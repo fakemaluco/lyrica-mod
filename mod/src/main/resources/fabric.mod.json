@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "fandroid",
+  "version": "${version}",
+  "name": "Relay",
+  "description": "A Y2K-inspired in-game phone for private messaging, calls, media controls and synchronized lyrics.",
+  "authors": ["Relay contributors"],
+  "contact": {
+    "sources": "https://github.com/fandroid/fandroid"
+  },
+  "license": "AGPL-3.0-only",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.fandroid.FanDroidMod"],
+    "client": ["dev.fandroid.client.FanDroidClient"],
+    "voicechat": ["dev.fandroid.voice.FanDroidVoicePlugin"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "${minecraft_dependency}",
+    "java": ">=21",
+    "fabric-api": "${fabric_api_dependency}"
+  },
+  "suggests": {
+    "voicechat": "${voicechat_dependency}",
+    "essential-container": ">=1.0.0",
+    "modmenu": "*",
+    "controlify": "*",
+    "minecraft-cursor": "*",
+    "cursors_extended": "*",
+    "mousetweaks": "*",
+    "emi": "*",
+    "roughlyenoughitems": "*",
+    "iris": "*",
+    "sodium": "*",
+    "immediatelyfast": "*",
+    "xaerominimap": "*",
+    "appleskin": "*"
+  }
+}
