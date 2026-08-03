@@ -41,6 +41,13 @@ public final class RoundedGui {
         }
     }
 
+    /** Runs the drawer clipped to a straight rectangle (integer scissor, batch-safe). */
+    public static void scissor(DrawContext context, int x, int y, int width, int height,
+                               Runnable drawer) {
+        if (width <= 0 || height <= 0 || drawer == null) return;
+        band(context, x, y, x + width, y + height, drawer);
+    }
+
     public static void fill(DrawContext context, int x, int y, int width, int height,
                             int radius, int color) {
         if (width <= 0 || height <= 0) return;

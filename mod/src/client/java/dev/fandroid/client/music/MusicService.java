@@ -270,6 +270,11 @@ public final class MusicService implements AutoCloseable {
         overlay.setArtworkAccent(artwork.accentColor());
         return artwork.draw(context, x, y, width, height);
     }
+    public boolean drawArtwork(DrawContext context, int x, int y, int width, int height,
+                               int cornerRadius) {
+        overlay.setArtworkAccent(artwork.accentColor());
+        return artwork.draw(context, x, y, width, height, cornerRadius);
+    }
     public boolean drawArtworkTransition(DrawContext context, int x, int y, int width, int height) {
         return drawArtworkTransition(context, x, y, width, height, 0);
     }

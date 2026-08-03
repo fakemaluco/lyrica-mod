@@ -47,6 +47,8 @@ public final class CoverArtTexture implements AutoCloseable {
     private volatile String status = "NO ARTWORK";
     private volatile long enhancedBackdropRetryNanos;
     private volatile long lastAttemptNanos;
+    private RoundedCover roundedCurrent;
+    private RoundedCover roundedPrevious;
 
     public void update(String value) {
         String url = value == null ? null : value.strip();
@@ -77,6 +79,14 @@ public final class CoverArtTexture implements AutoCloseable {
         return true;
     }
 
+    /** Draws the cover through the same runtime-supersampled rounded clip as the border. */
+    public boolean draw(DrawContext context, int x, int y, int width, int height,
+                        int cornerRadius) {
+        TextureState value = texture;
+        if (value == null || width <= 0 || height <= 0) return false;
+        return drawRoundedCover(context, value, x, y, width, height, cornerRadius, 1, 1);
+    }
+
     /** Draws a two-cover slide, clipped strictly to the requested album-art rectangle. */
     public boolean drawTransition(DrawContext context, int x, int y, int width, int height) {
         return drawTransition(context, x, y, width, height, 0);
@@ -89,27 +99,26 @@ public final class CoverArtTexture implements AutoCloseable {
         if (current == null || width <= 0 || height <= 0) return false;
         TextureState previous = previousTexture;
         long started = coverTransitionStartedNanos;
-        Runnable drawer;
         if (previous == null || started == 0) {
-            drawer = () -> drawCover(context, current, x, y, width, height);
-        } else {
-            double linear = Math.clamp((System.nanoTime() - started)
-                    / (double) COVER_TRANSITION_NANOS, 0, 1);
-            if (linear >= 1) {
-                previousTexture = null;
-                coverTransitionStartedNanos = 0;
-                if (previous != current) destroy(previous);
-                drawer = () -> drawCover(context, current, x, y, width, height);
-            } else {
-                int[] offsets = transitionOffsets(easeInOutQuint(linear), width);
-                drawer = () -> {
-                    drawCover(context, previous, x + offsets[0], y, width, height);
-                    // The incoming cover is intentionally rendered last over the stationary old cover.
-                    drawCover(context, current, x + offsets[1], y, width, height);
-                };
-            }
+            return drawRoundedCover(context, current, x, y, width, height, cornerRadius, 1, 1);
         }
-        RoundedGui.clipped(context, x, y, width, height, cornerRadius, drawer);
+        double linear = Math.clamp((System.nanoTime() - started)
+                / (double) COVER_TRANSITION_NANOS, 0, 1);
+        if (linear >= 1) {
+            previousTexture = null;
+            coverTransitionStartedNanos = 0;
+            discardRoundedCover(false);
+            if (previous != current) destroy(previous);
+            return drawRoundedCover(context, current, x, y, width, height, cornerRadius, 1, 1);
+        }
+        int[] offsets = transitionOffsets(easeInOutQuint(linear), width);
+        RoundedGui.scissor(context, x, y, width, height, () -> {
+            drawRoundedCover(context, previous, x + offsets[0], y, width, height,
+                    cornerRadius, 1, 1);
+            // The incoming cover is intentionally rendered last over the stationary old cover.
+            drawRoundedCover(context, current, x + offsets[1], y, width, height,
+                    cornerRadius, 1, 1);
+        });
         return true;
     }
 
@@ -191,13 +200,8 @@ public final class CoverArtTexture implements AutoCloseable {
                 // A shader reload or GUI batch switch is normally transient. Retry instead of
                 // permanently removing the dynamic background for the rest of the session.
                 enhancedBackdropRetryNanos = System.nanoTime() + Duration.ofSeconds(3).toNanos();
-                if (cornerRadius > 0) {
-                    RoundedGui.clipped(context, x, y, width, height, cornerRadius,
-                            () -> drawCover(context, value, x, y, width, height,
-                                    backgroundOpacity, .58));
-                } else {
-                    drawCover(context, value, x, y, width, height, backgroundOpacity, .58);
-                }
+                drawRoundedCover(context, value, x, y, width, height, cornerRadius,
+                        backgroundOpacity, .58);
             }
             int veil = 0x1C + (3 - strength) * 4;
             int veilAlpha = (int) Math.round(veil * backgroundOpacity);
@@ -210,7 +214,7 @@ public final class CoverArtTexture implements AutoCloseable {
                 }
             }
         };
-        RoundedGui.clipped(context, x, y, width, height, cornerRadius, drawer);
+        RoundedGui.scissor(context, x, y, width, height, drawer);
         return true;
     }
 
@@ -240,6 +244,61 @@ public final class CoverArtTexture implements AutoCloseable {
         }
         PlatformTextures.draw(context, texture.id(), x, y, width, height, cropX, cropY,
                 cropWidth, cropHeight, sourceWidth, sourceHeight, opacity, brightness);
+    }
+
+    /** Draws the cover from a cached per-pixel-rounded composite, so corners stay crisp
+     *  at display resolution even with render mods that batch the GUI. Falls back to the
+     *  plain cover when no rounding is needed. */
+    private boolean drawRoundedCover(DrawContext context, TextureState state,
+                                     int x, int y, int width, int height,
+                                     int cornerRadius, double opacity, double brightness) {
+        if (width <= 0 || height <= 0) return false;
+        if (cornerRadius <= 0) {
+            drawCover(context, state, x, y, width, height, opacity, brightness);
+            return true;
+        }
+        RoundedCover rounded = roundedCover(state, width, height, cornerRadius);
+        if (rounded == null) {
+            drawCover(context, state, x, y, width, height, opacity, brightness);
+            return true;
+        }
+        PlatformTextures.draw(context, rounded.id(), x, y, width, height,
+                0, 0, rounded.width(), rounded.height(),
+                rounded.width(), rounded.height(), opacity, brightness);
+        return true;
+    }
+
+    private RoundedCover roundedCover(TextureState state, int width, int height, int radius) {
+        boolean current = state == texture;
+        RoundedCover cached = current ? roundedCurrent : roundedPrevious;
+        if (cached != null && cached.state() == state && cached.width() == width
+                && cached.height() == height && cached.radius() == radius) {
+            return cached;
+        }
+        RoundedCover built = RoundedCover.build(state, width, height, radius);
+        if (built == null) return cached;
+        if (current) {
+            if (roundedCurrent != null) roundedCurrent.close();
+            roundedCurrent = built;
+        } else {
+            if (roundedPrevious != null) roundedPrevious.close();
+            roundedPrevious = built;
+        }
+        return built;
+    }
+
+    private void discardRoundedCover(boolean current) {
+        if (current) {
+            if (roundedCurrent != null) {
+                roundedCurrent.close();
+                roundedCurrent = null;
+            }
+        } else {
+            if (roundedPrevious != null) {
+                roundedPrevious.close();
+                roundedPrevious = null;
+            }
+        }
     }
 
     public int accentColor() {
@@ -371,7 +430,7 @@ public final class CoverArtTexture implements AutoCloseable {
         TextureState discarded = previousTexture;
         TextureState outgoing = texture;
         previousTexture = outgoing;
-        texture = new TextureState(id, width, height, palette.accent(), palette.colors());
+        texture = new TextureState(id, image, width, height, palette.accent(), palette.colors());
         enhancedBackdropRetryNanos = 0;
         coverTransitionStartedNanos = outgoing == null ? 0 : System.nanoTime();
         if (discarded != null && discarded != outgoing) destroy(discarded);
@@ -547,6 +606,8 @@ public final class CoverArtTexture implements AutoCloseable {
         previousTexture = null;
         coverTransitionStartedNanos = 0;
         enhancedBackdropRetryNanos = 0;
+        discardRoundedCover(true);
+        discardRoundedCover(false);
         destroy(current);
         if (previous != current) destroy(previous);
     }
@@ -616,11 +677,105 @@ public final class CoverArtTexture implements AutoCloseable {
         }
     }
 
-    private record TextureState(Identifier id, int width, int height, int accent, int[] palette) {
+    private record TextureState(Identifier id, NativeImage image, int width, int height,
+                                int accent, int[] palette) {
         private TextureState {
             palette = Arrays.copyOf(palette, palette.length);
         }
     }
+
+    /** Bakes the cover art at draw size with per-pixel signed-distance rounding, exactly
+     *  like the fluid composite, so rounded covers never depend on GUI blend batching. */
+    private record RoundedCover(TextureState state, int width, int height, int radius,
+                                NativeImageBackedTexture texture, Identifier id)
+            implements AutoCloseable {
+        private static final int MAX_COMPOSITE = 1024;
+
+        static RoundedCover build(TextureState state, int width, int height, int radius) {
+            NativeImage source = state.image();
+            if (source == null || width <= 0 || height <= 0) return null;
+            int outputWidth = Math.clamp(width, 1, MAX_COMPOSITE);
+            int outputHeight = Math.clamp(height, 1, MAX_COMPOSITE);
+            int sourceWidth = state.width();
+            int sourceHeight = state.height();
+            double targetRatio = outputWidth / (double) outputHeight;
+            double sourceRatio = sourceWidth / (double) sourceHeight;
+            int cropWidth = sourceWidth;
+            int cropHeight = sourceHeight;
+            int cropX = 0;
+            int cropY = 0;
+            if (sourceRatio > targetRatio) {
+                cropWidth = Math.max(1, (int) Math.round(sourceHeight * targetRatio));
+                cropX = (sourceWidth - cropWidth) / 2;
+            } else if (sourceRatio < targetRatio) {
+                cropHeight = Math.max(1, (int) Math.round(sourceWidth / targetRatio));
+                cropY = (sourceHeight - cropHeight) / 2;
+            }
+            NativeImageBackedTexture texture = PlatformTextures.empty(
+                    "FanDroid rounded cover", outputWidth, outputHeight);
+            Identifier id = PlatformTextures.register("fandroid_rounded_cover_"
+                    + COVER_GENERATION.incrementAndGet(), texture);
+            NativeImage target = texture.getImage();
+            if (target == null) {
+                MinecraftClient.getInstance().getTextureManager().destroyTexture(id);
+                return null;
+            }
+            double scaleX = cropWidth / (double) outputWidth;
+            double scaleY = cropHeight / (double) outputHeight;
+            double halfW = outputWidth / 2.0;
+            double halfH = outputHeight / 2.0;
+            int safeRadius = Math.max(0, Math.min(radius, Math.min(outputWidth, outputHeight) / 2));
+            for (int py = 0; py < outputHeight; py++) {
+                double fy = cropY + (py + .5) * scaleY - .5;
+                int y0 = Math.clamp((int) Math.floor(fy), 0, sourceHeight - 1);
+                double ty = Math.clamp(fy - y0, 0, 1);
+                int y1 = Math.min(sourceHeight - 1, y0 + 1);
+                for (int px = 0; px < outputWidth; px++) {
+                    double fx = cropX + (px + .5) * scaleX - .5;
+                    int x0 = Math.clamp((int) Math.floor(fx), 0, sourceWidth - 1);
+                    double tx = Math.clamp(fx - x0, 0, 1);
+                    int x1 = Math.min(sourceWidth - 1, x0 + 1);
+                    int c00 = PlatformTextures.colorArgb(source, x0, y0);
+                    int c10 = PlatformTextures.colorArgb(source, x1, y0);
+                    int c01 = PlatformTextures.colorArgb(source, x0, y1);
+                    int c11 = PlatformTextures.colorArgb(source, x1, y1);
+                    double r = bilinear(c00 >>> 16 & 255, c10 >>> 16 & 255,
+                            c01 >>> 16 & 255, c11 >>> 16 & 255, tx, ty);
+                    double g = bilinear(c00 >>> 8 & 255, c10 >>> 8 & 255,
+                            c01 >>> 8 & 255, c11 >>> 8 & 255, tx, ty);
+                    double b = bilinear(c00 & 255, c10 & 255, c01 & 255, c11 & 255, tx, ty);
+                    int alpha = 255;
+                    if (safeRadius > 0) {
+                        double qx = Math.abs(px + .5 - halfW) - Math.max(0, halfW - safeRadius);
+                        double qy = Math.abs(py + .5 - halfH) - Math.max(0, halfH - safeRadius);
+                        double outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
+                        double distance = outside + Math.min(Math.max(qx, qy), 0) - safeRadius;
+                        alpha = Math.clamp((int) Math.round(
+                                Math.clamp(.5 - distance, 0, 1) * 255), 0, 255);
+                    }
+                    target.setColor(px, py,
+                            alpha << 24 | (int) Math.round(b) << 16
+                                    | (int) Math.round(g) << 8 | (int) Math.round(r));
+                }
+            }
+            texture.upload();
+            return new RoundedCover(state, outputWidth, outputHeight, safeRadius, texture, id);
+        }
+
+        private static double bilinear(double a, double b, double c, double d,
+                                       double tx, double ty) {
+            double top = a + (b - a) * tx;
+            double bottom = c + (d - c) * tx;
+            return top + (bottom - top) * ty;
+        }
+
+        @Override
+        public void close() {
+            MinecraftClient.getInstance().getTextureManager().destroyTexture(id);
+        }
+    }
+
+    private static final AtomicLong COVER_GENERATION = new AtomicLong();
 
     private static final class FluidBackdrop implements AutoCloseable {
         private static final int SIZE = 96;

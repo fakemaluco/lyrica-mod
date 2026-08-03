@@ -666,7 +666,7 @@ public final class FanDroidScreen extends FanDroidScreenBase {
                 0xFF414844, 0xFF242A27);
         RetroDraw.outlineRounded(context, 102, 226, 164, 164, 3, 1,
                 0xFF59615C, 0xFF151A17);
-        if (!music.drawArtwork(context, 108, 232, 152, 152)) {
+        if (!music.drawArtwork(context, 108, 232, 152, 152, 4)) {
             RetroDraw.centeredText(context, textRenderer, "♪", 184, 278,
                     0xFFE9ECE5, 5.0F);
         }
