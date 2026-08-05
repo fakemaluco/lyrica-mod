@@ -116,7 +116,9 @@ public final class LyricsOverlay implements AutoCloseable {
     private boolean phoneEnhancedFailed;
     private boolean renderingInPhone;
     private boolean renderingOverScreen;
+    private boolean bandedTransitionDrawing;
     private boolean drawingLyricsShadow;
+    private double cornerMorph;
     private boolean stylingLyrics;
     private double lyricsSurfaceOpacity = 1;
     private double smoothX;
@@ -166,6 +168,7 @@ public final class LyricsOverlay implements AutoCloseable {
 
     public LyricsOverlay(ClientPreferences preferences) {
         this.preferences = preferences;
+        this.cornerMorph = preferences.isModernMode() ? 1 : 0;
     }
 
     public void beginLookup() {
@@ -331,16 +334,31 @@ public final class LyricsOverlay implements AutoCloseable {
         // Keep the Back curve's slight under/overshoot in the transform while
         // clipping remains constrained to the real popup rectangle.
         float scale = (float) (.82 + rawAmount * .18);
-        context.enableScissor(clipLeft, clipTop, clipLeft + clipWidth, clipTop + clipHeight);
         GuiTransform.push(context);
         try {
             GuiTransform.translate(context, centerX, centerY);
             GuiTransform.scale(context, scale, scale);
             GuiTransform.translate(context, -centerX, -centerY);
-            renderCompact(context, bounds.x(), bounds.y(), bounds.width(), bounds.height());
+            if (preferences.isModernMode()) {
+                int radius = morphRadius(Math.clamp(Math.min(bounds.width(), bounds.height()) / 22, 9, 16));
+                bandedTransitionDrawing = true;
+                try {
+                    RoundedGui.clipped(context, clipLeft, clipTop, clipWidth, clipHeight, radius,
+                            () -> renderCompact(context, bounds.x(), bounds.y(),
+                                    bounds.width(), bounds.height()));
+                } finally {
+                    bandedTransitionDrawing = false;
+                }
+            } else {
+                context.enableScissor(clipLeft, clipTop, clipLeft + clipWidth, clipTop + clipHeight);
+                try {
+                    renderCompact(context, bounds.x(), bounds.y(), bounds.width(), bounds.height());
+                } finally {
+                    context.disableScissor();
+                }
+            }
         } finally {
             GuiTransform.pop(context);
-            context.disableScissor();
             renderingOverScreen = false;
             pointerX = Double.NaN;
             pointerY = Double.NaN;
@@ -502,8 +520,9 @@ public final class LyricsOverlay implements AutoCloseable {
     private void renderCompact(DrawContext context, int x, int y, int width, int height) {
         TextRenderer renderer = renderer();
         if (renderer == null) return;
-        double frameDelta = frameClock.nextDelta();
+        double frameDelta = bandedTransitionDrawing ? 0 : frameClock.nextDelta();
         double delta = frameDelta * preferences.getLyricsTransitionSpeed().deltaMultiplier();
+        stepCornerMorph(delta);
         PopupMotion.State animation = popupMotion.step(delta,
                 preferences.isLyricsAnimations() && !renderingOverScreen);
         GuiTransform.push(context);
@@ -512,8 +531,8 @@ public final class LyricsOverlay implements AutoCloseable {
         GuiTransform.scale(context, (float) animation.scale(), (float) animation.scale());
         GuiTransform.translate(context, (float) -(x + width / 2.0), (float) -(y + height / 2.0));
         int accent = accentColor();
-        int surfaceRadius = preferences.isModernMode()
-                ? Math.clamp(Math.min(width, height) / 22, 9, 16) : 0;
+        int surfaceRadius = morphRadius(preferences.isModernMode()
+                ? Math.clamp(Math.min(width, height) / 22, 9, 16) : 0);
         boolean dynamic = false;
         if (preferences.isLyricsDynamicBackground() && artworkTexture != null) {
             double reactive = getLyricsBackgroundReactiveMultiplier();
@@ -587,52 +606,59 @@ public final class LyricsOverlay implements AutoCloseable {
         double coverTransition = easeInOutQuint(coverFocus);
         CoverBounds drawnCover = CoverBounds.interpolate(restingBounds, expandedBounds, coverTransition);
         double contentOpacity = 1 - smooth(Math.clamp(coverTransition / .72, 0, 1));
+        int metadataGap = 14;
+        int textRightLimit = x + width - 14;
         if (empty) {
             double textOpacity = smooth((transition - .28) / .72) * contentOpacity;
-            int centerX = x + width / 2;
+            int textRight = Math.min(restingBounds.x() + restingBounds.width() + metadataGap,
+                    textRightLimit - 40);
+            int textAvail = Math.max(40, textRightLimit - textRight);
             String title = playback.title();
-            String artist = fit(playback.artist(), width - 42, .94);
-            String message = emptyMessage.isBlank() ? "" : fit(emptyMessage, width - 36, .82);
-            double titleW = Math.min(width - 36, textWidth(title) * 1.16);
+            String artist = fit(playback.artist(), textAvail, .94);
+            String message = emptyMessage.isBlank() ? "" : fit(emptyMessage, textAvail, .82);
+            double titleW = Math.min(textAvail, textWidth(title) * 1.16);
             double artistW = textWidth(artist) * .94;
             double messageW = textWidth(message) * .82;
-            double blockW = Math.min(width - 36, Math.max(titleW, Math.max(artistW, messageW)));
-            int blockLeft = Math.max(x + 18, (int) Math.floor(centerX - blockW / 2.0));
+            double blockW = Math.max(1, Math.min(textAvail, Math.max(titleW, Math.max(artistW, messageW))));
             double titleHeight = renderer().fontHeight * 1.16;
             double artistHeight = renderer().fontHeight * .94;
             double gap = 4;
             double messageHeight = message.isBlank() ? 0 : renderer().fontHeight * .82 + gap;
             double blockHeight = titleHeight + gap + artistHeight
                     + (messageHeight > 0 ? gap + messageHeight : 0);
-            int blockBottom = y + height - 8;
-            int blockBase = restingCoverY + restingCover + 18;
-            double textY = blockBase + Math.max(0,
-                    (blockBottom - blockBase - blockHeight) / 2.0);
+            double textY = (restingBounds.y() + restingBounds.height() / 2.0) - blockHeight / 2.0;
             int titleWidth = Math.max(1, (int) Math.floor(blockW));
-            drawMarqueeText(context, title, blockLeft, textY, titleWidth,
+            drawMarqueeText(context, title, textRight, textY, titleWidth,
                     multiplyAlpha(0xFFF7F6F1, textOpacity), 1.16, false);
-            drawScaled(context, renderer, artist, blockLeft, textY + titleHeight + gap,
+            drawScaled(context, renderer, artist, textRight, textY + titleHeight + gap,
                     multiplyAlpha(0xFFB9BEC6, textOpacity), .94);
             if (!message.isBlank()) {
-                drawScaled(context, renderer, message, blockLeft,
+                drawScaled(context, renderer, message, textRight,
                         textY + titleHeight + gap + artistHeight + gap,
                         multiplyAlpha(0xFF939AA4, textOpacity * .92), .82);
             }
         } else {
             if (contentOpacity > .004) {
-                int metadataX = x + headerCover + 24;
-                int metadataWidth = Math.max(40, width - headerCover - 38);
-                drawMarqueeText(context, playback.title(), metadataX, y + 12, metadataWidth,
+                int metadataX = Math.min(restingBounds.x() + restingBounds.width() + metadataGap,
+                        textRightLimit - 40);
+                int metadataWidth = Math.max(40, textRightLimit - metadataX);
+                double metadataTitleHeight = renderer().fontHeight * 1.12;
+                double metadataArtistHeight = renderer().fontHeight * .88;
+                int metadataTop = (int) Math.round(
+                        (restingBounds.y() + restingBounds.height() / 2.0)
+                                - (metadataTitleHeight + 2 + metadataArtistHeight) / 2.0);
+                drawMarqueeText(context, playback.title(), metadataX, metadataTop, metadataWidth,
                         multiplyAlpha(0xFFF7F6F1, contentOpacity), 1.12, false);
-                drawScaled(context, renderer, fit(playback.artist(), metadataWidth, .88), metadataX, y + 31,
+                drawScaled(context, renderer, fit(playback.artist(), metadataWidth, .88), metadataX,
+                        metadataTop + (int) Math.round(metadataTitleHeight) + 2,
                         multiplyAlpha(0xFFB7BBC2, contentOpacity), .88);
                 int lyricsTop = y + Math.max(64, headerCover + 18);
                 renderLyricsBody(context, x + 5, lyricsTop, width - 10,
                         Math.max(1, height - (lyricsTop - y) - 8), false, delta, contentOpacity);
             }
         }
-        int coverRadius = preferences.isModernMode()
-                ? Math.clamp(Math.min(drawnCover.width(), drawnCover.height()) / 22, 9, 16) : 0;
+        int coverRadius = morphRadius(preferences.isModernMode()
+                ? Math.clamp(Math.min(drawnCover.width(), drawnCover.height()) / 22, 9, 16) : 0);
         if (preferences.isLyricsCoverShadow() && drawnCover.width() < width - 4) {
             RoundedGui.smoothFill(context, drawnCover.x() + 2, drawnCover.y() + 6,
                     drawnCover.width(), drawnCover.height(), coverRadius, 0x14000000);
@@ -704,8 +730,8 @@ public final class LyricsOverlay implements AutoCloseable {
         }
 
         int shadeAlpha = (int) Math.round(150 * visibility);
-        int coverRadius = preferences.isModernMode()
-                ? Math.clamp(Math.min(cover.width(), cover.height()) / 22, 9, 16) : 0;
+        int coverRadius = morphRadius(preferences.isModernMode()
+                ? Math.clamp(Math.min(cover.width(), cover.height()) / 22, 9, 16) : 0);
         if (preferences.isModernMode()) {
             RoundedGui.smoothFill(context, cover.x(), cover.y(), cover.width(), cover.height(),
                     coverRadius, shadeAlpha << 24);
@@ -749,7 +775,7 @@ public final class LyricsOverlay implements AutoCloseable {
         popupProgressBounds = interactive && canSeek
                 ? new ControlBounds(barLeft, barY - 4, barRight - barLeft, barHeight + 8) : null;
         boolean progressHovered = contains(popupProgressBounds, pointerX, pointerY);
-        int barRadius = preferences.isModernMode() ? Math.max(1, barHeight / 2) : 0;
+        int barRadius = morphRadius(preferences.isModernMode() ? Math.max(1, barHeight / 2) : 0);
         int railColor = multiplyAlpha(progressHovered || popupProgressScrubbing
                 ? 0xA0BFC7CA : 0x805E686D, visibility);
         if (preferences.isModernMode()) {
@@ -778,6 +804,27 @@ public final class LyricsOverlay implements AutoCloseable {
     private static double fadeControl(double current, boolean active, double delta, double speed) {
         double response = 1 - Math.exp(-Math.clamp(delta, 0, .05) * speed);
         return current + ((active ? 1 : 0) - current) * response;
+    }
+
+    /** Advances the modern↔retro corner blend toward the currently selected mode. */
+    private void stepCornerMorph(double delta) {
+        double target = preferences.isModernMode() ? 1 : 0;
+        if (!preferences.isLyricsAnimations() || delta <= 0) {
+            cornerMorph = target;
+            return;
+        }
+        double response = 1 - Math.exp(-Math.clamp(delta, 0, .05) * 14);
+        cornerMorph += (target - cornerMorph) * response;
+    }
+
+    /** Current modern-mode corner blend, shared with the standalone controller. */
+    public double cornerMorph() {
+        return Math.clamp(cornerMorph, 0, 1);
+    }
+
+    /** Scales a modern corner radius by the current corner blend. */
+    public int morphRadius(int modernRadius) {
+        return (int) Math.round(modernRadius * cornerMorph());
     }
 
     private static int popupControlColor(double hover, double visibility, boolean enabled) {
@@ -916,7 +963,7 @@ public final class LyricsOverlay implements AutoCloseable {
         int top = (int) Math.round(region.y() + insetY);
         int right = (int) Math.round(region.x() + region.width() - insetX);
         int bottom = (int) Math.round(region.y() + region.height() - insetY);
-        int radius = preferences.isModernMode() ? Math.clamp((bottom - top) / 4, 4, 8) : 0;
+        int radius = morphRadius(preferences.isModernMode() ? Math.clamp((bottom - top) / 4, 4, 8) : 0);
         int color = withAlpha(0x00FFFFFF,
                 (int) Math.round(46 * Math.clamp(opacity, 0, 1)));
         if (preferences.isModernMode()) {
@@ -988,7 +1035,7 @@ public final class LyricsOverlay implements AutoCloseable {
         long frameNanos = System.nanoTime();
         double cameraGoal = manualScroll.target(activeCenter, minimumCamera, maximumCamera, frameNanos);
         ManualReadMotion readMotion = interactive ? phoneManualReadMotion : hudManualReadMotion;
-        double manualRead = readMotion.step(manualScroll.scrolling(frameNanos), delta);
+        double manualRead = readMotion.step(manualScroll.active(frameNanos), delta);
         double scroll = scrollMotion.step(cameraGoal, delta);
         double focusY = y + height * .43;
         double minimum = scroll + y + 25 - focusY;

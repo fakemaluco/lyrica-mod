@@ -32,6 +32,6 @@ public final class InventoryLyricsInteraction {
     }
 
     public static boolean handles(Screen screen) {
-        return screen != null && InventoryLyricsController.supports(screen);
+        return screen != null && !(screen instanceof LyricsConfigScreen);
     }
 }

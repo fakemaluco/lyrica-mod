@@ -105,7 +105,7 @@ public final class InventoryLyricsController {
         if (popupVisible && POPUP_TRANSITION.isFullyVisible()) {
             overlay.renderHudOverScreen(context, mouseX, mouseY);
         } else if (transitionVisibility > .001
-                && (popupVisible || !inventoryPopupEnabled())) {
+                && (popupVisible || !screenPopupEnabled(activeScreen))) {
             overlay.renderHudTransition(context, transitionVisibility, true);
         }
         if (RelayLyricsClient.preferences().isInventoryNowPlaying()) {
@@ -116,7 +116,7 @@ public final class InventoryLyricsController {
         if (popupVisible && selected) {
             PopupBounds popup = popupBounds();
             if (RelayLyricsClient.preferences().isModernMode()) {
-                int radius = Math.clamp(Math.min(popup.width(), popup.height()) / 22, 9, 16);
+                int radius = overlay.morphRadius(Math.clamp(Math.min(popup.width(), popup.height()) / 22, 9, 16));
                 RoundedGui.smoothOutline(context, popup.x(), popup.y(), popup.width(), popup.height(),
                         radius, 0xFFE4F5F7);
             } else {
@@ -124,7 +124,7 @@ public final class InventoryLyricsController {
             }
             Bounds gear = gearBounds(popup);
             boolean hovered = gear.contains(mouseX, mouseY);
-            int gearRadius = RelayLyricsClient.preferences().isModernMode() ? 5 : 0;
+            int gearRadius = overlay.morphRadius(RelayLyricsClient.preferences().isModernMode() ? 5 : 0);
             if (gearRadius > 0) {
                 RoundedGui.smoothFill(context, gear.x, gear.y, gear.width, gear.height, gearRadius,
                         hovered ? 0xFFE0E0E0 : 0xFFC0C0C0);
@@ -448,8 +448,8 @@ public final class InventoryLyricsController {
         double eased = 1 - Math.pow(1 - animationProgress, 3);
         int startX = useLeft ? guiLeft + 4 : gui.right - cover - 4;
         int animatedX = (int) Math.round(startX + (infoX - startX) * eased);
-        int coverRadius = RelayLyricsClient.preferences().isModernMode()
-                ? Math.clamp(cover / 22, 9, 16) : 0;
+        int coverRadius = RelayLyricsClient.overlay().morphRadius(
+                RelayLyricsClient.preferences().isModernMode() ? Math.clamp(cover / 22, 9, 16) : 0);
         context.enableScissor(useLeft ? 0 : Math.min(screenWidth, gui.right), 0,
                 useLeft ? Math.max(0, guiLeft) : screenWidth, screenHeight);
         try {
@@ -507,7 +507,8 @@ public final class InventoryLyricsController {
             progressBarBounds = metadataFade > .35
                     ? new Bounds(barLeft, barY - 3, barRight - barLeft, 10) : null;
             boolean hovered = progressBarBounds != null && progressBarBounds.contains(mouseX, mouseY);
-            int barRadius = RelayLyricsClient.preferences().isModernMode() ? 2 : 0;
+            int barRadius = RelayLyricsClient.overlay().morphRadius(
+                    RelayLyricsClient.preferences().isModernMode() ? 2 : 0);
             int railColor = fadeColor(hovered || scrubbing ? 0xD05B656B : 0xB0444C52, metadataFade);
             if (barRadius > 0) {
                 RoundedGui.smoothFill(context, barLeft, barY, barRight - barLeft, 4,
@@ -594,8 +595,8 @@ public final class InventoryLyricsController {
         if (coverControlsFade < .005) return;
 
         int shadeAlpha = (int) Math.round(142 * Math.clamp(coverControlsFade, 0, 1));
-        int coverRadius = RelayLyricsClient.preferences().isModernMode()
-                ? Math.clamp(cover / 10, 5, 10) : 0;
+        int coverRadius = RelayLyricsClient.overlay().morphRadius(
+                RelayLyricsClient.preferences().isModernMode() ? Math.clamp(cover / 10, 5, 10) : 0);
         if (coverRadius > 0) {
             RoundedGui.smoothFill(context, x, y, cover, cover, coverRadius, shadeAlpha << 24);
         } else {

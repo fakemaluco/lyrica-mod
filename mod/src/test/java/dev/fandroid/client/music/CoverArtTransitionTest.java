@@ -79,6 +79,60 @@ class CoverArtTransitionTest {
         assertThat(red(neutralBase)).isGreaterThan(55);
     }
 
+    @Test
+    void smallVividDetailsEnterThePalette() {
+        // 50% preto, 40% branco, 2% vermelho, 1% azul
+        int[] counts = new int[4_096];
+        long[] red = new long[4_096];
+        long[] green = new long[4_096];
+        long[] blue = new long[4_096];
+        addBucket(counts, red, green, blue, 0, 0, 0, 5_000);
+        addBucket(counts, red, green, blue, 255, 255, 255, 4_000);
+        addBucket(counts, red, green, blue, 255, 0, 0, 200);
+        addBucket(counts, red, green, blue, 0, 0, 255, 100);
+
+        int[] palette = CoverArtTexture.selectPaletteColors(counts, red, green, blue);
+        int accent = palette[0];
+
+        int ar = red(accent);
+        int ag = green(accent);
+        int ab = blue(accent);
+        assertThat(Math.max(ar, Math.max(ag, ab)) - Math.min(ar, Math.min(ag, ab)))
+                .isGreaterThan(60);
+        assertThat(ar).isGreaterThan(ag);
+        boolean blueDetailPresent = false;
+        for (int color : palette) {
+            if (blue(color) > red(color) && blue(color) > green(color)) {
+                blueDetailPresent = true;
+                break;
+            }
+        }
+        assertThat(blueDetailPresent).isTrue();
+    }
+
+    @Test
+    void neutralCoversKeepANeutralAccent() {
+        int[] counts = new int[4_096];
+        long[] red = new long[4_096];
+        long[] green = new long[4_096];
+        long[] blue = new long[4_096];
+        addBucket(counts, red, green, blue, 64, 64, 64, 3_000);
+        addBucket(counts, red, green, blue, 128, 128, 128, 4_000);
+        addBucket(counts, red, green, blue, 192, 192, 192, 2_000);
+
+        int accent = CoverArtTexture.selectPaletteColors(counts, red, green, blue)[0];
+        assertThat(red(accent)).isEqualTo(green(accent)).isEqualTo(blue(accent));
+    }
+
+    private static void addBucket(int[] counts, long[] red, long[] green, long[] blue,
+            int r, int g, int b, int amount) {
+        int bucket = (r >> 4) << 8 | (g >> 4) << 4 | b >> 4;
+        counts[bucket] = amount;
+        red[bucket] = (long) r * amount;
+        green[bucket] = (long) g * amount;
+        blue[bucket] = (long) b * amount;
+    }
+
     private static int red(int color) { return color >>> 16 & 255; }
     private static int green(int color) { return color >>> 8 & 255; }
     private static int blue(int color) { return color & 255; }

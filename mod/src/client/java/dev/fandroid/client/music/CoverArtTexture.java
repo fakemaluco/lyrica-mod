@@ -441,8 +441,8 @@ public final class CoverArtTexture implements AutoCloseable {
         long[] red = new long[4_096];
         long[] green = new long[4_096];
         long[] blue = new long[4_096];
-        int stepX = Math.max(1, image.getWidth() / 48);
-        int stepY = Math.max(1, image.getHeight() / 48);
+        int stepX = Math.max(1, image.getWidth() / 128);
+        int stepY = Math.max(1, image.getHeight() / 128);
         for (int y = stepY / 2; y < image.getHeight(); y += stepY) {
             for (int x = stepX / 2; x < image.getWidth(); x += stepX) {
                 int argb = PlatformTextures.colorArgb(image, x, y);
@@ -458,10 +458,22 @@ public final class CoverArtTexture implements AutoCloseable {
                 blue[bucket] += b;
             }
         }
+        int[] colors = selectPaletteColors(counts, red, green, blue);
+        return new PaletteData(colors[0], colors);
+    }
+
+    static int[] selectPaletteColors(int[] counts, long[] red, long[] green, long[] blue) {
+        int maxCount = 0;
+        int total = 0;
+        for (int count : counts) {
+            total += count;
+            if (count > maxCount) maxCount = count;
+        }
+        int accentFloor = Math.max(2, total / 256);
+        int detailFloor = Math.max(2, total / 128);
         int[] selectedBuckets = {-1, -1, -1, -1, -1, -1};
         int[] colors = new int[6];
         int selected = 0;
-        int primaryCount = 0;
         for (int slot = 0; slot < colors.length; slot++) {
             int best = -1;
             double bestScore = -1;
@@ -490,13 +502,27 @@ public final class CoverArtTexture implements AutoCloseable {
                             + (b - ob) * (b - ob)) / (255.0 * 255.0 * 3.0);
                     diversity = Math.min(diversity, Math.sqrt(distance));
                 }
-                // Population remains the main signal. Saturation and mid-tone contrast may
-                // help a representative color, but must not let a tiny pink/red detail take
-                // over an otherwise neutral cover.
-                double luminanceWeight = .58 + Math.sin(Math.PI * luminance) * .56;
-                double colorWeight = .72 + Math.pow(saturation, .82) * .82;
-                double score = Math.pow(counts[bucket], .94) * colorWeight
-                        * luminanceWeight * (selected == 0 ? 1 : .18 + diversity * 1.72);
+                double population = counts[bucket] / (double) Math.max(1, maxCount);
+                double score;
+                if (selected == 0) {
+                    // The accent should carry the cover's mood, not its biggest
+                    // neutral surface. Saturated regions keep a mild (log-like)
+                    // population weight so a small vivid blotch outranks a giant
+                    // white/black backdrop; anything saturated below the 0.4%
+                    // floor is rejected so isolated pixels cannot hijack the
+                    // palette. Covers without such a region fall back to plain
+                    // population, keeping neutral accents honest.
+                    if (saturation > .12 && counts[bucket] < accentFloor) continue;
+                    double vibrancy = .02 + Math.pow(saturation, 1.4);
+                    double populationWeight = Math.pow(population, .18);
+                    double luminanceWeight = .30 + Math.sin(Math.PI * luminance) * 1.6;
+                    score = populationWeight * vibrancy * luminanceWeight;
+                } else {
+                    double colorWeight = .55 + Math.pow(saturation, 1.15) * .95;
+                    score = Math.pow(counts[bucket], .72) * colorWeight
+                            * (.58 + Math.sin(Math.PI * luminance) * .56)
+                            * (.18 + diversity * 1.72);
+                }
                 if (score > bestScore) {
                     best = bucket;
                     bestScore = score;
@@ -504,23 +530,22 @@ public final class CoverArtTexture implements AutoCloseable {
                 }
             }
             if (best < 0) break;
-            if (selected > 0 && (bestDiversity < .095
-                    || counts[best] < Math.max(2, primaryCount / 32))) break;
+            if (selected > 0 && (bestDiversity < .08
+                    || counts[best] < detailFloor)) break;
             selectedBuckets[selected++] = best;
             int count = counts[best];
-            if (selected == 1) primaryCount = count;
             colors[slot] = vibrant((int) (red[best] / count), (int) (green[best] / count),
                     (int) (blue[best] / count));
         }
         int[] fallback = {0xFF111111, 0xFF383838, 0xFF686868, 0xFF929292, 0xFFBDBDBD, 0xFFE8E8E8};
-        if (selected == 0) return new PaletteData(0xFF929292, fallback);
+        if (selected == 0) return fallback.clone();
         int seedCount = selected;
         while (selected < colors.length) {
             int seed = colors[(selected - seedCount) % seedCount];
             int variant = selected - seedCount;
             colors[selected++] = familyVariant(seed, variant);
         }
-        return new PaletteData(colors[0], colors);
+        return colors;
     }
 
     static int vibrant(int r, int g, int b) {
@@ -585,14 +610,22 @@ public final class CoverArtTexture implements AutoCloseable {
         double blue = 0;
         double totalWeight = 0;
         for (int index = 0; index < palette.length; index++) {
-            double weight = index == 0 ? 1.45 : 1;
             int color = palette[index];
-            red += (color >>> 16 & 255) * weight;
-            green += (color >>> 8 & 255) * weight;
-            blue += (color & 255) * weight;
+            int r = color >>> 16 & 255;
+            int g = color >>> 8 & 255;
+            int b = color & 255;
+            int maximum = Math.max(r, Math.max(g, b));
+            int minimum = Math.min(r, Math.min(g, b));
+            double saturation = maximum == 0 ? 0 : (maximum - minimum) / (double) maximum;
+            double weight = (index == 0 ? 1.45 : 1) * (.55 + saturation * .85);
+            red += r * weight;
+            green += g * weight;
+            blue += b * weight;
             totalWeight += weight;
         }
-        double strength = isNeutralPalette(palette) ? .64 : .58;
+        double averageLuminance = (red + green * 2 + blue) / (totalWeight * 255.0 * 4.0);
+        double strength = (isNeutralPalette(palette) ? .66 : .62)
+                * Math.clamp(1.35 - averageLuminance * .85, .55, 1.15);
         int r = Math.clamp((int) Math.round(red / totalWeight * strength), 0, 255);
         int g = Math.clamp((int) Math.round(green / totalWeight * strength), 0, 255);
         int b = Math.clamp((int) Math.round(blue / totalWeight * strength), 0, 255);
