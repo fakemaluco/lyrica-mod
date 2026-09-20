@@ -140,6 +140,7 @@ pub struct SpicetifyLyricsStatus {
 enum Event {
     Command(MusicCommand, String),
     Source(String),
+    ReloadAudioOutput,
     SpicetifySnapshot(PlaybackSnapshot),
     SpicetifyLyrics(SpicetifyLyricsPayload),
     SpicetifyClientHello(SpicetifyClientHello),
@@ -166,6 +167,9 @@ fn stdin_events(sender: mpsc::Sender<Event>) {
                     let source = value.get("source").and_then(Value::as_str)
                         .unwrap_or("AUTOMATIC").to_owned();
                     if sender.send(Event::Source(source)).is_err() { break; }
+                }
+                Some("reload_audio_output") => {
+                    if sender.send(Event::ReloadAudioOutput).is_err() { break; }
                 }
                 _ => {}
             }
@@ -194,14 +198,15 @@ fn main() -> Result<()> {
     );
 
     let mut system = platform::SystemMedia::new()?;
-    let intensity = platform::start_intensity_capture();
+    let mut intensity = platform::start_intensity_capture();
     let mut latest_spicetify: Option<(PlaybackSnapshot, Instant)> = None;
     let mut spicetify_connected = false;
     let mut active_source = "AUTOMATIC".to_owned();
     let mut last_state_request = Instant::now() - Duration::from_secs(5);
     loop {
         if !drain_events(&receiver, &mut system, &spicetify, &mut latest_spicetify,
-            &mut spicetify_connected, &mut active_source) {
+            &mut spicetify_connected, &mut active_source, &mut intensity) {
+            intensity.stop();
             return Ok(());
         }
         if last_state_request.elapsed() >= Duration::from_secs(2) {
@@ -271,6 +276,7 @@ fn drain_events(
     latest: &mut Option<(PlaybackSnapshot, Instant)>,
     spicetify_connected: &mut bool,
     active_source: &mut String,
+    intensity: &mut platform::IntensityCapture,
 ) -> bool {
     while let Ok(event) = receiver.try_recv() {
         match event {
@@ -281,6 +287,11 @@ fn drain_events(
                     &json!({"type": "command", "command": command}).to_string()); }
             }
             Event::Source(source) => *active_source = source,
+            Event::ReloadAudioOutput => {
+                intensity.stop();
+                *intensity = platform::start_intensity_capture();
+                output(json!({"type": "audio_output_reloaded"}));
+            }
             Event::SpicetifySnapshot(snapshot) => {
                 if snapshot.is_meaningful() {
                     *latest = Some((snapshot, Instant::now()));

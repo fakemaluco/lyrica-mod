@@ -138,7 +138,7 @@ fn capture_loop(
     let mut beat_phase = 1.0f64;
     let mut bands_smooth = [0.0f64; BAND_COUNT];
     let mut centroid_smooth = 0.5f64;
-    loop {
+    while shared.is_active() {
         let mut sum = 0.0f64;
         let mut samples = 0usize;
         unsafe {

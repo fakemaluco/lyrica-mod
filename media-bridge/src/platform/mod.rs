@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 #[cfg(target_os = "linux")]
@@ -25,6 +25,7 @@ pub const BAND_COUNT: usize = 16;
 /// - bands: 16 log-spaced spectrum bands, each scaled by 10_000 (0..1)
 #[derive(Clone)]
 pub struct IntensityCapture {
+    active: Arc<AtomicBool>,
     pub intensity: Arc<AtomicU32>,
     pub beat_phase: Arc<AtomicU32>,
     pub bpm: Arc<AtomicU32>,
@@ -37,12 +38,24 @@ impl IntensityCapture {
     /// has no audio capture, or before the capture thread reports anything).
     pub fn zeroed() -> Self {
         Self {
+            active: Arc::new(AtomicBool::new(true)),
             intensity: Arc::new(AtomicU32::new(0)),
             beat_phase: Arc::new(AtomicU32::new(0)),
             bpm: Arc::new(AtomicU32::new(120)),
             centroid: Arc::new(AtomicU32::new(5000)),
             bands: Arc::new([const { AtomicU32::new(0) }; BAND_COUNT]),
         }
+    }
+
+    /// Stops the producer behind this snapshot. A replacement capture can then
+    /// attach to the newly selected default render endpoint without leaving the
+    /// old WASAPI loop running in the background.
+    pub fn stop(&self) {
+        self.active.store(false, Ordering::Release);
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active.load(Ordering::Acquire)
     }
 
     pub fn intensity(&self) -> f64 {

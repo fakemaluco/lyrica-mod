@@ -21,6 +21,11 @@ public final class PlatformTextures {
         return texture;
     }
 
+    /** Physical pixels represented by one logical GUI pixel. */
+    public static double guiScale() {
+        return Math.max(1.0, MinecraftClient.getInstance().getWindow().getScaleFactor());
+    }
+
     public static Identifier register(String name, NativeImageBackedTexture texture) {
         return MinecraftClient.getInstance().getTextureManager().registerDynamicTexture(name, texture);
     }

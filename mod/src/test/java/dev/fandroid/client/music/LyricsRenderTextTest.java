@@ -132,6 +132,24 @@ class LyricsRenderTextTest {
     }
 
     @Test
+    void replacesMainTextFromFragmentOnlyRomanizationAndKeepsSync() {
+        LyricLine line = new LyricLine(1_000, 2_400, "今日は", List.of(
+                new TimedWord(1_000, 1_350, "今", false, "kon"),
+                new TimedWord(1_350, 1_700, "日", true, "ni"),
+                new TimedWord(1_700, 2_400, "は", true, "chiwa")),
+                "v1", false, null, null);
+
+        assertThat(LyricsRenderText.hasRomanization(line)).isTrue();
+        assertThat(LyricsRenderText.visualWords(line, true)).satisfiesExactly(word -> {
+            assertThat(word.text()).isEqualTo("konnichiwa");
+            assertThat(word.fragments()).extracting(fragment -> fragment.timing().startMillis())
+                    .containsExactly(1_000L, 1_350L, 1_700L);
+            assertThat(word.fragments()).extracting(fragment -> fragment.timing().endMillis())
+                    .containsExactly(1_350L, 1_700L, 2_400L);
+        });
+    }
+
+    @Test
     void usesRomanizedWordBoundariesInsteadOfUnspacedJapaneseGeometry() {
         LyricLine line = new LyricLine(1_000, 3_000, "\u4ECA\u65E5\u306F\u4E16\u754C", List.of(
                 new TimedWord(1_000, 1_350, "\u4ECA", false, "kon"),
@@ -140,9 +158,19 @@ class LyricsRenderTextTest {
                 new TimedWord(2_100, 3_000, "\u4E16\u754C", true, "sekai")),
                 "v1", false, null, "konnichiwa sekai");
 
-        assertThat(LyricsRenderText.visualWords(line, true))
-                .extracting(LyricsRenderText.VisualWord::text)
-                .containsExactly("konnichiwa", "sekai");
+        assertThat(LyricsRenderText.visualWords(line, true)).satisfiesExactly(
+                word -> {
+                    assertThat(word.text()).isEqualTo("konnichiwa");
+                    assertThat(word.startMillis()).isEqualTo(1_000);
+                    assertThat(word.endMillis()).isEqualTo(2_000);
+                    assertThat(word.fragments()).extracting(fragment -> fragment.timing().startMillis())
+                            .containsExactly(1_000L, 1_350L, 1_700L);
+                },
+                word -> {
+                    assertThat(word.text()).isEqualTo("sekai");
+                    assertThat(word.startMillis()).isEqualTo(2_100);
+                    assertThat(word.endMillis()).isEqualTo(3_000);
+                });
     }
 
     private static LyricLine line(String text, List<TimedWord> words) {

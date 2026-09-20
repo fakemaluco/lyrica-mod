@@ -58,6 +58,10 @@ public final class InventoryLyricsController {
     private static double heartHoverFade;
     private static double nextHoverFade;
     private static double coverControlsFade;
+    private static long cachedPositionSecond = Long.MIN_VALUE;
+    private static long cachedDurationSecond = Long.MIN_VALUE;
+    private static String cachedPositionLabel = "0:00";
+    private static String cachedDurationLabel = "0:00";
 
     private InventoryLyricsController() {
     }
@@ -99,7 +103,10 @@ public final class InventoryLyricsController {
 
     public static void render(Screen screen, DrawContext context, int mouseX, int mouseY) {
         LyricsOverlay overlay = RelayLyricsClient.overlay();
-        if (screen != activeScreen || overlay == null) return;
+        if (overlay == null) return;
+        if (screen != activeScreen) {
+            attach(screen);
+        }
         boolean popupVisible = inventoryPopupAvailable();
         double transitionVisibility = popupTransitionVisibility();
         if (popupVisible && POPUP_TRANSITION.isFullyVisible()) {
@@ -248,6 +255,11 @@ public final class InventoryLyricsController {
     }
 
     public static void tick(MinecraftClient client) {
+        if (activeScreen == null && client.currentScreen != null
+                && !(client.currentScreen instanceof LyricsConfigScreen)
+                && screenPopupEnabled(client.currentScreen)) {
+            attach(client.currentScreen);
+        }
         if (activeScreen != null && client.currentScreen != activeScreen
                 && !(client.currentScreen instanceof LyricsConfigScreen)) {
             POPUP_TRANSITION.setVisible(true, System.nanoTime(),
@@ -491,8 +503,8 @@ public final class InventoryLyricsController {
         long duration = Math.max(0, RelayLyricsClient.music().snapshot().durationMillis());
         if (duration > 0) position = Math.min(position, duration);
         int progressY = y + cover + 6;
-        String currentLabel = formatTime(position);
-        String durationLabel = formatTime(duration);
+        String currentLabel = cachedTimeLabel(position, false);
+        String durationLabel = cachedTimeLabel(duration, true);
         float timeScale = .62F;
         int currentWidth = (int) Math.ceil(client.textRenderer.getWidth(currentLabel) * timeScale);
         int durationWidth = (int) Math.ceil(client.textRenderer.getWidth(durationLabel) * timeScale);
@@ -777,8 +789,28 @@ public final class InventoryLyricsController {
         long hours = totalSeconds / 3_600;
         long minutes = totalSeconds / 60 % 60;
         long seconds = totalSeconds % 60;
-        return hours > 0 ? String.format("%d:%02d:%02d", hours, minutes, seconds)
-                : String.format("%d:%02d", minutes, seconds);
+        if (hours > 0) return hours + ":" + twoDigits(minutes) + ":" + twoDigits(seconds);
+        return minutes + ":" + twoDigits(seconds);
+    }
+
+    private static String cachedTimeLabel(long millis, boolean duration) {
+        long second = Math.max(0, millis / 1_000);
+        if (duration) {
+            if (second != cachedDurationSecond) {
+                cachedDurationSecond = second;
+                cachedDurationLabel = formatTime(second * 1_000);
+            }
+            return cachedDurationLabel;
+        }
+        if (second != cachedPositionSecond) {
+            cachedPositionSecond = second;
+            cachedPositionLabel = formatTime(second * 1_000);
+        }
+        return cachedPositionLabel;
+    }
+
+    private static String twoDigits(long value) {
+        return value < 10 ? "0" + value : Long.toString(value);
     }
 
     private static double smoothStep(double value) {
@@ -794,7 +826,7 @@ public final class InventoryLyricsController {
 
     /** Makes the container plus EMI/REI sidebars solid obstacles during drag and resize. */
     private static void keepOutsideGui(Screen screen, PreferenceBounds previous) {
-        if (!inventoryPopupEnabled()) return;
+        if (!inventoryPopupEnabled() || RelayLyricsClient.preferences().isLyricsAllowGuiOverlap()) return;
         GuiBounds gui = guiBounds(screen);
         if (gui == null) return;
         Rect handled = new Rect(gui.left, gui.top, gui.right - gui.left, gui.bottom - gui.top);

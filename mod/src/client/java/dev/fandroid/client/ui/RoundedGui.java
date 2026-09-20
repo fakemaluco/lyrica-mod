@@ -8,6 +8,8 @@ import net.minecraft.client.texture.NativeImageBackedTexture;
 import net.minecraft.util.Identifier;
 
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -21,6 +23,7 @@ public final class RoundedGui {
             new LinkedHashMap<>(8, .75F, true);
     private static final Map<Integer, MaskTexture> FILL_TEXTURES =
             new LinkedHashMap<>(8, .75F, true);
+    private static final List<List<RoundedClipBand>> CLIP_PLANS = createClipPlans();
 
     private RoundedGui() { }
 
@@ -33,12 +36,54 @@ public final class RoundedGui {
             return;
         }
         if (height - r * 2 > 0) band(context, x, y + r, x + width, y + height - r, drawer);
-        for (int row = 0; row < r; row++) {
-            int inset = cornerInset(r, row);
-            band(context, x + inset, y + row, x + width - inset, y + row + 1, drawer);
-            band(context, x + inset, y + height - row - 1,
-                    x + width - inset, y + height - row, drawer);
+        for (RoundedClipBand clipBand : roundedClipPlan(r)) {
+            int inset = clipBand.inset();
+            band(context, x + inset, y + clipBand.startRow(), x + width - inset,
+                    y + clipBand.endRow(), drawer);
+            band(context, x + inset, y + height - clipBand.endRow(), x + width - inset,
+                    y + height - clipBand.startRow(), drawer);
         }
+    }
+
+    /**
+     * Groups adjacent corner scanlines whose exact inset differs by at most two pixels.
+     * The midpoint keeps every edge within one logical pixel while reducing a radius-16
+     * clip from 33 complete callbacks to at most 11.
+     */
+    static List<RoundedClipBand> roundedClipPlan(int radius) {
+        int safeRadius = Math.clamp(radius, 0, MAX_RADIUS);
+        return CLIP_PLANS.get(safeRadius);
+    }
+
+    private static List<List<RoundedClipBand>> createClipPlans() {
+        List<List<RoundedClipBand>> plans = new ArrayList<>(MAX_RADIUS + 1);
+        plans.add(List.of());
+        for (int radius = 1; radius <= MAX_RADIUS; radius++) {
+            plans.add(buildClipPlan(radius));
+        }
+        return List.copyOf(plans);
+    }
+
+    private static List<RoundedClipBand> buildClipPlan(int safeRadius) {
+        List<RoundedClipBand> bands = new ArrayList<>();
+        int start = 0;
+        while (start < safeRadius) {
+            int minimum = cornerInset(safeRadius, start);
+            int maximum = minimum;
+            int end = start + 1;
+            while (end < safeRadius) {
+                int candidate = cornerInset(safeRadius, end);
+                int nextMinimum = Math.min(minimum, candidate);
+                int nextMaximum = Math.max(maximum, candidate);
+                if (nextMaximum - nextMinimum > 2) break;
+                minimum = nextMinimum;
+                maximum = nextMaximum;
+                end++;
+            }
+            bands.add(new RoundedClipBand(start, end, (minimum + maximum) / 2));
+            start = end;
+        }
+        return List.copyOf(bands);
     }
 
     /** Runs the drawer clipped to a straight rectangle (integer scissor, batch-safe). */
@@ -349,4 +394,6 @@ public final class RoundedGui {
 
     private record MaskTexture(Identifier id, NativeImageBackedTexture texture,
                                int textureSize, int cap) { }
+
+    record RoundedClipBand(int startRow, int endRow, int inset) { }
 }

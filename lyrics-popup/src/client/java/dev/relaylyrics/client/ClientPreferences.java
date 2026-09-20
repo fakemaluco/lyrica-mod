@@ -11,6 +11,7 @@ import java.nio.file.Path;
 public final class ClientPreferences {
     private boolean lyricsVisible = true;
     private boolean lyricsPinned = true;
+    private boolean lyricsAllowGuiOverlap;
     private LyricsEffectsMode lyricsEffects = LyricsEffectsMode.AUTO;
     private boolean lyricsTranslation = true;
     private boolean lyricsRomanization = true;
@@ -93,6 +94,8 @@ public final class ClientPreferences {
     public void setLyricsVisible(boolean value) { lyricsVisible = value; }
     public boolean isLyricsPinned() { return lyricsPinned; }
     public void setLyricsPinned(boolean value) { lyricsPinned = value; }
+    public boolean isLyricsAllowGuiOverlap() { return lyricsAllowGuiOverlap; }
+    public void setLyricsAllowGuiOverlap(boolean value) { lyricsAllowGuiOverlap = value; }
     public LyricsEffectsMode getLyricsEffects() {
         return LyricsEffectsMode.ENHANCED;
     }

@@ -6,6 +6,7 @@ public enum LyricsSource {
     SPICY_TTML("SPICY TTML"),
     SPICY_CACHE("SPICY CACHE"),
     AMLL("AMLL"),
+    BETTER_LYRICS("BETTER LYRICS"),
     LRCLIB("LRCLIB");
 
     private final String label;

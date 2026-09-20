@@ -140,4 +140,26 @@ class SecureTtmlParserTest {
         assertThat(document.groups().get(1).alignment()).isEqualTo(LyricAlignment.OPPOSITE);
         assertThat(document.activeGroupsAt(2_750)).hasSize(2);
     }
+
+    @Test
+    void alignsVoiceTwoRightEvenWhenItIsTheFirstPhraseAndKeepsItsBackingVocals() {
+        String ttml = """
+                <tt xmlns="http://www.w3.org/ns/ttml"
+                    xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+                  <body><div>
+                    <p begin="1s" end="4s" ttm:agent="v2">
+                      <span begin="1s" end="4s">Second voice opens</span>
+                      <span ttm:role="x-bg" begin="2s" end="3s">(backing)</span>
+                    </p>
+                    <p begin="4s" end="6s" ttm:agent="v1">Primary voice</p>
+                  </div></body>
+                </tt>
+                """;
+
+        LyricsDocument document = parser.parse(ttml.getBytes(StandardCharsets.UTF_8));
+
+        assertThat(document.groups().getFirst().alignment()).isEqualTo(LyricAlignment.OPPOSITE);
+        assertThat(document.groups().getFirst().backingVocals()).hasSize(1);
+        assertThat(document.groups().get(1).alignment()).isEqualTo(LyricAlignment.NORMAL);
+    }
 }

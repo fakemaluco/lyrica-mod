@@ -19,6 +19,11 @@ public final class PlatformTextures {
         return new NativeImageBackedTexture(name, width, height, false);
     }
 
+    /** Physical pixels represented by one logical GUI pixel. */
+    public static double guiScale() {
+        return Math.max(1.0, MinecraftClient.getInstance().getWindow().getScaleFactor());
+    }
+
     public static Identifier register(String name, NativeImageBackedTexture texture) {
         Identifier id = Identifier.of("fandroid", "dynamic/" + name.replaceAll("[^a-z0-9_/.-]", "_"));
         MinecraftClient.getInstance().getTextureManager().registerTexture(id, texture);

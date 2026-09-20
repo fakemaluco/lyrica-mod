@@ -209,6 +209,11 @@ public final class MediaBridgeConnector implements MusicConnector {
         send(java.util.Map.of("type", "source", "source", next));
     }
 
+    /** Reopens WASAPI loopback against the current Windows default output. */
+    public void reloadAudioOutput() {
+        send(java.util.Map.of("type", "reload_audio_output"));
+    }
+
     @Override
     public MusicCapabilities capabilities() { return latest.capabilities(); }
 

@@ -34,6 +34,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
             return;
         }
 
+        LyricsOverlay.initializeRenderingBackend();
         CompatibilityManager.initialize();
 
         overlay = new LyricsOverlay(preferences());

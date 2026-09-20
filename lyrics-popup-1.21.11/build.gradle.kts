@@ -72,6 +72,8 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
     from(rootProject.file("mod-1.21.11/src/client/java")) {
         include("dev/fandroid/client/music/PlatformTextures.java")
         include("dev/fandroid/client/ui/LyricsBloomRenderer.java")
+        include("dev/fandroid/client/mixin/glow/DrawContextStateAccessor.java")
+        include("dev/fandroid/client/mixin/glow/SpecialGuiElementRendererAccessor.java")
         include("dev/fandroid/client/ui/GuiTransform.java")
         include("dev/fandroid/client/ui/PlatformTextStyles.java")
         include("dev/fandroid/client/ui/FanDroidScreenBase.java")
@@ -137,10 +139,19 @@ tasks.processResources {
     from(rootProject.file("mod/src/main/resources/assets/fandroid/shaders")) {
         into("assets/relaylyrics/shaders")
     }
+    from(rootProject.file("mod/src/main/resources/assets/fandroid/post_effect")) {
+        into("assets/relaylyrics/post_effect")
+    }
     inputs.property("version", project.version)
     filesMatching("fabric.mod.json") {
         expand(mapOf("version" to project.version, "minecraft_dependency" to "~1.21.11",
             "fabric_api_dependency" to ">=0.141.2"))
+        filter { line: String ->
+            if (line.contains("\"environment\""))
+                "$line\n  \"mixins\": [\"relaylyrics.client.mixins.json\", \"relaylyrics.glow.mixins.json\"],"
+            else if (line.contains("\"mixins\"")) ""
+            else line
+        }
     }
 }
 tasks.withType<Jar>().configureEach {

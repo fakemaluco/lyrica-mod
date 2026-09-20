@@ -7,20 +7,24 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.Framebuffer;
 import net.minecraft.client.gl.PostEffectProcessor;
 import net.minecraft.client.gl.SimpleFramebuffer;
+import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import org.lwjgl.opengl.GL11;
 
 /** Off-screen bloom pass used only by the enhanced lyrics renderer. */
 final class LyricsBloomRenderer implements AutoCloseable {
     private static final Identifier BLUR = Identifier.of("fandroid", "shaders/post/lyrics_bloom.json");
-    private static final int DOWNSAMPLE = 2;
+    private static final int DOWNSAMPLE = 1;
 
     private SimpleFramebuffer glowTarget;
     private PostEffectProcessor blur;
     private int width;
     private int height;
     private boolean writing;
+
+    static void register() { }
 
     boolean begin(DrawContext context, int clipLeft, int clipTop, int clipRight, int clipBottom,
                   boolean softwareClip) {
@@ -45,13 +49,15 @@ final class LyricsBloomRenderer implements AutoCloseable {
     }
 
     boolean finish(DrawContext context, int clipLeft, int clipTop, int clipRight, int clipBottom,
-                   float radius, boolean clip) {
+                   float radius, boolean clip, boolean additive) {
         MinecraftClient client = MinecraftClient.getInstance();
         try {
             context.draw();
             glowTarget.endWrite();
             writing = false;
-            blur.setUniforms("Radius", Math.clamp(radius, 1.5F, 6.0F));
+            // Radius is expressed in screen pixels by the shared profile. This target is
+            // half-resolution, so convert it before filtering to keep both versions matched.
+            blur.setUniforms("Radius", Math.clamp(radius / DOWNSAMPLE, .5F, 6.0F));
             blur.render(0);
 
             Framebuffer main = client.getFramebuffer();
@@ -60,7 +66,13 @@ final class LyricsBloomRenderer implements AutoCloseable {
             try {
                 glowTarget.setTexFilter(GL11.GL_LINEAR);
                 RenderSystem.enableBlend();
-                RenderSystem.blendFunc(GlStateManager.SrcFactor.SRC_ALPHA, GlStateManager.DstFactor.ONE);
+                if (additive) {
+                    // The source was already blended into a transparent framebuffer and is
+                    // therefore premultiplied. SRC_ALPHA here would dim it a second time.
+                    RenderSystem.blendFunc(GlStateManager.SrcFactor.ONE, GlStateManager.DstFactor.ONE);
+                } else {
+                    RenderSystem.defaultBlendFunc();
+                }
                 glowTarget.draw(main.textureWidth, main.textureHeight, false);
             } finally {
                 RenderSystem.setShaderColor(1, 1, 1, 1);
@@ -75,6 +87,22 @@ final class LyricsBloomRenderer implements AutoCloseable {
             FanDroidMod.LOGGER.warn("Enhanced lyrics bloom failed; using compatible renderer: {}",
                     failure.toString());
             return false;
+        }
+    }
+
+    void drawGlyph(DrawContext context, TextRenderer renderer, Text text,
+                   double x, double y, double scale, int color,
+                   int clipLeft, int clipTop, int clipRight, int clipBottom) {
+        if (!writing || (color >>> 24) == 0 || clipRight <= clipLeft || clipBottom <= clipTop) return;
+        context.enableScissor(clipLeft, clipTop, clipRight, clipBottom);
+        try {
+            GuiTransform.push(context);
+            GuiTransform.translate(context, (float) x, (float) y);
+            GuiTransform.scale(context, (float) scale, (float) scale);
+            context.drawText(renderer, text, 0, 0, color, false);
+            GuiTransform.pop(context);
+        } finally {
+            context.disableScissor();
         }
     }
 

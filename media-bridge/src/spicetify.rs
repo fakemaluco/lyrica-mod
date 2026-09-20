@@ -101,6 +101,12 @@ fn handle(
     let Ok(mut socket) = accept(stream) else {
         return;
     };
+    // Announce the current pairing code so a trusted localhost extension can auto-pair
+    // the first time, without the user typing a code into Minecraft. Clients that already
+    // hold a token simply ignore this greeting and proceed to authenticate.
+    let _ = socket.send(Message::Text(
+        json!({"type": "pairing_code", "code": pairing_code.clone()}).to_string().into(),
+    ));
     let Ok(Message::Text(first)) = socket.read() else {
         return;
     };

@@ -733,10 +733,10 @@ public final class FanDroidScreen extends FanDroidScreenBase {
         else lyrics.renderInPhone(context, 104, 426, 544, 414,
                     layout.x(), layout.y(), layout.scale() * PHONE_WIDTH_FACTOR, layout.scale(),
                     mouseX, mouseY);
-        if (!"Lyrics ready".equals(music.lyricsStatus())) {
-            RetroDraw.regularText(context, textRenderer, RetroDraw.fit(textRenderer, localizedLyricsStatus(), 440),
-                    104, 862, 0xFFD6E0E1, 1.05F);
-        }
+        String footer = "Lyrics ready".equals(music.lyricsStatus()) && !music.lyricsProvider().isBlank()
+                ? tr("music.fandroid.source", music.lyricsProvider()) : localizedLyricsStatus();
+        RetroDraw.regularText(context, textRenderer, RetroDraw.fit(textRenderer, footer, 440),
+                104, 862, 0xFFD6E0E1, 1.05F);
         musicIconButton(context, MusicIcon.RETRY, 604, 848, 40, true, false, mouseX, mouseY);
     }
 
@@ -814,10 +814,13 @@ public final class FanDroidScreen extends FanDroidScreenBase {
             case "Start playback to find lyrics" -> tr("music.fandroid.status_start");
             case "Spotify DJ voice segment - no lyrics" -> tr("music.fandroid.status_dj");
             case "Finding lyrics..." -> tr("music.fandroid.status_finding");
+            case "Searching AMLL..." -> tr("music.fandroid.status_searching_amll");
+            case "Searching Better Lyrics..." -> tr("music.fandroid.status_searching_better");
+            case "Searching LRCLIB..." -> tr("music.fandroid.status_searching_lrclib");
             case "Choose an imported TTML match" -> tr("music.fandroid.status_choose_import");
             case "Loading lyrics..." -> tr("music.fandroid.status_loading");
             case "Lyrics ready" -> tr("music.fandroid.status_ready");
-            case "No synced lyrics in AMLL or LRCLIB" -> tr("music.fandroid.status_not_found");
+            case "No synced lyrics in AMLL, Better Lyrics or LRCLIB" -> tr("music.fandroid.status_not_found");
             default -> music.lyricsStatus();
         };
     }
@@ -962,11 +965,14 @@ public final class FanDroidScreen extends FanDroidScreenBase {
                 tr("settings.fandroid.reactive_source."
                         + runtime.preferences().getLyricsReactiveSource().name().toLowerCase(Locale.ROOT)),
                 92, 292, mouseX, mouseY);
+        settingValue(context, tr("settings.fandroid.reactive_output_reload"),
+                tr("settings.fandroid.reactive_output_reload.button"),
+                92, 356, mouseX, mouseY);
         settingStepper(context, tr("settings.fandroid.reactive_intensity"),
                 Math.round(runtime.preferences().getLyricsReactiveIntensity() * 100) + "%",
-                92, 356, mouseX, mouseY);
+                92, 420, mouseX, mouseY);
         settingToggle(context, tr("settings.fandroid.reactive"),
-                runtime.preferences().isLyricsReactiveBackground(), 92, 420);
+                runtime.preferences().isLyricsReactiveBackground(), 92, 484);
     }
 
     private void renderExperimentalColor(DrawContext context, int mouseX, int mouseY) {
@@ -1719,18 +1725,22 @@ public final class FanDroidScreen extends FanDroidScreenBase {
                         runtime.preferences().setLyricsReactiveSource(
                                 runtime.preferences().getLyricsReactiveSource().next());
                         runtime.preferences().save();
-                    } else if (inside(x, y, 478, 356, 46, 48)) {
+                    } else if (inside(x, y, 478, 356, 174, 48)) {
+                        toast(tr(music.reloadReactiveAudioOutput()
+                                ? "toast.fandroid.reactive_output_reloaded"
+                                : "toast.fandroid.reactive_output_unavailable"));
+                    } else if (inside(x, y, 478, 420, 46, 48)) {
                         runtime.preferences().setLyricsReactiveIntensity(
                                 runtime.preferences().getLyricsReactiveIntensity() - .25);
                         runtime.preferences().save();
-                    } else if (inside(x, y, 530, 356, 70, 48)) {
+                    } else if (inside(x, y, 530, 420, 70, 48)) {
                         runtime.preferences().setLyricsReactiveIntensity(1.0);
                         runtime.preferences().save();
-                    } else if (inside(x, y, 606, 356, 46, 48)) {
+                    } else if (inside(x, y, 606, 420, 46, 48)) {
                         runtime.preferences().setLyricsReactiveIntensity(
                                 runtime.preferences().getLyricsReactiveIntensity() + .25);
                         runtime.preferences().save();
-                    } else if (inside(x, y, 556, 420, 96, 48)) {
+                    } else if (inside(x, y, 556, 484, 96, 48)) {
                         runtime.preferences().setLyricsReactiveBackground(
                                 !runtime.preferences().isLyricsReactiveBackground());
                         runtime.preferences().save();

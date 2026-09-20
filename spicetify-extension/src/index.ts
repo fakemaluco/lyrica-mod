@@ -10,7 +10,7 @@
       <path d="M9.2 12.2l1.7 1.7 3.9-4.1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>`;
 
-  type ConnectionState = "offline" | "authenticating" | "ready-to-pair" | "paired";
+  type ConnectionState = "offline" | "authenticating" | "ready-to-pair" | "pairing" | "paired";
   type TopbarButton = InstanceType<NonNullable<typeof Spicetify.Topbar>["Button"]>;
 
   let socket: WebSocket | undefined;
@@ -22,6 +22,9 @@
   let pairStatus: HTMLElement | undefined;
   let pairingInFlight = false;
   let bridgeNoticeShown = false;
+  // Auto-pairing: the bridge publishes its pairing code over the WebSocket so the
+  // first connection can complete without the user typing a code into Minecraft.
+  let autoPairCode: string | undefined;
   let lastPlayerState: PlayerState | undefined;
   let lastLyricsFingerprint = "";
   let lastLyricsStatusFingerprint = "";
@@ -491,12 +494,14 @@
       offline: "Relay offline",
       authenticating: "Connecting Relay",
       "ready-to-pair": "Pair Relay",
+      pairing: "Pairing…",
       paired: "Relay connected",
     };
     const colors: Record<ConnectionState, string> = {
       offline: "#8f949b",
       authenticating: "#e7b85b",
       "ready-to-pair": "#c59be8",
+      pairing: "#e7b85b",
       paired: "#7fd38a",
     };
     topbarButton.label = labels[next];
@@ -517,10 +522,11 @@
 
   function updatePairControls() {
     const connected = socket?.readyState === WebSocket.OPEN;
-    if (pairInput) pairInput.disabled = !connected || pairingInFlight || state === "paired";
+    const autoPairing = state === "pairing" || pairingInFlight;
+    if (pairInput) pairInput.disabled = !connected || autoPairing || state === "paired";
     if (pairSubmit) {
-      pairSubmit.disabled = !connected || pairingInFlight;
-      pairSubmit.textContent = pairingInFlight ? "Connecting…"
+      pairSubmit.disabled = !connected || autoPairing;
+      pairSubmit.textContent = autoPairing ? "Pairing…"
         : !connected ? "Waiting for bridge…"
         : state === "paired" ? "Pair again"
         : "Pair Relay";
@@ -611,17 +617,13 @@
     setState("offline");
     socket = new WebSocket(`ws://127.0.0.1:${PORT}`);
     socket.addEventListener("open", () => {
-      const token = localStorage.getItem(TOKEN_KEY);
+       const token = localStorage.getItem(TOKEN_KEY);
       if (token) {
         setState("authenticating");
         socket?.send(JSON.stringify({ type: "authenticate", token }));
       } else {
         setState("ready-to-pair");
-        if (!bridgeNoticeShown) {
-          bridgeNoticeShown = true;
-          Spicetify.showNotification("Relay found — use the phone icon to pair");
-        }
-        setPairStatus("Enter the current code from Minecraft.");
+        setPairStatus("Waiting for a pairing code from Minecraft…");
         updatePairControls();
       }
     });
@@ -629,10 +631,24 @@
       const message = JSON.parse(String(event.data)) as {
         type?: string;
         token?: string;
+        code?: string;
         error?: string;
         command?: { action?: string; value?: number };
       };
-      if (message.type === "paired" && message.token) {
+      if (message.type === "pairing_code" && !message.code) {
+        autoPairCode = undefined;
+      } else if (message.type === "pairing_code" && !localStorage.getItem(TOKEN_KEY)
+          && !pairingInFlight && (state === "ready-to-pair" || state === "pairing")) {
+        autoPairCode = message.code;
+        pairingInFlight = true;
+        setState("pairing");
+        if (!bridgeNoticeShown) {
+          bridgeNoticeShown = true;
+          Spicetify.showNotification("Relay connected to Minecraft");
+        }
+        setPairStatus("Auto-pairing with the bridge…");
+        socket?.send(JSON.stringify({ type: "pair", code: message.code }));
+      } else if (message.type === "paired" && message.token) {
         localStorage.setItem(TOKEN_KEY, message.token);
         pairingInFlight = false;
         setState("paired");

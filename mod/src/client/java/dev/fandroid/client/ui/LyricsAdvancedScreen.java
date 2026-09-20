@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /** Compact vanilla screen for lyric typography and interaction preferences. */
-public final class LyricsAdvancedScreen extends Screen {
+public final class LyricsAdvancedScreen extends FanDroidScreenBase {
     private final Screen parent;
     private final ClientPreferences preferences;
     private final LyricsOverlay overlay;
@@ -67,6 +67,9 @@ public final class LyricsAdvancedScreen extends Screen {
                 () -> enumValue("config.fandroid.shadow_softness.",
                         Integer.toString(preferences.getLyricsShadowSoftness())),
                 () -> preferences.setLyricsShadowSoftness((preferences.getLyricsShadowSoftness() + 1) % 3));
+        option(right, y + 120, columnWidth, "config.fandroid.allow_gui_overlap",
+                () -> toggleValue(preferences.isLyricsAllowGuiOverlap()),
+                () -> preferences.setLyricsAllowGuiOverlap(!preferences.isLyricsAllowGuiOverlap()));
 
         addDrawableChild(ButtonWidget.builder(Text.translatable("gui.done"), ignored -> close())
                 .dimensions((width - 200) / 2, height - 28, 200, 20).build());
@@ -121,8 +124,7 @@ public final class LyricsAdvancedScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        renderBackground(context, mouseX, mouseY, delta);
-        super.render(context, mouseX, mouseY, delta);
+        renderVanillaScreen(context, mouseX, mouseY, delta);
         context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 16, 0xFFFFFFFF);
     }
 

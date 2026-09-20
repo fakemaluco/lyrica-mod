@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /** Vanilla-styled category and option rows used by the Mod Menu entrypoint. */
-public final class LyricsConfigScreen extends Screen {
+public final class LyricsConfigScreen extends FanDroidScreenBase {
     private final Screen parent;
     private final ClientPreferences preferences;
     private final List<Row> rows = new ArrayList<>();
@@ -67,6 +67,10 @@ public final class LyricsConfigScreen extends Screen {
                         () -> preferences.setLyricsVisible(true), () -> preferences.setLyricsVisible(false));
                 y = addToggle(y, "config.relaylyrics.pinned", preferences::isLyricsPinned,
                         () -> preferences.setLyricsPinned(true), () -> preferences.setLyricsPinned(false));
+                y = addToggle(y, "config.relaylyrics.allow_gui_overlap",
+                        preferences::isLyricsAllowGuiOverlap,
+                        () -> preferences.setLyricsAllowGuiOverlap(true),
+                        () -> preferences.setLyricsAllowGuiOverlap(false));
                 y = addRow(y, Text.translatable("config.relaylyrics.render_type"),
                         () -> enumValue("config.relaylyrics.render_type.",
                                 preferences.getLyricsRenderType().name()),
@@ -193,24 +197,24 @@ public final class LyricsConfigScreen extends Screen {
                                 preferences.getMusicSource().name()),
                         () -> changeMusicSource(preferences.getMusicSource().next()),
                         () -> changeMusicSource(preferences.getMusicSource().previous()));
-                y = addRow(y, Text.translatable("config.relaylyrics.spotify.account"),
+                y = addDynamicRow(y, Text.translatable("config.relaylyrics.spotify.account"),
                         () -> Text.translatable(music != null && music.spotifyAccountConnected()
                                 ? "config.relaylyrics.connected" : "config.relaylyrics.spotify.configure"),
                         () -> {
                             if (music != null) MinecraftClient.getInstance().setScreen(
                                     new SpotifyAccountScreen(this, preferences, music));
                         }, null);
-                y = addRow(y, Text.translatable("config.relaylyrics.connection.status"),
+                y = addDynamicRow(y, Text.translatable("config.relaylyrics.connection.status"),
                         this::connectionText, null, null);
-                y = addRow(y, Text.translatable("config.relaylyrics.connection.extension"),
+                y = addDynamicRow(y, Text.translatable("config.relaylyrics.connection.extension"),
                         () -> valueOrDash(music == null ? null : music.spicetifyExtensionVersion()), null, null);
-                y = addRow(y, Text.translatable("config.relaylyrics.connection.code"),
+                y = addDynamicRow(y, Text.translatable("config.relaylyrics.connection.code"),
                         () -> valueOrDash(music == null ? null : music.pairingCode()), null, null);
-                y = addRow(y, Text.translatable("config.relaylyrics.connection.port"),
+                y = addDynamicRow(y, Text.translatable("config.relaylyrics.connection.port"),
                         () -> music == null || music.pairingPort() <= 0 ? Text.literal("—")
                                 : Text.literal(Integer.toString(music.pairingPort())), null, null);
-                addRow(y, Text.translatable("config.relaylyrics.connection.lyrics"),
-                        () -> valueOrDash(music == null ? null : music.lyricsStatus()), null, null);
+                addDynamicRow(y, Text.translatable("config.relaylyrics.connection.lyrics"),
+                        () -> valueOrDash(music == null ? null : music.lyricsStatusDetail()), null, null);
             }
             case EXPERIMENTAL -> {
                 y = addRow(y, Text.translatable("config.relaylyrics.reactive_source"),
@@ -220,6 +224,12 @@ public final class LyricsConfigScreen extends Screen {
                                 preferences.getLyricsReactiveSource().next()),
                         () -> preferences.setLyricsReactiveSource(
                                 preferences.getLyricsReactiveSource().previous()));
+                y = addRow(y, Text.translatable("config.relaylyrics.reactive_output_reload"),
+                        () -> Text.translatable("config.relaylyrics.reactive_output_reload.button"),
+                        () -> {
+                            MusicService music = RelayLyricsClient.music();
+                            if (music != null) music.reloadReactiveAudioOutput();
+                        }, null);
                 y = addRow(y, Text.translatable("config.relaylyrics.reactive_intensity"),
                         () -> Text.literal(Math.round(
                                 preferences.getLyricsReactiveIntensity() * 100) + "%"),
@@ -267,15 +277,17 @@ public final class LyricsConfigScreen extends Screen {
                         () -> preferences.setLyricsReactiveBackground(true),
                         () -> preferences.setLyricsReactiveBackground(false));
                 MusicService music = RelayLyricsClient.music();
-                addRow(y, Text.translatable("config.relaylyrics.volume"),
+                addDynamicRow(y, Text.translatable("config.relaylyrics.volume"),
                         () -> music == null
                                 ? Text.literal("—")
                                 : Text.literal(Math.round(music.snapshot().volume() * 100) + "%"),
                         null, null);
             }
         }
-        settingsBottom = rows.stream().mapToInt(row -> row.button.getY() + row.button.getHeight())
-                .max().orElse(58);
+        settingsBottom = 58;
+        for (Row row : rows) {
+            settingsBottom = Math.max(settingsBottom, row.button.getY() + row.button.getHeight());
+        }
 
         int doneWidth = Math.min(200, contentWidth);
         addDrawableChild(ButtonWidget.builder(Text.translatable("gui.done"), ignored -> close())
@@ -289,11 +301,24 @@ public final class LyricsConfigScreen extends Screen {
     }
 
     private int addRow(int y, Text label, Supplier<Text> value, Runnable increase, Runnable decrease) {
-        ButtonWidget control = ButtonWidget.builder(value.get(), ignored -> {
+        return addRow(y, label, value, increase, decrease, false);
+    }
+
+    private int addDynamicRow(int y, Text label, Supplier<Text> value,
+                              Runnable increase, Runnable decrease) {
+        return addRow(y, label, value, increase, decrease, true);
+    }
+
+    private int addRow(int y, Text label, Supplier<Text> value, Runnable increase,
+                       Runnable decrease, boolean dynamic) {
+        Text initialValue = value.get();
+        ButtonWidget control = ButtonWidget.builder(initialValue, ignored -> {
             apply(increase);
         }).dimensions(controlLeft, y, width - contentLeft - controlLeft, 20).build();
         control.active = increase != null || decrease != null;
-        rows.add(new Row(label, control, value, decrease));
+        int available = Math.max(20, controlLeft - contentLeft - 16);
+        Text fittedLabel = Text.literal(textRenderer.trimToWidth(label.getString(), available));
+        rows.add(new Row(fittedLabel, control, value, decrease, dynamic, initialValue));
         addDrawableChild(control);
         return y + 25;
     }
@@ -351,12 +376,24 @@ public final class LyricsConfigScreen extends Screen {
     }
 
     private void refreshValues() {
-        for (Row row : rows) row.button.setMessage(row.value.get());
+        for (Row row : rows) row.refresh();
+    }
+
+    private void refreshDynamicValues() {
+        for (Row row : rows) {
+            if (row.dynamic) row.refresh();
+        }
+    }
+
+    @Override
+    public void tick() {
+        refreshDynamicValues();
     }
 
     private void restoreDefaults() {
         preferences.setLyricsVisible(true);
         preferences.setLyricsPinned(true);
+        preferences.setLyricsAllowGuiOverlap(false);
         preferences.setLyricsDynamicBackground(true);
         preferences.setLyricsTranslation(true);
         preferences.setLyricsRomanization(true);
@@ -399,14 +436,10 @@ public final class LyricsConfigScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        renderBackground(context, mouseX, mouseY, delta);
-        refreshValues();
-        super.render(context, mouseX, mouseY, delta);
+        renderVanillaScreen(context, mouseX, mouseY, delta);
         drawCentered(context, title, 10, 0xFFFFFFFF);
         for (Row row : rows) {
-            int available = Math.max(20, controlLeft - contentLeft - 16);
-            Text fitted = Text.literal(textRenderer.trimToWidth(row.label.getString(), available));
-            context.drawTextWithShadow(textRenderer, fitted, contentLeft + 6,
+            context.drawTextWithShadow(textRenderer, row.label, contentLeft + 6,
                     row.button.getY() + 6, 0xFFE0E0E0);
         }
         renderPopupPreview(context);
@@ -473,6 +506,29 @@ public final class LyricsConfigScreen extends Screen {
         Category(String key) { this.key = key; }
     }
 
-    private record Row(Text label, ButtonWidget button, Supplier<Text> value, Runnable decrease) {
+    private static final class Row {
+        private final Text label;
+        private final ButtonWidget button;
+        private final Supplier<Text> value;
+        private final Runnable decrease;
+        private final boolean dynamic;
+        private Text displayedValue;
+
+        private Row(Text label, ButtonWidget button, Supplier<Text> value, Runnable decrease,
+                    boolean dynamic, Text displayedValue) {
+            this.label = label;
+            this.button = button;
+            this.value = value;
+            this.decrease = decrease;
+            this.dynamic = dynamic;
+            this.displayedValue = displayedValue;
+        }
+
+        private void refresh() {
+            Text next = value.get();
+            if (next.equals(displayedValue)) return;
+            displayedValue = next;
+            button.setMessage(next);
+        }
     }
 }

@@ -10,6 +10,7 @@ public final class ClientPreferences {
     private double phoneHeight = 0.55;
     private boolean lyricsVisible = true;
     private boolean lyricsPinned = true;
+    private boolean lyricsAllowGuiOverlap;
     private LyricsEffectsMode lyricsEffects = LyricsEffectsMode.AUTO;
     private boolean lyricsTranslation = true;
     private boolean lyricsRomanization = true;
@@ -102,6 +103,9 @@ public final class ClientPreferences {
     public void setLyricsPinned(boolean lyricsPinned) {
         this.lyricsPinned = lyricsPinned;
     }
+
+    public boolean isLyricsAllowGuiOverlap() { return lyricsAllowGuiOverlap; }
+    public void setLyricsAllowGuiOverlap(boolean value) { lyricsAllowGuiOverlap = value; }
 
     public LyricsEffectsMode getLyricsEffects() {
         return LyricsEffectsMode.ENHANCED;

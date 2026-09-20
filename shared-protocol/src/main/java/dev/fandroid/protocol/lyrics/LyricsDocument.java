@@ -99,8 +99,7 @@ public record LyricsDocument(
             start = Math.min(start, background.startMillis());
             end = Math.max(end, background.endMillis());
         }
-        LyricAlignment alignment = !firstAgent.isBlank() && !firstAgent.equals(lead.agent())
-                ? LyricAlignment.OPPOSITE : LyricAlignment.NORMAL;
+        LyricAlignment alignment = LyricAlignment.forAgent(lead.agent(), firstAgent);
         return new LyricVocalGroup(start, end, lead, backgrounds, alignment);
     }
 }

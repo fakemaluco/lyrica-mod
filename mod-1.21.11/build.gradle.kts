@@ -129,6 +129,11 @@ tasks.processResources {
             "fabric_api_dependency" to ">=0.141.2",
             "voicechat_dependency" to ">=1.21.11-2.6.21"
         ))
+        filter { line: String ->
+            if (line.contains("\"environment\""))
+                "$line\n  \"mixins\": [\"fandroid.glow.mixins.json\"],"
+            else line
+        }
     }
 }
 

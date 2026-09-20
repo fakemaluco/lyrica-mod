@@ -10,7 +10,7 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 
 /** Small vanilla screen for selecting any regular Google Fonts family by name. */
-public final class GoogleFontScreen extends Screen {
+public final class GoogleFontScreen extends FanDroidScreenBase {
     private final Screen parent;
     private final ClientPreferences preferences;
     private final Runnable fontChanged;
@@ -91,8 +91,7 @@ public final class GoogleFontScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        renderBackground(context, mouseX, mouseY, delta);
-        super.render(context, mouseX, mouseY, delta);
+        renderVanillaScreen(context, mouseX, mouseY, delta);
         drawCentered(context, title, height / 2 - 82, 0xFFFFFFFF);
         drawCentered(context, Text.translatable("config.fandroid.google_font.hint"),
                 height / 2 - 61, 0xFFB7B7B7);

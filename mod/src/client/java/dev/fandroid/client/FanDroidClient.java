@@ -37,6 +37,7 @@ public final class FanDroidClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        LyricsOverlay.initializeRenderingBackend();
         CompatibilityManager.initialize();
         KeyBinding openPhone = PlatformKeyBindings.registerOpenPhone();
         GoogleFontManager.restore(RUNTIME.preferences().getGoogleFontFamily(),

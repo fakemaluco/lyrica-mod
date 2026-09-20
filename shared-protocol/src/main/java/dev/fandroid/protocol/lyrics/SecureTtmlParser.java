@@ -63,8 +63,7 @@ public final class SecureTtmlParser {
                 ParagraphResult result = readParagraph(paragraph, sidecars);
                 if (result == null) continue;
                 if (firstAgent.isBlank()) firstAgent = result.lead.agent();
-                LyricAlignment alignment = !firstAgent.isBlank() && !firstAgent.equals(result.lead.agent())
-                        ? LyricAlignment.OPPOSITE : LyricAlignment.NORMAL;
+                LyricAlignment alignment = LyricAlignment.forAgent(result.lead.agent(), firstAgent);
                 groups.add(new LyricVocalGroup(result.lead.startMillis(), result.endMillis(),
                         result.lead, result.backgrounds, alignment));
             }

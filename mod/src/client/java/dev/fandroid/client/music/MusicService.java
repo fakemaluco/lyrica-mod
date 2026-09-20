@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class MusicService implements AutoCloseable {
     private final MusicConnector connector;
     private final AmllLyricsClient lyricsClient = new AmllLyricsClient();
+    private final BetterLyricsClient betterLyricsClient = new BetterLyricsClient();
     private final LrclibLyricsClient lineLyricsClient = new LrclibLyricsClient();
     private final SecureTtmlParser ttmlParser = new SecureTtmlParser();
     private final SpicyLyricsParser spicyParser = new SpicyLyricsParser();
@@ -42,6 +43,8 @@ public final class MusicService implements AutoCloseable {
     private final ClientPreferences preferences;
     private final SpotifyAccountClient spotifyAccount;
     private volatile String lookupKey;
+    private volatile String lookupTrackKey;
+    private long lookupGeneration;
     private volatile String importsPendingKey;
     private volatile String importedLyricsKey;
     private volatile String spicyLyricsKey;
@@ -97,6 +100,12 @@ public final class MusicService implements AutoCloseable {
         }
     }
 
+    public boolean reloadReactiveAudioOutput() {
+        if (!(connector instanceof MediaBridgeConnector bridge) || !bridge.bridgeAlive()) return false;
+        bridge.reloadAudioOutput();
+        return true;
+    }
+
     public CompletableFuture<java.net.URI> connectSpotifyAccount(String clientId) {
         return spotifyAccount.connect(clientId);
     }
@@ -125,6 +134,7 @@ public final class MusicService implements AutoCloseable {
         overlay.setPlayback(value);
         if (value.title() == null || value.title().equals("Nothing playing")) {
             lookupKey = null;
+            lookupTrackKey = null;
             importsPendingKey = null;
             importedLyricsKey = null;
             spicyLyricsKey = null;
@@ -136,7 +146,8 @@ public final class MusicService implements AutoCloseable {
         }
         if (isSpotifyDjSpeaking(value)) {
             String djKey = "spotify-dj\n" + value.title() + '\n' + value.artist();
-            if (!djKey.equals(lookupKey)) {
+            if (!djKey.equals(lookupTrackKey)) {
+                lookupTrackKey = djKey;
                 lookupKey = djKey;
                 importsPendingKey = null;
                 importedLyricsKey = null;
@@ -149,9 +160,11 @@ public final class MusicService implements AutoCloseable {
             }
             return;
         }
-        String key = (value.spotifyUri() == null ? "" : value.spotifyUri()) + '\n'
+        String trackKey = (value.spotifyUri() == null ? "" : value.spotifyUri()) + '\n'
                 + value.title() + '\n' + value.artist() + '\n' + value.album();
-        if (key.equals(lookupKey)) return;
+        if (trackKey.equals(lookupTrackKey)) return;
+        lookupTrackKey = trackKey;
+        String key = trackKey + "\nlookup=" + ++lookupGeneration;
         lookupKey = key;
         importsPendingKey = key;
         importedLyricsKey = null;
@@ -181,14 +194,17 @@ public final class MusicService implements AutoCloseable {
         } else {
             lyricsStatus = "Finding lyrics...";
         }
-        if (spotifyId != null) loadCachedSpicy(value.spotifyUri(), key, spotifyId);
+        if (spotifyId != null && prefersSpicetifyLyrics()) {
+            loadCachedSpicy(value.spotifyUri(), key, spotifyId);
+        }
         CompletableFuture.runAsync(() -> beginNetworkLookup(value, key, spotifyId),
-                CompletableFuture.delayedExecutor(1_200, TimeUnit.MILLISECONDS));
+                CompletableFuture.delayedExecutor(prefersSpicetifyLyrics() && spicetifyConnected()
+                        ? 1_800 : 250, TimeUnit.MILLISECONDS));
     }
 
     private void beginNetworkLookup(PlaybackSnapshot value, String key, String spotifyId) {
         if (!stillNeedsFallback(key)) return;
-        lyricsStatus = "Finding lyrics...";
+        lyricsStatus = "Searching AMLL...";
         if (spotifyId == null) {
             searchByMetadata(value, key, null);
             return;
@@ -204,15 +220,11 @@ public final class MusicService implements AutoCloseable {
         lyricsClient.search(value.title(), value.artist(), value.album(), spotifyId).thenAccept(matches -> {
             if (!stillNeedsFallback(key)) return;
             candidates = matches;
-            if (isConfident(matches)) loadCandidate(matches.getFirst(), value, key, true);
-            else fallbackToLineLyrics(value, key, matches);
+            // AMLL is the primary web catalogue. A valid top match is consumed before
+            // Better Lyrics or LRCLIB, even when several community revisions exist.
+            if (!matches.isEmpty()) loadCandidate(matches.getFirst(), value, key, true);
+            else fallbackToBetterLyrics(value, key);
         });
-    }
-
-    private static boolean isConfident(List<AmllLyricsClient.LyricsCandidate> matches) {
-        if (matches.isEmpty() || matches.getFirst().score() < .72) return false;
-        return matches.size() == 1 || matches.getFirst().score() - matches.get(1).score() >= .025
-                || matches.getFirst().score() >= .90;
     }
 
     private static boolean isSpotifyDjSpeaking(PlaybackSnapshot value) {
@@ -266,6 +278,14 @@ public final class MusicService implements AutoCloseable {
         return MediaBridgeConnector.startupError(connector);
     }
     public String lyricsStatus() { return lyricsStatus; }
+    public String lyricsProvider() {
+        return overlay.document().lines().isEmpty() ? "" : overlay.document().metadata().provider();
+    }
+    public String lyricsStatusDetail() {
+        String provider = lyricsProvider();
+        return "Lyrics ready".equals(lyricsStatus) && !provider.isBlank()
+                ? lyricsStatus + " — " + provider : lyricsStatus;
+    }
     public boolean drawArtwork(DrawContext context, int x, int y, int width, int height) {
         overlay.setArtworkAccent(artwork.accentColor());
         return artwork.draw(context, x, y, width, height);
@@ -304,6 +324,7 @@ public final class MusicService implements AutoCloseable {
     public String artworkStatus() { return artwork.status(); }
     public void retryLyrics() {
         PlaybackSnapshot current = snapshot();
+        lookupTrackKey = null;
         lookupKey = null;
         update(current);
     }
@@ -330,16 +351,29 @@ public final class MusicService implements AutoCloseable {
         lyricsClient.load(selected).thenAccept(document -> {
             if (key != null && stillNeedsFallback(key)) {
                 if (document.isPresent()) applyAmll(document.get(), key);
-                else if (fallback) fallbackToLineLyrics(value, key, List.of());
+                else if (fallback) fallbackToBetterLyrics(value, key);
                 else markUnavailable("AMLL match could not be read");
             }
         });
     }
 
-    private void fallbackToLineLyrics(PlaybackSnapshot value, String key,
-                                      List<AmllLyricsClient.LyricsCandidate> deferredAmll) {
+    private void fallbackToBetterLyrics(PlaybackSnapshot value, String key) {
         if (!stillNeedsFallback(key)) return;
-        lyricsStatus = "Finding lyrics...";
+        lyricsStatus = "Searching Better Lyrics...";
+        betterLyricsClient.find(value.title(), value.artist(), value.album(), value.durationMillis())
+                .thenAccept(result -> {
+                    if (!stillNeedsFallback(key)) return;
+                    if (result.isPresent()) applyBetterLyrics(result.get(), value, key);
+                    else fallbackToLineLyrics(value, key);
+                }).exceptionally(error -> {
+                    if (stillNeedsFallback(key)) fallbackToLineLyrics(value, key);
+                    return null;
+                });
+    }
+
+    private void fallbackToLineLyrics(PlaybackSnapshot value, String key) {
+        if (!stillNeedsFallback(key)) return;
+        lyricsStatus = "Searching LRCLIB...";
         lineLyricsClient.find(value.title(), value.artist(), value.album(), value.durationMillis())
                 .thenAccept(result -> {
                     if (!stillNeedsFallback(key)) return;
@@ -354,22 +388,37 @@ public final class MusicService implements AutoCloseable {
                                 found.wordSynced() ? LyricsSyncMode.WORD : LyricsSyncMode.LINE,
                                 previous.trackKey(), previous.title(), previous.artist(), previous.album(),
                                 previous.songwriters()));
+                        if (!stillNeedsFallback(key)) return;
                         overlay.setLyrics(labelled, "LYRICS");
                         FanDroidMod.LOGGER.info("Loaded {} lyrics from LRCLIB for '{}'", precision, value.title());
-                    } else if (!deferredAmll.isEmpty()) {
-                        // AMLL occasionally has several equivalent community revisions. If LRCLIB
-                        // has no result, use the highest-scoring one instead of blocking the player.
-                        loadCandidate(deferredAmll.getFirst(), value, key, false);
                     } else {
-                        markUnavailable("No synced lyrics in AMLL or LRCLIB");
+                        markUnavailable("No synced lyrics in AMLL, Better Lyrics or LRCLIB");
                     }
                 }).exceptionally(error -> {
                     if (stillNeedsFallback(key)) {
-                        if (!deferredAmll.isEmpty()) loadCandidate(deferredAmll.getFirst(), value, key, false);
-                        else markUnavailable("Lyrics lookup failed - check connection");
+                        markUnavailable("Lyrics lookup failed - check connection");
                     }
                     return null;
                 });
+    }
+
+    private void applyBetterLyrics(BetterLyricsClient.LyricsResult found,
+                                   PlaybackSnapshot value, String key) {
+        if (!stillNeedsFallback(key)) return;
+        LyricsDocument document = found.document();
+        boolean wordSynced = hasWordTiming(document);
+        LyricsMetadata previous = document.metadata();
+        LyricsDocument labelled = document.withMetadata(new LyricsMetadata(
+                LyricsSource.BETTER_LYRICS,
+                wordSynced ? LyricsSyncMode.WORD : LyricsSyncMode.LINE,
+                previous.trackKey(), value.title(), value.artist(), value.album(),
+                previous.songwriters()));
+        if (!stillNeedsFallback(key)) return;
+        lyricsStatus = "Lyrics ready";
+        candidates = List.of();
+        overlay.setLyrics(labelled, "LYRICS");
+        FanDroidMod.LOGGER.info("Loaded {} lyrics from Better Lyrics for '{}' (score {})",
+                wordSynced ? "WORD SYNC" : "LINE SYNC", value.title(), found.score());
     }
 
     private void applyAmll(LyricsDocument document, String key) {
@@ -382,6 +431,7 @@ public final class MusicService implements AutoCloseable {
                 wordSynced ? LyricsSyncMode.WORD : LyricsSyncMode.LINE,
                 document.metadata().trackKey(), document.metadata().title(), document.metadata().artist(),
                 document.metadata().album(), document.metadata().songwriters());
+        if (!stillNeedsFallback(key)) return;
         overlay.setLyrics(document.withMetadata(metadata), "LYRICS");
         FanDroidMod.LOGGER.info("Loaded {} lyrics from AMLL ({} lines)", precision, document.lines().size());
     }
@@ -399,11 +449,17 @@ public final class MusicService implements AutoCloseable {
     }
 
     private void acceptSpicyLyrics(SpicetifyLyricsPayload payload) {
+        if (!prefersSpicetifyLyrics()) return;
         PlaybackSnapshot current = snapshot();
         String key = lookupKey;
         if (key == null || current.spotifyUri() == null || !current.spotifyUri().equals(payload.uri())) return;
         if (key.equals(importsPendingKey) || key.equals(importedLyricsKey)) return;
         CompletableFuture.runAsync(() -> parseAndApplySpicy(payload, key, true));
+    }
+
+    private boolean prefersSpicetifyLyrics() {
+        MusicSource selected = preferences.getMusicSource();
+        return selected == MusicSource.AUTOMATIC || selected == MusicSource.SPICETIFY_BRIDGE;
     }
 
     private void loadCachedSpicy(String uri, String key, String trackId) {

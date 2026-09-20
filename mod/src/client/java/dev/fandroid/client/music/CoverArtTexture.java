@@ -263,19 +263,19 @@ public final class CoverArtTexture implements AutoCloseable {
             return true;
         }
         PlatformTextures.draw(context, rounded.id(), x, y, width, height,
-                0, 0, rounded.width(), rounded.height(),
-                rounded.width(), rounded.height(), opacity, brightness);
+                0, 0, rounded.textureWidth(), rounded.textureHeight(),
+                rounded.textureWidth(), rounded.textureHeight(), opacity, brightness);
         return true;
     }
 
     private RoundedCover roundedCover(TextureState state, int width, int height, int radius) {
         boolean current = state == texture;
         RoundedCover cached = current ? roundedCurrent : roundedPrevious;
-        if (cached != null && cached.state() == state && cached.width() == width
-                && cached.height() == height && cached.radius() == radius) {
+        double guiScale = PlatformTextures.guiScale();
+        if (cached != null && cached.matches(state, width, height, radius, guiScale)) {
             return cached;
         }
-        RoundedCover built = RoundedCover.build(state, width, height, radius);
+        RoundedCover built = RoundedCover.build(state, width, height, radius, guiScale);
         if (built == null) return cached;
         if (current) {
             if (roundedCurrent != null) roundedCurrent.close();
@@ -717,18 +717,35 @@ public final class CoverArtTexture implements AutoCloseable {
         }
     }
 
-    /** Bakes the cover art at draw size with per-pixel signed-distance rounding, exactly
-     *  like the fluid composite, so rounded covers never depend on GUI blend batching. */
-    private record RoundedCover(TextureState state, int width, int height, int radius,
+    static int roundedCompositeSize(int logicalSize, double guiScale, int maximum) {
+        return Math.clamp((int) Math.ceil(Math.max(1, logicalSize) * Math.max(1.0, guiScale)),
+                1, Math.max(1, maximum));
+    }
+
+    static int roundedCompositeRadius(int logicalRadius, double guiScale) {
+        return Math.max(0, (int) Math.round(logicalRadius * Math.max(1.0, guiScale)));
+    }
+
+    /** Bakes the cover at physical GUI resolution with per-pixel signed-distance rounding,
+     *  so rounded covers retain the source detail at every GUI scale and render-mod setup. */
+    private record RoundedCover(TextureState state, int drawWidth, int drawHeight, int drawRadius,
+                                double guiScale, int textureWidth, int textureHeight, int textureRadius,
                                 NativeImageBackedTexture texture, Identifier id)
             implements AutoCloseable {
         private static final int MAX_COMPOSITE = 1024;
 
-        static RoundedCover build(TextureState state, int width, int height, int radius) {
+        boolean matches(TextureState state, int width, int height, int radius, double guiScale) {
+            return this.state == state && drawWidth == width && drawHeight == height
+                    && drawRadius == radius && Double.compare(this.guiScale, guiScale) == 0;
+        }
+
+        static RoundedCover build(TextureState state, int width, int height, int radius,
+                                  double guiScale) {
             NativeImage source = state.image();
             if (source == null || width <= 0 || height <= 0) return null;
-            int outputWidth = Math.clamp(width, 1, MAX_COMPOSITE);
-            int outputHeight = Math.clamp(height, 1, MAX_COMPOSITE);
+            double safeGuiScale = Math.max(1.0, guiScale);
+            int outputWidth = roundedCompositeSize(width, safeGuiScale, MAX_COMPOSITE);
+            int outputHeight = roundedCompositeSize(height, safeGuiScale, MAX_COMPOSITE);
             int sourceWidth = state.width();
             int sourceHeight = state.height();
             double targetRatio = outputWidth / (double) outputHeight;
@@ -757,7 +774,8 @@ public final class CoverArtTexture implements AutoCloseable {
             double scaleY = cropHeight / (double) outputHeight;
             double halfW = outputWidth / 2.0;
             double halfH = outputHeight / 2.0;
-            int safeRadius = Math.max(0, Math.min(radius, Math.min(outputWidth, outputHeight) / 2));
+            int safeRadius = Math.max(0, Math.min(roundedCompositeRadius(radius, safeGuiScale),
+                    Math.min(outputWidth, outputHeight) / 2));
             for (int py = 0; py < outputHeight; py++) {
                 double fy = cropY + (py + .5) * scaleY - .5;
                 int y0 = Math.clamp((int) Math.floor(fy), 0, sourceHeight - 1);
@@ -792,7 +810,8 @@ public final class CoverArtTexture implements AutoCloseable {
                 }
             }
             texture.upload();
-            return new RoundedCover(state, outputWidth, outputHeight, safeRadius, texture, id);
+            return new RoundedCover(state, width, height, radius, safeGuiScale,
+                    outputWidth, outputHeight, safeRadius, texture, id);
         }
 
         private static double bilinear(double a, double b, double c, double d,
@@ -816,8 +835,7 @@ public final class CoverArtTexture implements AutoCloseable {
         private static final long FRAME_NANOS = 33_333_333L;
         private static final double MAX_HUE_SHIFT = 80.0;
         private static final double AUTO_HUE_RATE = 150.0;
-        private NativeImageBackedTexture texture;
-        private Identifier id;
+        private NativeImage fieldImage;
         private NativeImageBackedTexture composite;
         private Identifier compositeId;
         private int compositeWidth;
@@ -830,6 +848,13 @@ public final class CoverArtTexture implements AutoCloseable {
         private final double[] centersY = new double[6];
         private final double[] radiiX = new double[6];
         private final double[] radiiY = new double[6];
+        private final double[] radiusXSquared = new double[6];
+        private final double[] radiusYSquared = new double[6];
+        private final double[] lobeXSquared = new double[6];
+        private final double[] lobeYSquared = new double[6];
+        private final double[] lobeOffsetX = new double[6];
+        private final double[] lobeOffsetY = new double[6];
+        private BackdropSamplingPlan samplingPlan;
         private int animatedColors;
         private boolean initialized;
         private double motionTime;
@@ -839,23 +864,9 @@ public final class CoverArtTexture implements AutoCloseable {
 
         private void draw(DrawContext context, int x, int y, int width, int height, int[] palette,
                           double speedMultiplier, double opacity, int cornerRadius,
-                          BackdropFx fx) {
+            BackdropFx fx) {
             ensureField();
             long now = System.nanoTime();
-            double delta = lastMotionFrame == 0 ? .016
-                    : Math.clamp((now - lastMotionFrame) / 1_000_000_000.0, .001, .25);
-            if (fx.hueAuto()) {
-                hueShift = (hueShift + Math.clamp(fx.huePulse(), 0, 1) * AUTO_HUE_RATE * delta) % 360;
-            } else {
-                double targetHue = Math.clamp(fx.huePulse(), 0, 1) * MAX_HUE_SHIFT;
-                hueShift += (targetHue - hueShift) * (1 - Math.exp(-delta * 5));
-            }
-            // Fast attack on each beat, slow release so the glow lingers after it.
-            double targetGlow = Math.clamp(fx.bloomPulse(), 0, 3);
-            double response = targetGlow > bloomGlow
-                    ? 1 - Math.exp(-delta * 6)
-                    : 1 - Math.exp(-delta * 1.4);
-            bloomGlow += (targetGlow - bloomGlow) * response;
             boolean animate = lastFrame == 0 || now - lastFrame >= FRAME_NANOS
                     || width != compositeWidth || height != compositeHeight;
             if (animate) {
@@ -872,9 +883,10 @@ public final class CoverArtTexture implements AutoCloseable {
         }
 
         private void ensureField() {
-            if (texture != null) return;
-            texture = PlatformTextures.empty("FanDroid fluid backdrop", SIZE, SIZE);
-            id = PlatformTextures.register("fandroid_fluid_backdrop", texture);
+            if (fieldImage != null) return;
+            // The 96 px field is a CPU-only source for the display-size composite. Registering
+            // and uploading it as a second GPU texture performed work that was never sampled.
+            fieldImage = new NativeImage(SIZE, SIZE, true);
         }
 
         private void resizeComposite(int width, int height) {
@@ -893,31 +905,31 @@ public final class CoverArtTexture implements AutoCloseable {
             this.compositeWidth = compositeWidth;
             this.compositeHeight = compositeHeight;
             this.compositeRadius = -1;
+            this.samplingPlan = null;
         }
 
         /** Upscales the 96px field to display resolution and clips it with the popup's
          *  signed-distance rounding (same SDF as the border), so corners stay crisp. */
         private void compositeField(int width, int height, int cornerRadius) {
-            NativeImage source = texture.getImage();
+            NativeImage source = fieldImage;
             NativeImage target = composite.getImage();
             if (source == null || target == null) return;
             int outputWidth = compositeWidth;
             int outputHeight = compositeHeight;
-            double scaleX = (SIZE - 1) / (double) Math.max(1, outputWidth - 1);
-            double scaleY = (SIZE - 1) / (double) Math.max(1, outputHeight - 1);
-            double halfW = outputWidth / 2.0;
-            double halfH = outputHeight / 2.0;
             int radius = cornerRadius;
+            BackdropSamplingPlan plan = samplingPlan;
+            if (plan == null || !plan.matches(outputWidth, outputHeight, radius)) {
+                plan = new BackdropSamplingPlan(outputWidth, outputHeight, radius, SIZE);
+                samplingPlan = plan;
+            }
             for (int py = 0; py < outputHeight; py++) {
-                double fy = Math.clamp((py * scaleY), 0, SIZE - 1);
-                int y0 = Math.min(SIZE - 2, (int) Math.floor(fy));
-                double ty = fy - y0;
-                int y1 = y0 + 1;
+                int y0 = plan.y0[py];
+                int y1 = plan.y1[py];
+                double ty = plan.ty[py];
                 for (int px = 0; px < outputWidth; px++) {
-                    double fx = Math.clamp((px * scaleX), 0, SIZE - 1);
-                    int x0 = Math.min(SIZE - 2, (int) Math.floor(fx));
-                    double tx = fx - x0;
-                    int x1 = x0 + 1;
+                    int x0 = plan.x0[px];
+                    int x1 = plan.x1[px];
+                    double tx = plan.tx[px];
                     int c00 = PlatformTextures.colorArgb(source, x0, y0);
                     int c10 = PlatformTextures.colorArgb(source, x1, y0);
                     int c01 = PlatformTextures.colorArgb(source, x0, y1);
@@ -927,15 +939,7 @@ public final class CoverArtTexture implements AutoCloseable {
                     double g = bilinear(c00 >>> 8 & 255, c10 >>> 8 & 255,
                             c01 >>> 8 & 255, c11 >>> 8 & 255, tx, ty);
                     double b = bilinear(c00 & 255, c10 & 255, c01 & 255, c11 & 255, tx, ty);
-                    int alpha = 255;
-                    if (radius > 0) {
-                        double qx = Math.abs(px + .5 - halfW) - Math.max(0, halfW - radius);
-                        double qy = Math.abs(py + .5 - halfH) - Math.max(0, halfH - radius);
-                        double outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
-                        double distance = outside + Math.min(Math.max(qx, qy), 0) - radius;
-                        alpha = Math.clamp((int) Math.round(
-                                Math.clamp(.5 - distance, 0, 1) * 255), 0, 255);
-                    }
+                    int alpha = plan.alpha[py * outputWidth + px];
                     target.setColor(px, py,
                             alpha << 24 | (int) Math.round(b) << 16
                                     | (int) Math.round(g) << 8 | (int) Math.round(r));
@@ -954,11 +958,25 @@ public final class CoverArtTexture implements AutoCloseable {
 
         private void updateField(int[] palette, long now, double speedMultiplier, double aspect,
                             BackdropFx fx) {
-            NativeImage image = texture.getImage();
+            NativeImage image = fieldImage;
             if (image == null) return;
-            double delta = lastMotionFrame == 0 ? .08
+            boolean firstMotionFrame = lastMotionFrame == 0;
+            double delta = firstMotionFrame ? .08
                     : Math.clamp((now - lastMotionFrame) / 1_000_000_000.0, .01, .25);
             lastMotionFrame = now;
+            double effectDelta = firstMotionFrame ? .016 : delta;
+            if (fx.hueAuto()) {
+                hueShift = (hueShift + Math.clamp(fx.huePulse(), 0, 1) * AUTO_HUE_RATE * effectDelta) % 360;
+            } else {
+                double targetHue = Math.clamp(fx.huePulse(), 0, 1) * MAX_HUE_SHIFT;
+                hueShift += (targetHue - hueShift) * (1 - Math.exp(-effectDelta * 5));
+            }
+            // Fast attack on each beat, slow release so the glow lingers after it.
+            double targetGlow = Math.clamp(fx.bloomPulse(), 0, 3);
+            double response = targetGlow > bloomGlow
+                    ? 1 - Math.exp(-effectDelta * 6)
+                    : 1 - Math.exp(-effectDelta * 1.4);
+            bloomGlow += (targetGlow - bloomGlow) * response;
             motionTime += delta * speedMultiplier;
             int colorCount = Math.clamp(palette.length, 1, 6);
             boolean neutralPalette = isNeutralPalette(palette);
@@ -1001,6 +1019,12 @@ public final class CoverArtTexture implements AutoCloseable {
                         + .085 * Math.sin(time * (.58 + index * .052) + index * 1.29);
                 radiiY[index] = (index == 0 ? .55 : .32 + (index % 2) * .055)
                         + .096 * Math.cos(time * (.49 + index * .061) + index * 1.53);
+                radiusXSquared[index] = radiiX[index] * radiiX[index];
+                radiusYSquared[index] = radiiY[index] * radiiY[index];
+                lobeXSquared[index] = radiusXSquared[index] * .68;
+                lobeYSquared[index] = radiusYSquared[index] * .66;
+                lobeOffsetX[index] = .16 * Math.sin(time * (.88 + index * .047) + index * 1.93);
+                lobeOffsetY[index] = .18 * Math.cos(time * (.74 + index * .039) + index * 1.47);
             }
             int baseColor = tint(rotateHue(backdropBaseColor(palette), hueShift), tintColor, tintMix);
             double baseRed = baseColor >>> 16 & 255;
@@ -1029,13 +1053,12 @@ public final class CoverArtTexture implements AutoCloseable {
                     for (int index = 0; index < colorCount; index++) {
                         double dx = (warpedU - centersX[index]) * aspect;
                         double dy = warpedV - centersY[index];
-                        double rx = radiiX[index];
-                        double ry = radiiY[index];
-                        double mainField = Math.exp(-1.92 * (dx * dx / (rx * rx) + dy * dy / (ry * ry)));
-                        double lobeX = dx + .16 * Math.sin(time * (.88 + index * .047) + index * 1.93);
-                        double lobeY = dy - .18 * Math.cos(time * (.74 + index * .039) + index * 1.47);
-                        double lobeField = .78 * Math.exp(-2.48 * (lobeX * lobeX / (rx * rx * .68)
-                                + lobeY * lobeY / (ry * ry * .66)));
+                        double mainField = Math.exp(-1.92 * (dx * dx / radiusXSquared[index]
+                                + dy * dy / radiusYSquared[index]));
+                        double lobeX = dx + lobeOffsetX[index];
+                        double lobeY = dy - lobeOffsetY[index];
+                        double lobeField = .78 * Math.exp(-2.48 * (lobeX * lobeX / lobeXSquared[index]
+                                + lobeY * lobeY / lobeYSquared[index]));
                         double ripple = .10 * Math.sin((dx * 5.2 - dy * 4.4) * Math.PI
                                 + time * (1.35 + index * .11));
                         double field = Math.clamp(mainField + lobeField + ripple * mainField, 0, 1.48);
@@ -1061,7 +1084,6 @@ public final class CoverArtTexture implements AutoCloseable {
                     image.setColor(px, py, 255 << 24 | b << 16 | g << 8 | r);
                 }
             }
-            texture.upload();
             lastFrame = now;
         }
 
@@ -1075,17 +1097,17 @@ public final class CoverArtTexture implements AutoCloseable {
 
         @Override
         public void close() {
-            if (id != null) MinecraftClient.getInstance().getTextureManager().destroyTexture(id);
+            if (fieldImage != null) fieldImage.close();
             if (compositeId != null) {
                 MinecraftClient.getInstance().getTextureManager().destroyTexture(compositeId);
             }
-            texture = null;
-            id = null;
+            fieldImage = null;
             composite = null;
             compositeId = null;
             compositeWidth = 0;
             compositeHeight = 0;
             compositeRadius = -1;
+            samplingPlan = null;
             initialized = false;
             animatedColors = 0;
             lastFrame = 0;
@@ -1094,6 +1116,78 @@ public final class CoverArtTexture implements AutoCloseable {
             hueShift = 0;
             bloomGlow = 0;
             centroidSmooth = .5;
+        }
+    }
+
+    /** Immutable sampling geometry reused while the backdrop size and radius stay unchanged. */
+    static final class BackdropSamplingPlan {
+        private final int width;
+        private final int height;
+        private final int radius;
+        private final int[] x0;
+        private final int[] x1;
+        private final double[] tx;
+        private final int[] y0;
+        private final int[] y1;
+        private final double[] ty;
+        private final int[] alpha;
+
+        BackdropSamplingPlan(int width, int height, int radius, int sourceSize) {
+            this.width = Math.max(1, width);
+            this.height = Math.max(1, height);
+            this.radius = Math.max(0, radius);
+            int safeSourceSize = Math.max(2, sourceSize);
+            x0 = new int[this.width];
+            x1 = new int[this.width];
+            tx = new double[this.width];
+            y0 = new int[this.height];
+            y1 = new int[this.height];
+            ty = new double[this.height];
+            alpha = new int[this.width * this.height];
+            fillAxis(x0, x1, tx, safeSourceSize);
+            fillAxis(y0, y1, ty, safeSourceSize);
+            double halfWidth = this.width / 2.0;
+            double halfHeight = this.height / 2.0;
+            for (int y = 0; y < this.height; y++) {
+                for (int x = 0; x < this.width; x++) {
+                    int value = 255;
+                    if (this.radius > 0) {
+                        double distance = roundedRectDistance(x + .5, y + .5,
+                                halfWidth, halfHeight, this.radius);
+                        value = Math.clamp((int) Math.round(
+                                Math.clamp(.5 - distance, 0, 1) * 255), 0, 255);
+                    }
+                    alpha[y * this.width + x] = value;
+                }
+            }
+        }
+
+        boolean matches(int width, int height, int radius) {
+            return this.width == width && this.height == height && this.radius == radius;
+        }
+
+        int alpha(int x, int y) { return alpha[y * width + x]; }
+        int sourceX(int x) { return x0[x]; }
+        int sourceY(int y) { return y0[y]; }
+        double fractionX(int x) { return tx[x]; }
+        double fractionY(int y) { return ty[y]; }
+
+        private static void fillAxis(int[] lower, int[] upper, double[] fraction, int sourceSize) {
+            double scale = (sourceSize - 1) / (double) Math.max(1, lower.length - 1);
+            for (int index = 0; index < lower.length; index++) {
+                double sample = Math.clamp(index * scale, 0, sourceSize - 1);
+                lower[index] = Math.min(sourceSize - 2, (int) Math.floor(sample));
+                upper[index] = lower[index] + 1;
+                fraction[index] = sample - lower[index];
+            }
+        }
+
+        private static double roundedRectDistance(double x, double y, double halfWidth,
+                                                  double halfHeight, double radius) {
+            double qx = Math.abs(x - halfWidth) - Math.max(0, halfWidth - radius);
+            double qy = Math.abs(y - halfHeight) - Math.max(0, halfHeight - radius);
+            double outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
+            return outside + Math.min(Math.max(qx, qy), 0) - radius;
         }
     }
 }

@@ -11,7 +11,7 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
 
 /** Vanilla OAuth setup screen. Client secret is deliberately never requested or stored. */
-public final class SpotifyAccountScreen extends Screen {
+public final class SpotifyAccountScreen extends FanDroidScreenBase {
     private final Screen parent;
     private final ClientPreferences preferences;
     private final MusicService music;
@@ -77,8 +77,7 @@ public final class SpotifyAccountScreen extends Screen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        renderBackground(context, mouseX, mouseY, delta);
-        super.render(context, mouseX, mouseY, delta);
+        renderVanillaScreen(context, mouseX, mouseY, delta);
         drawCentered(context, title, height / 2 - 92, 0xFFFFFFFF);
         drawCentered(context, Text.translatable("config.fandroid.spotify.hint"),
                 height / 2 - 72, 0xFFB7B7B7);

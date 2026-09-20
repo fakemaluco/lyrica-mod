@@ -25,7 +25,9 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 public final class AmllLyricsClient {
+    private static final String API_ROOT = "https://api.amll.dev/v1/lyrics/";
     private static final String RAW_ROOT = "https://raw.githubusercontent.com/amll-dev/amll-ttml-db/main/";
+    private static final int MAX_API_BYTES = 5 * 1024 * 1024;
     private static final long INDEX_RECHECK_MILLIS = Duration.ofHours(6).toMillis();
     private static final int MAX_INDEX_BYTES = 16 * 1024 * 1024;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
@@ -36,8 +38,8 @@ public final class AmllLyricsClient {
     public CompletableFuture<Optional<LyricsDocument>> bySpotifyUri(String uri) {
         String trackId = spotifyTrackId(uri);
         if (trackId == null) return CompletableFuture.completedFuture(Optional.empty());
-        return CompletableFuture.supplyAsync(() -> downloadAndParse(
-                "spotify-lyrics/" + trackId + ".ttml", cache.resolve(trackId + ".ttml")));
+        return CompletableFuture.supplyAsync(() -> getFromApi("spotifyId=" + encode(trackId),
+                cache.resolve("api-spotify-" + trackId + ".ttml")));
     }
 
     public CompletableFuture<List<LyricsCandidate>> search(String title, String artist, String album) {
@@ -49,57 +51,109 @@ public final class AmllLyricsClient {
     }
 
     private List<LyricsCandidate> searchBlocking(String title, String artist, String album, String spotifyId) {
+        List<LyricsCandidate> official = searchApi(title, artist, album, spotifyId);
+        if (!official.isEmpty()) return official;
+        // Do not download the legacy multi-megabyte GitHub index here. A miss must
+        // advance immediately to Better Lyrics instead of looking frozen for tens
+        // of seconds. Existing raw-path candidates remain loadable for compatibility.
+        return List.of();
+    }
+
+    public CompletableFuture<Optional<LyricsDocument>> load(LyricsCandidate candidate) {
+        if (candidate.path().startsWith("api:")) {
+            String id = candidate.path().substring("api:".length());
+            return CompletableFuture.supplyAsync(() -> getFromApi("id=" + encode(id),
+                    cache.resolve("api-id-" + id + ".ttml")));
+        }
+        String safeName = Integer.toHexString(candidate.path().hashCode()) + ".ttml";
+        return CompletableFuture.supplyAsync(() -> downloadAndParse(candidate.path(), cache.resolve(safeName)));
+    }
+
+    private List<LyricsCandidate> searchApi(String title, String artist, String album, String spotifyId) {
         try {
-            Path index = cache.resolve("raw-lyrics-index.jsonl");
-            Path etag = cache.resolve("raw-lyrics-index.etag");
-            Files.createDirectories(cache);
-            if (!ensureIndex(index, etag)) return List.of();
-
-            Map<String, LyricsCandidate> deduplicated = new HashMap<>();
-            try (var reader = Files.newBufferedReader(index, StandardCharsets.UTF_8)) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (line.isBlank()) continue;
-                    try {
-                        JsonNode value = ProtocolCodec.mapper().readTree(line);
-                        String candidateTitle = firstNonBlank(metadata(value, "musicName"), text(value, "name", "title", "trackName"));
-                        String candidateArtist = firstNonBlank(metadata(value, "artists"), text(value, "artists", "artist", "artistName"));
-                        String candidateAlbum = firstNonBlank(metadata(value, "album"), text(value, "album", "albumName"));
-                        String candidateSpotify = firstNonBlank(metadata(value, "spotifyId"),
-                                text(value, "spotifyId", "spotify_id", "spotifyTrackId"));
-                        String path = firstNonBlank(text(value, "path", "ttml", "file"),
-                                value.path("rawLyricFile").isTextual() ? "raw-lyrics/" + value.path("rawLyricFile").asText() : null);
-                        if (path == null && candidateSpotify != null) path = "spotify-lyrics/" + candidateSpotify + ".ttml";
-                        if (!safeLyricsPath(path) || candidateTitle == null) continue;
-
-                        boolean exactSpotify = spotifyId != null && candidateSpotify != null
-                                && List.of(candidateSpotify.split("\\s*,\\s*")).contains(spotifyId);
-                        double score = exactSpotify ? 1.0 : LyricsMatchScorer.score(title, artist, album,
-                                candidateTitle, candidateArtist, candidateAlbum);
-                        if (score < .62) continue;
-                        LyricsCandidate candidate = new LyricsCandidate(candidateTitle,
-                                firstNonBlank(candidateArtist, "Unknown artist"), firstNonBlank(candidateAlbum, ""), path, score);
-                        String key = exactSpotify ? "spotify:" + spotifyId
-                                : LyricsMatchScorer.canonicalKey(candidateTitle, candidateArtist, candidateAlbum);
-                        deduplicated.merge(key, candidate, AmllLyricsClient::preferCandidate);
-                    } catch (Exception ignored) {
-                        // A malformed third-party index row must not discard all other matches.
-                    }
-                }
-            }
-            return deduplicated.values().stream()
-                    .sorted(Comparator.comparingDouble(LyricsCandidate::score).reversed()
-                            .thenComparing(LyricsCandidate::path, Comparator.reverseOrder()))
-                    .limit(8)
-                    .toList();
-        } catch (Exception e) {
+            // The native AMLL search endpoint provides ranked metadata matches. Spotify IDs
+            // are handled by /get first; metadata search covers tracks without a DB platform ID.
+            String baseQuery = "musicName=" + encode(title) + "&pageSize=8";
+            if (artist != null && !artist.isBlank()) baseQuery += "&artistName=" + encode(artist);
+            // Album participates in local scoring but is intentionally not an AND
+            // filter: Spotify editions often use a different album name than AMLL.
+            List<LyricsCandidate> matches = searchApiRequest(baseQuery, title, artist, album, spotifyId);
+            String primaryArtist = primaryArtist(artist);
+            if (!matches.isEmpty() || primaryArtist.equals(artist)) return matches;
+            return searchApiRequest("musicName=" + encode(title) + "&pageSize=8&artistName="
+                    + encode(primaryArtist), title, artist, album, spotifyId);
+        } catch (Exception ignored) {
             return List.of();
         }
     }
 
-    public CompletableFuture<Optional<LyricsDocument>> load(LyricsCandidate candidate) {
-        String safeName = Integer.toHexString(candidate.path().hashCode()) + ".ttml";
-        return CompletableFuture.supplyAsync(() -> downloadAndParse(candidate.path(), cache.resolve(safeName)));
+    private List<LyricsCandidate> searchApiRequest(String query, String title, String artist,
+                                                   String album, String spotifyId) throws Exception {
+        HttpResponse<byte[]> response = apiGet("search?" + query);
+        if (response.statusCode() != 200) return List.of();
+        JsonNode items = ProtocolCodec.mapper().readTree(response.body()).path("data").path("items");
+        return candidatesFromApi(items, title, artist, album, spotifyId);
+    }
+
+    static List<LyricsCandidate> candidatesFromApi(JsonNode items, String title, String artist,
+                                                    String album, String spotifyId) {
+        if (!items.isArray()) return List.of();
+        List<LyricsCandidate> matches = new ArrayList<>();
+        try {
+            for (JsonNode item : items) {
+                String candidateTitle = firstArrayText(item.path("musicNames"));
+                String candidateArtist = joinArray(item.path("artistNames"));
+                String candidateAlbum = firstArrayText(item.path("albumNames"));
+                boolean exactSpotify = spotifyId != null && arrayContains(item.path("spotifyIds"), spotifyId);
+                double score = exactSpotify ? 1.0 : LyricsMatchScorer.score(title, artist, album,
+                        candidateTitle, candidateArtist, candidateAlbum);
+                if (score < .62 || !item.path("id").canConvertToLong()) continue;
+                matches.add(new LyricsCandidate(candidateTitle,
+                        firstNonBlank(candidateArtist, "Unknown artist"),
+                        firstNonBlank(candidateAlbum, ""), "api:" + item.path("id").asText(), score));
+            }
+            return matches.stream().sorted(Comparator.comparingDouble(LyricsCandidate::score).reversed())
+                    .limit(8).toList();
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private Optional<LyricsDocument> getFromApi(String query, Path target) {
+        try {
+            Files.createDirectories(cache);
+            HttpResponse<byte[]> response = apiGet("get?" + query);
+            if (response.statusCode() == 200) {
+                JsonNode root = ProtocolCodec.mapper().readTree(response.body());
+                String lyrics = root.path("data").path("lyrics").asText("");
+                if (!lyrics.isBlank()) {
+                    byte[] bytes = lyrics.getBytes(StandardCharsets.UTF_8);
+                    LyricsDocument document = parser.parse(bytes);
+                    if (!document.lines().isEmpty()) {
+                        writeAtomically(target, bytes);
+                        return Optional.of(document);
+                    }
+                }
+            }
+        } catch (Exception ignored) { }
+        try {
+            if (Files.isRegularFile(target)) {
+                LyricsDocument cached = parser.parse(Files.readAllBytes(target));
+                if (!cached.lines().isEmpty()) return Optional.of(cached);
+            }
+        } catch (Exception ignored) { }
+        return Optional.empty();
+    }
+
+    private HttpResponse<byte[]> apiGet(String relative) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(API_ROOT + relative))
+                .timeout(Duration.ofSeconds(8))
+                .header("Accept", "application/json")
+                .header("User-Agent", "FanDroid v0.1.0")
+                .GET().build();
+        HttpResponse<byte[]> response = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        if (response.body().length > MAX_API_BYTES) throw new IllegalArgumentException("AMLL response too large");
+        return response;
     }
 
     private synchronized boolean ensureIndex(Path index, Path etag) {
@@ -224,6 +278,34 @@ public final class AmllLyricsClient {
     private static String firstNonBlank(String... values) {
         for (String value : values) if (value != null && !value.isBlank()) return value;
         return null;
+    }
+
+    private static String encode(String value) {
+        return java.net.URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8)
+                .replace("+", "%20");
+    }
+
+    static String primaryArtist(String artist) {
+        if (artist == null) return "";
+        int separator = artist.indexOf(',');
+        return (separator < 0 ? artist : artist.substring(0, separator)).strip();
+    }
+
+    private static String firstArrayText(JsonNode values) {
+        return values.isArray() && !values.isEmpty() ? values.get(0).asText("") : "";
+    }
+
+    private static String joinArray(JsonNode values) {
+        if (!values.isArray()) return "";
+        List<String> result = new ArrayList<>();
+        values.forEach(value -> { if (value.isTextual() && !value.asText().isBlank()) result.add(value.asText()); });
+        return String.join(", ", result);
+    }
+
+    private static boolean arrayContains(JsonNode values, String expected) {
+        if (!values.isArray()) return false;
+        for (JsonNode value : values) if (expected.equals(value.asText())) return true;
+        return false;
     }
 
     public record LyricsCandidate(String title, String artist, String album, String path, double score) { }
