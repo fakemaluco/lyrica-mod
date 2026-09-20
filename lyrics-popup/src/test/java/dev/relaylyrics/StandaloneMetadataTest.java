@@ -21,7 +21,7 @@ final class StandaloneMetadataTest {
         try (InputStream stream = getClass().getResourceAsStream("/fabric.mod.json")) {
             assertThat(stream).isNotNull();
             JsonNode metadata = mapper.readTree(stream);
-            assertThat(metadata.path("id").asText()).isEqualTo("relaylyrics");
+            assertThat(metadata.path("id").asText()).isEqualTo("lyrica");
             assertThat(metadata.path("environment").asText()).isEqualTo("client");
             assertThat(metadata.path("entrypoints").has("client")).isTrue();
             assertThat(metadata.path("entrypoints").has("modmenu")).isTrue();

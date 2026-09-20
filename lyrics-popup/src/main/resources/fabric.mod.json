@@ -1,12 +1,13 @@
 {
   "schemaVersion": 1,
-  "id": "relaylyrics",
+  "id": "lyrica",
   "version": "${version}",
-  "name": "Relay Lyrics",
-  "description": "Standalone synchronized Spotify lyrics popup extracted from Relay.",
-  "authors": ["Relay contributors"],
+  "name": "Lyrica",
+  "icon": "icon.png",
+  "description": "Synchronized music lyrics for Minecraft.",
+  "authors": ["Lyrica contributors"],
   "contact": {
-    "sources": "https://github.com/fandroid/fandroid"
+    "sources": "https://github.com/fakemaluco/lyrica-mod"
   },
   "license": "AGPL-3.0-only",
   "environment": "client",

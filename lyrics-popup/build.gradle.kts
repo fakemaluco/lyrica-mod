@@ -9,7 +9,7 @@ java {
 }
 
 base {
-    archivesName.set("relaylyrics-1.21.1")
+    archivesName.set("lyrica-1.21.1")
 }
 group = "dev.relaylyrics"
 

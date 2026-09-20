@@ -8,7 +8,7 @@ java {
     withSourcesJar()
 }
 
-base { archivesName.set("relaylyrics-1.21.11") }
+base { archivesName.set("lyrica-1.21.11") }
 group = "dev.relaylyrics"
 
 val minecraftVersion = "1.21.11"
