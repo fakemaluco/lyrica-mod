@@ -24,17 +24,18 @@ class LyricsAnimationTest {
     void quickWordsLiftAsAWholeAndHeldWordsUsePerGlyphMotion() {
         assertThat(LyricsAnimation.usesPerGlyphMotion(1_399)).isFalse();
         assertThat(LyricsAnimation.usesPerGlyphMotion(1_400)).isTrue();
-        assertThat(LyricsAnimation.shortWordLift(500, .5)).isGreaterThan(1);
+        assertThat(LyricsAnimation.shortWordLift(500, .5)).isGreaterThan(.9);
         assertThat(LyricsAnimation.shortWordLift(500, 0)).isZero();
-        assertThat(LyricsAnimation.shortWordLift(500, 1)).isZero();
+        assertThat(LyricsAnimation.shortWordLift(500, 1)).isGreaterThan(1);
+        assertThat(LyricsAnimation.shortWordLift(500, 1.5)).isBetween(.4, .8);
+        assertThat(LyricsAnimation.shortWordLift(500, 2.1)).isZero();
         assertThat(LyricsAnimation.shortWordLift(2_000, .5)).isZero();
         assertThat(LyricsAnimation.shortWordLift(500, .10))
                 .isLessThan(LyricsAnimation.shortWordLift(500, .25));
         assertThat(LyricsAnimation.shortWordLift(500, .25))
                 .isLessThan(LyricsAnimation.shortWordLift(500, .5));
-        assertThat(LyricsAnimation.shortWordLift(500, .25))
-                .isCloseTo(LyricsAnimation.shortWordLift(500, .75),
-                        org.assertj.core.data.Offset.offset(.000001));
+        assertThat(LyricsAnimation.shortWordLift(500, .75))
+                .isEqualTo(LyricsAnimation.shortWordLift(500, 1));
     }
 
     @Test

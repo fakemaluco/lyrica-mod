@@ -106,7 +106,7 @@ public final class LyricsAnimation {
     public static double activeGlyphGlow(double motionGlow, long durationMillis,
                                          double wordProgress, double boundaryAmount) {
         if (!usesPerGlyphMotion(durationMillis) || wordProgress <= 0 || wordProgress >= 1) return 0;
-        double bed = activeWordGlow(durationMillis, wordProgress);
+        double bed = .70 + .15 * sustainedGlowStrength(durationMillis);
         double motion = Math.clamp(motionGlow, 0, 1);
         double boundary = Math.clamp(boundaryAmount, 0, 1) * .25;
         return Math.clamp((Math.max(bed, motion) + boundary) * activeGlowEnvelope(wordProgress), 0, 1);
@@ -115,8 +115,8 @@ public final class LyricsAnimation {
     /** Slow, derivative-free entrance and exit so the framebuffer halo never pops on or off. */
     public static double activeGlowEnvelope(double wordProgress) {
         if (wordProgress <= 0 || wordProgress >= 1) return 0;
-        double entrance = smoother(Math.clamp(wordProgress / .18, 0, 1));
-        double exit = smoother(Math.clamp((1 - wordProgress) / .24, 0, 1));
+        double entrance = smoother(Math.clamp(wordProgress / .20, 0, 1));
+        double exit = smoother(Math.clamp((1 - wordProgress) / .32, 0, 1));
         return entrance * exit;
     }
 
@@ -218,10 +218,16 @@ public final class LyricsAnimation {
 
     public static double shortWordLift(long durationMillis, double progress) {
         if (usesPerGlyphMotion(durationMillis)) return 0;
-        if (progress <= 0 || progress >= 1) return 0;
-        // A raised cosine moves the whole word as one block with zero velocity at
-        // both ends and a rounded apex instead of a hard enter/hold/leave corner.
-        return Math.sin(Math.PI * smoother(progress)) * 1.08;
+        if (progress <= 0) return 0;
+        double duration = Math.max(1, durationMillis);
+        double elapsed = progress * duration;
+        double enterMillis = Math.clamp(duration * .65, 180, 360);
+        if (elapsed < enterMillis) return smoother(elapsed / enterMillis) * 1.08;
+        // Stay elevated through the spoken interval, then settle while the next
+        // word may already be active instead of snapping down beforehand.
+        if (elapsed <= duration) return 1.08;
+        double exit = smoother((elapsed - duration) / 520.0);
+        return (1 - exit) * 1.08;
     }
 
     public static double wordEmphasis(double progress) {
