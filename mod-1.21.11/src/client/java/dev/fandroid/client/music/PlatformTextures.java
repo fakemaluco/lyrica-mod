@@ -1,22 +1,26 @@
 package dev.fandroid.client.music;
 
 import net.minecraft.client.MinecraftClient;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.FilterMode;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.NativeImageBackedTexture;
 import net.minecraft.util.Identifier;
 
+import java.util.function.Supplier;
+
 /** Minecraft 1.21.11 render-pipeline and GPU texture adapter. */
 public final class PlatformTextures {
     private PlatformTextures() { }
 
     static NativeImageBackedTexture fromImage(String name, NativeImage image) {
-        return new NativeImageBackedTexture(() -> name, image);
+        return new SmoothDynamicTexture(() -> name, image);
     }
 
     public static NativeImageBackedTexture empty(String name, int width, int height) {
-        return new NativeImageBackedTexture(name, width, height, false);
+        return new SmoothDynamicTexture(name, width, height);
     }
 
     /** Physical pixels represented by one logical GUI pixel. */
@@ -54,5 +58,23 @@ public final class PlatformTextures {
 
     static int colorArgb(NativeImage image, int x, int y) {
         return image.getColorArgb(x, y);
+    }
+
+    /**
+     * 1.21.11 defaults every NativeImageBackedTexture to a repeating nearest sampler.
+     * That is suitable for pixel atlases but tears the small rounded album composite
+     * when the inventory's Modern layout scales it. Covers and generated GUI surfaces
+     * need the same linear, edge-clamped sampling used by the 1.21.1 adapter.
+     */
+    private static final class SmoothDynamicTexture extends NativeImageBackedTexture {
+        private SmoothDynamicTexture(Supplier<String> name, NativeImage image) {
+            super(name, image);
+            sampler = RenderSystem.getSamplerCache().get(FilterMode.LINEAR);
+        }
+
+        private SmoothDynamicTexture(String name, int width, int height) {
+            super(name, width, height, false);
+            sampler = RenderSystem.getSamplerCache().get(FilterMode.LINEAR);
+        }
     }
 }
