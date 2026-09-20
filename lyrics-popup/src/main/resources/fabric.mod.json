@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "relaylyrics",
+  "version": "${version}",
+  "name": "Relay Lyrics",
+  "description": "Standalone synchronized Spotify lyrics popup extracted from Relay.",
+  "authors": ["Relay contributors"],
+  "contact": {
+    "sources": "https://github.com/fandroid/fandroid"
+  },
+  "license": "AGPL-3.0-only",
+  "environment": "client",
+  "mixins": ["relaylyrics.client.mixins.json"],
+  "entrypoints": {
+    "client": ["dev.relaylyrics.client.RelayLyricsClient"],
+    "modmenu": ["dev.relaylyrics.client.RelayLyricsModMenu"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "${minecraft_dependency}",
+    "java": ">=21",
+    "fabric-api": "${fabric_api_dependency}"
+  },
+  "suggests": {
+    "modmenu": "*",
+    "controlify": "*",
+    "minecraft-cursor": "*",
+    "cursors_extended": "*",
+    "mousetweaks": "*",
+    "emi": "*",
+    "roughlyenoughitems": "*",
+    "iris": "*",
+    "sodium": "*",
+    "immediatelyfast": "*",
+    "xaerominimap": "*",
+    "appleskin": "*"
+  },
+  "custom": {
+    "modmenu": {
+      "badges": ["client"]
+    }
+  }
+}

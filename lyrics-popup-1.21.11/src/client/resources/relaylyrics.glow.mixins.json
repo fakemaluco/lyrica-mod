@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "dev.relaylyrics.client.mixin.glow",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "DrawContextStateAccessor",
+    "SpecialGuiElementRendererAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

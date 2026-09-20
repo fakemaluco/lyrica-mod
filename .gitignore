@@ -1,0 +1,14 @@
+.gradle/
+build/
+**/build/
+.idea/
+*.iml
+run/
+*.db
+*.db-shm
+*.db-wal
+.env
+media-bridge/target/
+spicetify-extension/node_modules/
+spicetify-extension/dist/
+

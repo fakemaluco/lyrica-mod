@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "dev.relaylyrics.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "HandledScreenAccessor",
+    "InventoryMouseDragMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
