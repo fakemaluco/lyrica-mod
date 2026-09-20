@@ -14,6 +14,8 @@ import java.util.concurrent.CompletableFuture;
 /** Minimal client for the official Spicy Lyrics track endpoint. */
 public final class SpicyLyricsApiClient {
     private static final String API = "https://api.spicylyrics.org/v1/lyrics/";
+    private static final String DEFAULT_PUBLISHABLE_KEY =
+            "sl_pk_Ki5Z2YKN9BmEz70y5Pj7KWw0m_YIa5eFaWkBHrZeGVI";
     private static final int MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
@@ -89,7 +91,8 @@ public final class SpicyLyricsApiClient {
         if (publishable != null && !publishable.isBlank()) return validKey(publishable.strip());
         // Local development only. Secret keys must never be embedded in a distributed client.
         String secret = System.getenv("SPICY_LYRICS_SECRET_KEY");
-        return secret == null ? "" : validKey(secret.strip());
+        if (secret != null && !secret.isBlank()) return validKey(secret.strip());
+        return DEFAULT_PUBLISHABLE_KEY;
     }
 
     private static String validKey(String value) {

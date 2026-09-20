@@ -23,12 +23,10 @@ The mod adapts to the way you play. Customize when and how lyrics appear, keepin
 
 ## Spicy Lyrics
 
-O Lyrica usa somente a API oficial do Spicy Lyrics para buscas automáticas.
-Para usar a conta do Spotify sem a extensão do Spicetify, crie uma chave
-**publishable** (`sl_pk_...`) no painel do Spicy Lyrics, habilite acesso sem
-header de origem para cliente nativo e defina `SPICY_LYRICS_PUBLISHABLE_KEY`
-antes de iniciar o Minecraft. Para desenvolvimento local também é possível
-usar `-Dlyrica.spicyLyricsKey=...`.
+O Lyrica usa somente a API oficial do Spicy Lyrics para buscas automáticas e
+já inclui uma chave **publishable** de cliente. Desenvolvedores podem substituir
+essa chave com `SPICY_LYRICS_PUBLISHABLE_KEY` ou
+`-Dlyrica.spicyLyricsKey=...` sem alterar os fontes.
 
 Nunca coloque uma chave secreta (`sl_sk_...`) no código, no JAR ou em commits.
 
