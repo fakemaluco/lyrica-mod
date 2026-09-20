@@ -26,6 +26,7 @@ public final class SpicyLyricsParser {
         }
         try {
             JsonNode root = JSON.readTree(source);
+            if (root.path("Body").isObject()) root = root.path("Body");
             String type = text(root, "Type").toLowerCase(Locale.ROOT);
             JsonNode content = root.path("Content");
             if (!content.isArray() || content.isEmpty()) {
@@ -43,15 +44,18 @@ public final class SpicyLyricsParser {
             if (groups.isEmpty()) throw new IllegalArgumentException("Spicy Lyrics payload has no usable lines");
             groups = repairGroupEnds(groups);
             String providerCode = text(root, "source").toLowerCase(Locale.ROOT);
-            JsonNode upload = root.path("TTMLUploadMetadata");
+            JsonNode upload = root.path("UploadAttribution").isObject()
+                    ? root.path("UploadAttribution") : root.path("TTMLUploadMetadata");
             JsonNode maker = upload.path("Maker");
             JsonNode uploader = upload.path("Uploader");
             LyricsMetadata metadata = new LyricsMetadata(LyricsSource.SPICY_CACHE,
                     type.equals("syllable") ? LyricsSyncMode.WORD : LyricsSyncMode.LINE,
                     "", "", "", "", songwriters(root), providerLabel(providerCode),
-                    providerCode.equals("spl"), profileText(maker, "username", 160),
-                    profileText(maker, "avatar", 2_048), profileText(uploader, "username", 160),
-                    profileText(uploader, "avatar", 2_048));
+                    providerCode.equals("spl") || providerCode.equals("spicy_lyrics"),
+                    profileText(maker, 160, "username", "Username"),
+                    profileText(maker, 2_048, "avatar", "Avatar"),
+                    profileText(uploader, 160, "username", "Username"),
+                    profileText(uploader, 2_048, "avatar", "Avatar"));
             return new ParsedLyrics(new LyricsDocument(groups, metadata), type.equals("syllable"));
         } catch (IllegalArgumentException e) {
             throw e;
@@ -234,16 +238,16 @@ public final class SpicyLyricsParser {
 
     private static String providerLabel(String code) {
         return switch (code) {
-            case "spt" -> "Spotify";
-            case "aml" -> "Apple Music";
-            case "spl" -> "Spicy Lyrics";
+            case "spt", "spotify" -> "Spotify";
+            case "aml", "apple_music" -> "Apple Music";
+            case "spl", "spicy_lyrics" -> "Spicy Lyrics";
             case "ldb" -> "Local DB";
             default -> "Spicy Lyrics";
         };
     }
 
-    private static String profileText(JsonNode node, String field, int maximumLength) {
-        String value = text(node, field).strip();
+    private static String profileText(JsonNode node, int maximumLength, String... fields) {
+        String value = firstText(node, fields).strip();
         return value.length() <= maximumLength ? value : value.substring(0, maximumLength);
     }
 

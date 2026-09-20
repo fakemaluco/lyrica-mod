@@ -164,7 +164,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
         while (!closed) {
             try {
                 if (preferences.getMusicSource() == MusicSource.SPOTIFY_ACCOUNT && connected()) poll();
-                Thread.sleep(900);
+                Thread.sleep(500);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 return;

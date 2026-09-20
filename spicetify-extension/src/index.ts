@@ -704,7 +704,9 @@
     lastPlayerState = Spicetify.Player.data;
     Spicetify.Player.addEventListener("songchange", playerChanged);
     Spicetify.Player.addEventListener("onplaypause", playerChanged);
-    window.setInterval(sendSnapshot, 2_000);
+    // Keep Minecraft's interpolation anchored closely to Spotify without waiting
+    // for a multi-second correction window.
+    window.setInterval(sendSnapshot, 250);
     window.setInterval(() => void sendSpicyLyrics(), 3_000);
     document.addEventListener("visibilitychange", () => {
       sendSnapshot();

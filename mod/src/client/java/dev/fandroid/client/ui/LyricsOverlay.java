@@ -2158,7 +2158,7 @@ public final class LyricsOverlay implements AutoCloseable {
 
     private static String localizeEmptyMessage(String message) {
         if (message == null || message.equals("No synced lyrics found")) return ui("lyrics.fandroid.no_synced");
-        if (message.equals("No synced lyrics in AMLL or LRCLIB")) return ui("music.fandroid.status_not_found");
+        if (message.equals("No lyrics in Spicy Lyrics")) return ui("music.fandroid.status_not_found");
         if (message.equals("Spotify DJ is talking. Lyrics return with the next song.")) {
             return ui("lyrics.fandroid.dj_talking");
         }

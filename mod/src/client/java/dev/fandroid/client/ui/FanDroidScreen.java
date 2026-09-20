@@ -814,13 +814,11 @@ public final class FanDroidScreen extends FanDroidScreenBase {
             case "Start playback to find lyrics" -> tr("music.fandroid.status_start");
             case "Spotify DJ voice segment - no lyrics" -> tr("music.fandroid.status_dj");
             case "Finding lyrics..." -> tr("music.fandroid.status_finding");
-            case "Searching AMLL..." -> tr("music.fandroid.status_searching_amll");
-            case "Searching Better Lyrics..." -> tr("music.fandroid.status_searching_better");
-            case "Searching LRCLIB..." -> tr("music.fandroid.status_searching_lrclib");
+            case "Searching Spicy Lyrics..." -> tr("music.fandroid.status_searching_spicy");
             case "Choose an imported TTML match" -> tr("music.fandroid.status_choose_import");
             case "Loading lyrics..." -> tr("music.fandroid.status_loading");
             case "Lyrics ready" -> tr("music.fandroid.status_ready");
-            case "No synced lyrics in AMLL, Better Lyrics or LRCLIB" -> tr("music.fandroid.status_not_found");
+            case "No lyrics in Spicy Lyrics" -> tr("music.fandroid.status_not_found");
             default -> music.lyricsStatus();
         };
     }

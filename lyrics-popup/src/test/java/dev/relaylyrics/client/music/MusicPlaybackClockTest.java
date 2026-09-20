@@ -1,0 +1,45 @@
+package dev.relaylyrics.client.music;
+
+import dev.relaylyrics.protocol.music.MusicCapabilities;
+import dev.relaylyrics.protocol.music.PlaybackSnapshot;
+import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
+import java.util.concurrent.atomic.AtomicLong;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class MusicPlaybackClockTest {
+    private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
+
+    @Test
+    void replacesRepeatedCorrectionInsteadOfAccumulatingLatency() {
+        AtomicLong nanos = new AtomicLong();
+        MusicPlaybackClock clock = new MusicPlaybackClock(nanos::get, () -> NOW);
+        clock.update(snapshot(1_000, true));
+        nanos.addAndGet(250_000_000);
+        clock.update(snapshot(1_150, true));
+        clock.update(snapshot(1_150, true));
+        nanos.addAndGet(250_000_000);
+
+        assertThat(clock.positionMillis()).isBetween(1_420L, 1_510L);
+    }
+
+    @Test
+    void snapsWhenPlaybackStateChanges() {
+        AtomicLong nanos = new AtomicLong();
+        MusicPlaybackClock clock = new MusicPlaybackClock(nanos::get, () -> NOW);
+        clock.update(snapshot(3_000, true));
+        nanos.addAndGet(200_000_000);
+        clock.update(snapshot(3_050, false));
+        assertThat(clock.positionMillis()).isEqualTo(3_050);
+    }
+
+    private static PlaybackSnapshot snapshot(long position, boolean playing) {
+        return new PlaybackSnapshot("Track", "Artist", "Album", null,
+                "spotify:track:1234567890123456789012", null, position, 20_000,
+                playing, .5, false, "off", false, 0, 0, 0, .5,
+                new double[0], NOW,
+                new MusicCapabilities(true, true, true, true, true, true, true, true, false));
+    }
+}

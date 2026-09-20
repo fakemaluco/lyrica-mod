@@ -64,6 +64,22 @@ class SpicyLyricsParserTest {
     }
 
     @Test
+    void readsOfficialApiEnvelopeAndAttribution() {
+        String json = """
+                {"Status":200,"Type":"object","Body":{"Type":"Line","source":"spicy_lyrics",
+                  "UploadAttribution":{"Maker":{"Username":"Maker"},"Uploader":{"Username":"Uploader"}},
+                  "Content":[{"Text":"Official line","StartTime":1.0,"EndTime":2.0}]}}
+                """;
+
+        var metadata = parser.parse(json.getBytes(StandardCharsets.UTF_8)).document().metadata();
+
+        assertThat(metadata.provider()).isEqualTo("Spicy Lyrics");
+        assertThat(metadata.communityProvided()).isTrue();
+        assertThat(metadata.makerUsername()).isEqualTo("Maker");
+        assertThat(metadata.uploaderUsername()).isEqualTo("Uploader");
+    }
+
+    @Test
     void preservesMultipleWriterShapesFromNestedMetadata() {
         String json = """
                 {"Type":"Line","Metadata":{"Writers":[

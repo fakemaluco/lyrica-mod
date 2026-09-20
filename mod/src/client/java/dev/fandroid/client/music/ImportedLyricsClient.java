@@ -38,7 +38,7 @@ public final class ImportedLyricsClient {
     public SearchResult find(PlaybackSnapshot track) {
         try {
             Files.createDirectories(imports);
-            String spotifyId = AmllLyricsClient.spotifyTrackId(track.spotifyUri());
+            String spotifyId = SpicyLyricsApiClient.spotifyTrackId(track.spotifyUri());
             List<Path> files;
             try (Stream<Path> stream = Files.list(imports)) {
                 files = stream.filter(Files::isRegularFile)

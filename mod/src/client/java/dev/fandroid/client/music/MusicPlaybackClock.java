@@ -10,8 +10,9 @@ import java.util.function.Supplier;
 
 /** Smooth monotonic playback clock that gently absorbs normal snapshot jitter. */
 public final class MusicPlaybackClock {
-    private static final double CORRECTION_SECONDS = .70;
-    private static final long SNAP_THRESHOLD_MILLIS = 2_500;
+    private static final double CORRECTION_SECONDS = .24;
+    private static final long SNAP_THRESHOLD_MILLIS = 750;
+    private static final long JITTER_TOLERANCE_MILLIS = 18;
 
     private final LongSupplier nanoTime;
     private final Supplier<Instant> wallTime;
@@ -43,14 +44,19 @@ public final class MusicPlaybackClock {
         double observed = observedPosition(snapshot);
         boolean discontinuity = !initialized || !Objects.equals(trackKey, nextKey)
                 || Math.abs(observed - positionMillis) >= SNAP_THRESHOLD_MILLIS;
+        boolean playbackStateChanged = initialized && playing != snapshot.playing();
         durationMillis = Math.max(0, snapshot.durationMillis());
         playing = snapshot.playing();
         trackKey = nextKey;
         if (discontinuity) {
             positionMillis = observed;
             pendingCorrection = 0;
+        } else if (playbackStateChanged) {
+            positionMillis = observed;
+            pendingCorrection = 0;
         } else {
-            pendingCorrection += observed - positionMillis;
+            double error = observed - positionMillis;
+            pendingCorrection = Math.abs(error) <= JITTER_TOLERANCE_MILLIS ? 0 : error;
         }
         positionMillis = clamp(positionMillis);
         lastNanos = now;

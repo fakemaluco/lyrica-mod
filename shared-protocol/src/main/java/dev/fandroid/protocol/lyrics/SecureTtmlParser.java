@@ -22,7 +22,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Hardened AMLL-flavoured TTML parser. It deliberately has no network-capable
+ * Hardened TTML parser. It deliberately has no network-capable
  * XML features and accepts both word- and line-synchronised documents.
  */
 public final class SecureTtmlParser {

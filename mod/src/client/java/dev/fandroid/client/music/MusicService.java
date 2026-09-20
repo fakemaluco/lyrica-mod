@@ -23,14 +23,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class MusicService implements AutoCloseable {
     private final MusicConnector connector;
-    private final AmllLyricsClient lyricsClient = new AmllLyricsClient();
-    private final BetterLyricsClient betterLyricsClient = new BetterLyricsClient();
-    private final LrclibLyricsClient lineLyricsClient = new LrclibLyricsClient();
+    private final SpicyLyricsApiClient spicyApi = new SpicyLyricsApiClient();
     private final SecureTtmlParser ttmlParser = new SecureTtmlParser();
     private final SpicyLyricsParser spicyParser = new SpicyLyricsParser();
     private final Path importsFolder = FabricLoader.getInstance().getConfigDir().resolve("fandroid/lyrics/imports");
@@ -48,7 +45,6 @@ public final class MusicService implements AutoCloseable {
     private volatile String importsPendingKey;
     private volatile String importedLyricsKey;
     private volatile String spicyLyricsKey;
-    private volatile List<AmllLyricsClient.LyricsCandidate> candidates = List.of();
     private volatile List<ImportedLyricsClient.Candidate> importCandidates = List.of();
     private volatile String lyricsStatus = "Start playback to find lyrics";
     private volatile String artworkTrackKey;
@@ -138,7 +134,6 @@ public final class MusicService implements AutoCloseable {
             importsPendingKey = null;
             importedLyricsKey = null;
             spicyLyricsKey = null;
-            candidates = List.of();
             importCandidates = List.of();
             overlay.clearLyrics();
             lyricsStatus = "Start playback to find lyrics";
@@ -152,7 +147,6 @@ public final class MusicService implements AutoCloseable {
                 importsPendingKey = null;
                 importedLyricsKey = null;
                 spicyLyricsKey = null;
-                candidates = List.of();
                 importCandidates = List.of();
                 overlay.clearLyrics();
                 overlay.markUnavailable("Spotify DJ is talking. Lyrics return with the next song.");
@@ -169,12 +163,11 @@ public final class MusicService implements AutoCloseable {
         importsPendingKey = key;
         importedLyricsKey = null;
         spicyLyricsKey = null;
-        candidates = List.of();
         importCandidates = List.of();
         overlay.beginLookup();
         lyricsStatus = "Finding lyrics...";
 
-        String spotifyId = AmllLyricsClient.spotifyTrackId(value.spotifyUri());
+        String spotifyId = SpicyLyricsApiClient.spotifyTrackId(value.spotifyUri());
         FanDroidMod.LOGGER.info("Looking up synced lyrics for '{}' by '{}'{}", value.title(), value.artist(),
                 spotifyId == null ? "" : " (Spotify " + spotifyId + ")");
         CompletableFuture.runAsync(() -> beginSourceLookup(value, key, spotifyId));
@@ -197,33 +190,20 @@ public final class MusicService implements AutoCloseable {
         if (spotifyId != null && prefersSpicetifyLyrics()) {
             loadCachedSpicy(value.spotifyUri(), key, spotifyId);
         }
-        CompletableFuture.runAsync(() -> beginNetworkLookup(value, key, spotifyId),
-                CompletableFuture.delayedExecutor(prefersSpicetifyLyrics() && spicetifyConnected()
-                        ? 1_800 : 250, TimeUnit.MILLISECONDS));
+        beginNetworkLookup(value, key, spotifyId);
     }
 
     private void beginNetworkLookup(PlaybackSnapshot value, String key, String spotifyId) {
         if (!stillNeedsFallback(key)) return;
-        lyricsStatus = "Searching AMLL...";
-        if (spotifyId == null) {
-            searchByMetadata(value, key, null);
-            return;
-        }
-        lyricsClient.bySpotifyUri(value.spotifyUri()).thenAccept(document -> {
+        lyricsStatus = "Searching Spicy Lyrics...";
+        spicyApi.find(spotifyId).thenAccept(result -> {
             if (!stillNeedsFallback(key)) return;
-            if (document.isPresent()) applyAmll(document.get(), key);
-            else searchByMetadata(value, key, spotifyId);
-        });
-    }
-
-    private void searchByMetadata(PlaybackSnapshot value, String key, String spotifyId) {
-        lyricsClient.search(value.title(), value.artist(), value.album(), spotifyId).thenAccept(matches -> {
-            if (!stillNeedsFallback(key)) return;
-            candidates = matches;
-            // AMLL is the primary web catalogue. A valid top match is consumed before
-            // Better Lyrics or LRCLIB, even when several community revisions exist.
-            if (!matches.isEmpty()) loadCandidate(matches.getFirst(), value, key, true);
-            else fallbackToBetterLyrics(value, key);
+            if (result.payload().isPresent()) {
+                parseAndApplySpicy(new SpicetifyLyricsPayload(value.spotifyUri(), "spicy-json",
+                        new String(result.payload().get(), StandardCharsets.UTF_8), "Spicy Lyrics API"), key, true);
+            } else {
+                markUnavailable(result.message());
+            }
         });
     }
 
@@ -328,7 +308,6 @@ public final class MusicService implements AutoCloseable {
         lookupKey = null;
         update(current);
     }
-    public List<AmllLyricsClient.LyricsCandidate> candidates() { return candidates; }
     public List<ImportedLyricsClient.Candidate> importCandidates() { return importCandidates; }
     public Path importsFolder() { return importsFolder; }
     public void reloadImports() { retryLyrics(); }
@@ -337,108 +316,9 @@ public final class MusicService implements AutoCloseable {
         if (index < 0 || index >= values.size()) return;
         importedLyrics.load(values.get(index)).ifPresent(match -> applyImported(match, lookupKey));
     }
-    public void selectCandidate(int index) {
-        List<AmllLyricsClient.LyricsCandidate> values = candidates;
-        if (index < 0 || index >= values.size()) return;
-        PlaybackSnapshot value = snapshot();
-        loadCandidate(values.get(index), value, lookupKey, true);
-    }
-
-    private void loadCandidate(AmllLyricsClient.LyricsCandidate selected, PlaybackSnapshot value,
-                               String key, boolean fallback) {
-        lyricsStatus = "Loading lyrics...";
-        candidates = List.of();
-        lyricsClient.load(selected).thenAccept(document -> {
-            if (key != null && stillNeedsFallback(key)) {
-                if (document.isPresent()) applyAmll(document.get(), key);
-                else if (fallback) fallbackToBetterLyrics(value, key);
-                else markUnavailable("AMLL match could not be read");
-            }
-        });
-    }
-
-    private void fallbackToBetterLyrics(PlaybackSnapshot value, String key) {
-        if (!stillNeedsFallback(key)) return;
-        lyricsStatus = "Searching Better Lyrics...";
-        betterLyricsClient.find(value.title(), value.artist(), value.album(), value.durationMillis())
-                .thenAccept(result -> {
-                    if (!stillNeedsFallback(key)) return;
-                    if (result.isPresent()) applyBetterLyrics(result.get(), value, key);
-                    else fallbackToLineLyrics(value, key);
-                }).exceptionally(error -> {
-                    if (stillNeedsFallback(key)) fallbackToLineLyrics(value, key);
-                    return null;
-                });
-    }
-
-    private void fallbackToLineLyrics(PlaybackSnapshot value, String key) {
-        if (!stillNeedsFallback(key)) return;
-        lyricsStatus = "Searching LRCLIB...";
-        lineLyricsClient.find(value.title(), value.artist(), value.album(), value.durationMillis())
-                .thenAccept(result -> {
-                    if (!stillNeedsFallback(key)) return;
-                    if (result.isPresent()) {
-                        LrclibLyricsClient.LyricsResult found = result.get();
-                        String precision = found.wordSynced() ? "WORD SYNC" : "LINE SYNC";
-                        lyricsStatus = "Lyrics ready";
-                        candidates = List.of();
-                        LyricsMetadata previous = found.document().metadata();
-                        LyricsDocument labelled = found.document().withMetadata(new LyricsMetadata(
-                                LyricsSource.LRCLIB,
-                                found.wordSynced() ? LyricsSyncMode.WORD : LyricsSyncMode.LINE,
-                                previous.trackKey(), previous.title(), previous.artist(), previous.album(),
-                                previous.songwriters()));
-                        if (!stillNeedsFallback(key)) return;
-                        overlay.setLyrics(labelled, "LYRICS");
-                        FanDroidMod.LOGGER.info("Loaded {} lyrics from LRCLIB for '{}'", precision, value.title());
-                    } else {
-                        markUnavailable("No synced lyrics in AMLL, Better Lyrics or LRCLIB");
-                    }
-                }).exceptionally(error -> {
-                    if (stillNeedsFallback(key)) {
-                        markUnavailable("Lyrics lookup failed - check connection");
-                    }
-                    return null;
-                });
-    }
-
-    private void applyBetterLyrics(BetterLyricsClient.LyricsResult found,
-                                   PlaybackSnapshot value, String key) {
-        if (!stillNeedsFallback(key)) return;
-        LyricsDocument document = found.document();
-        boolean wordSynced = hasWordTiming(document);
-        LyricsMetadata previous = document.metadata();
-        LyricsDocument labelled = document.withMetadata(new LyricsMetadata(
-                LyricsSource.BETTER_LYRICS,
-                wordSynced ? LyricsSyncMode.WORD : LyricsSyncMode.LINE,
-                previous.trackKey(), value.title(), value.artist(), value.album(),
-                previous.songwriters()));
-        if (!stillNeedsFallback(key)) return;
-        lyricsStatus = "Lyrics ready";
-        candidates = List.of();
-        overlay.setLyrics(labelled, "LYRICS");
-        FanDroidMod.LOGGER.info("Loaded {} lyrics from Better Lyrics for '{}' (score {})",
-                wordSynced ? "WORD SYNC" : "LINE SYNC", value.title(), found.score());
-    }
-
-    private void applyAmll(LyricsDocument document, String key) {
-        if (!stillNeedsFallback(key)) return;
-        boolean wordSynced = hasWordTiming(document);
-        String precision = wordSynced ? "WORD SYNC" : "LINE SYNC";
-        lyricsStatus = "Lyrics ready";
-        candidates = List.of();
-        LyricsMetadata metadata = new LyricsMetadata(LyricsSource.AMLL,
-                wordSynced ? LyricsSyncMode.WORD : LyricsSyncMode.LINE,
-                document.metadata().trackKey(), document.metadata().title(), document.metadata().artist(),
-                document.metadata().album(), document.metadata().songwriters());
-        if (!stillNeedsFallback(key)) return;
-        overlay.setLyrics(document.withMetadata(metadata), "LYRICS");
-        FanDroidMod.LOGGER.info("Loaded {} lyrics from AMLL ({} lines)", precision, document.lines().size());
-    }
 
     private void markUnavailable(String message) {
         lyricsStatus = message;
-        candidates = List.of();
         overlay.markUnavailable(message);
         FanDroidMod.LOGGER.info(message);
     }
@@ -517,11 +397,10 @@ public final class MusicService implements AutoCloseable {
             String uploaderAvatar = firstNonBlank(payload.uploaderAvatar(), previous.uploaderAvatar());
             document = document.withMetadata(new LyricsMetadata(source,
                     wordSynced ? LyricsSyncMode.WORD : LyricsSyncMode.LINE,
-                    AmllLyricsClient.spotifyTrackId(payload.uri()), previous.title(), previous.artist(), previous.album(),
+                    SpicyLyricsApiClient.spotifyTrackId(payload.uri()), previous.title(), previous.artist(), previous.album(),
                     songwriters, provider, payload.communityProvided() || previous.communityProvided(),
                     makerUsername, makerAvatar, uploaderUsername, uploaderAvatar));
             lyricsStatus = "Lyrics ready";
-            candidates = List.of();
             overlay.setLyrics(document, "LYRICS");
             FanDroidMod.LOGGER.info("Loaded {} lyrics from {} ({} lines)", precision,
                     payload.source(), document.lines().size());
@@ -532,7 +411,7 @@ public final class MusicService implements AutoCloseable {
     }
 
     private void persistSpicy(SpicetifyLyricsPayload payload, String songwriters) {
-        String trackId = AmllLyricsClient.spotifyTrackId(payload.uri());
+        String trackId = SpicyLyricsApiClient.spotifyTrackId(payload.uri());
         if (trackId == null) return;
         try {
             Files.createDirectories(spicyCache);
@@ -555,9 +434,9 @@ public final class MusicService implements AutoCloseable {
     private static String providerLabel(String code) {
         if (code == null) return "";
         return switch (code.strip().toLowerCase(Locale.ROOT)) {
-            case "spt" -> "Spotify";
-            case "aml" -> "Apple Music";
-            case "spl" -> "Spicy Lyrics";
+            case "spt", "spotify" -> "Spotify";
+            case "aml", "apple_music" -> "Apple Music";
+            case "spl", "spicy_lyrics" -> "Spicy Lyrics";
             case "ldb" -> "Local DB";
             default -> "";
         };
@@ -572,7 +451,6 @@ public final class MusicService implements AutoCloseable {
         importedLyricsKey = key;
         spicyLyricsKey = null;
         importCandidates = List.of();
-        candidates = List.of();
         boolean wordSynced = hasWordTiming(match.document());
         String precision = wordSynced ? "WORD SYNC" : "LINE SYNC";
         lyricsStatus = "Lyrics ready";
