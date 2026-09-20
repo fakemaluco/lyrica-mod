@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  artifacts:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            helper: fandroid-media-bridge
+          - os: windows-latest
+            helper: fandroid-media-bridge.exe
+          - os: macos-latest
+            helper: fandroid-media-bridge
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: cargo build --release --locked
+        working-directory: media-bridge
+      - run: ./gradlew :mod:build :mod-1.21.11:build :backend:installDist --no-daemon
+      - name: Generate helper checksum
+        shell: bash
+        run: |
+          cd media-bridge/target/release
+          sha256sum "${{ matrix.helper }}" > "${{ matrix.helper }}.sha256"
+      - run: npm ci && npm run build
+        working-directory: spicetify-extension
+        if: runner.os == 'Linux'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fandroid-${{ runner.os }}
+          path: |
+            mod/build/libs/fandroid-*.jar
+            mod-1.21.11/build/libs/fandroid-*.jar
+            media-bridge/target/release/${{ matrix.helper }}
+            media-bridge/target/release/${{ matrix.helper }}.sha256
+            spicetify-extension/dist/fandroid.js
