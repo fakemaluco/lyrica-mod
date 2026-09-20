@@ -216,6 +216,25 @@ public final class LyricsAnimation {
         return durationMillis >= PER_GLYPH_MOTION_MIN_MILLIS;
     }
 
+    /**
+     * Chooses one motion owner for a visual word. Syllable-timed words deliberately
+     * take precedence over the duration heuristic: moving their whole word would
+     * make future syllables jump before their own timing begins.
+     */
+    public static TokenMotionPlan tokenMotionPlan(long durationMillis, int fragmentCount,
+                                                   boolean simpleMode) {
+        if (simpleMode) return TokenMotionPlan.NONE;
+        boolean syllableMotion = fragmentCount > 1;
+        boolean glyphMotion = !syllableMotion && usesPerGlyphMotion(durationMillis);
+        return new TokenMotionPlan(!syllableMotion && !glyphMotion, syllableMotion, glyphMotion);
+    }
+
+    /** Exactly one of these animation owners is selected outside simple mode. */
+    public record TokenMotionPlan(boolean wholeWordMotion, boolean syllableMotion,
+                                  boolean glyphMotion) {
+        private static final TokenMotionPlan NONE = new TokenMotionPlan(false, false, false);
+    }
+
     public static double shortWordLift(long durationMillis, double progress) {
         if (usesPerGlyphMotion(durationMillis)) return 0;
         if (progress <= 0) return 0;

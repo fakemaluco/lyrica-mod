@@ -51,7 +51,6 @@ import static dev.fandroid.client.music.LyricsAnimation.smoother;
 import static dev.fandroid.client.music.LyricsAnimation.shortWordLift;
 import static dev.fandroid.client.music.LyricsAnimation.sustainedWordGlow;
 import static dev.fandroid.client.music.LyricsAnimation.timedProgress;
-import static dev.fandroid.client.music.LyricsAnimation.usesPerGlyphMotion;
 import static dev.fandroid.client.music.LyricsAnimation.wordEmphasis;
 
 /**
@@ -1269,10 +1268,10 @@ public final class LyricsOverlay implements AutoCloseable {
                 : (now - token.timing.startMillis())
                 / (double) (token.timing.endMillis() - token.timing.startMillis());
         double durationStrength = durationStrength(token.visualWordDurationMillis);
-        double wordScale = 1 + wordEmphasis(wordProgress) * mix(.016, .045, durationStrength);
-        boolean perGlyphMotion = usesPerGlyphMotion(token.visualWordDurationMillis);
+        var motionPlan = token.motionPlan(false);
+        boolean perGlyphMotion = motionPlan.glyphMotion();
         if (!perGlyphMotion) return;
-        double wordLift = shortWordLift(token.visualWordDurationMillis, wordProgress);
+        double wordScale = 1 + wordEmphasis(wordProgress) * mix(.016, .045, durationStrength);
         double wordCenterX = x + token.rawWidth * scale / 2;
         double wordGlyphScale = scale * wordScale;
         double fillOffset = token.fillOffset(now);
@@ -1291,8 +1290,7 @@ public final class LyricsOverlay implements AutoCloseable {
             double drawX = baseX + glyph.rawWidth * wordGlyphScale * (1 - characterScale) / 2;
             double drawY = y + renderer().fontHeight * scale / 2
                     - renderer().fontHeight * animatedScale / 2
-                    - (perGlyphMotion
-                    ? segment.motion.elevation() + glyph.motion.elevation() : wordLift) * scale;
+                    - (segment.motion.elevation() + glyph.motion.elevation()) * scale;
             double motionGlow = perGlyphMotion
                     ? Math.clamp(Math.max(glyph.motion.glow(), segment.motion.glow()) / 1.65, 0, 1) : 0;
             double boundaryPixels = Math.clamp(fillOffset, 0, Math.max(0, token.rawWidth));
@@ -1323,26 +1321,27 @@ public final class LyricsOverlay implements AutoCloseable {
             if (index < 0 || index >= scene.groups.length) continue;
             PreparedGroup focused = scene.groups[index];
             if (!focused.group.activeAt(now) && index != active) continue;
-            updateLineTokenMotion(focused.lead, now, delta);
+            updateLineTokenMotion(focused.lead, now, delta, simple);
             for (PreparedLine background : focused.backgrounds) {
-                updateLineTokenMotion(background, now, delta);
+                updateLineTokenMotion(background, now, delta, simple);
             }
         }
     }
 
-    private static void updateLineTokenMotion(PreparedLine line, long now, double delta) {
+    private static void updateLineTokenMotion(PreparedLine line, long now, double delta, boolean simple) {
         for (Row row : line.layout.rows) {
             for (Token token : row.tokens) {
-                boolean perGlyphMotion = usesPerGlyphMotion(token.visualWordDurationMillis);
+                var motionPlan = token.motionPlan(simple);
+                boolean segmentMotion = motionPlan.syllableMotion() || motionPlan.glyphMotion();
                 for (Segment segment : token.segments) {
                     segment.motion.update(timedProgress(now, segment.startMillis, segment.endMillis),
-                            durationStrength(segment.durationMillis()), perGlyphMotion, delta);
+                            durationStrength(segment.durationMillis()), segmentMotion, delta);
                 }
                 for (Glyph glyph : token.glyphs) {
                     if (glyph.startMillis == Long.MIN_VALUE) continue;
                     Segment segment = token.segments.get(glyph.segmentIndex);
                     glyph.motion.update(timedProgress(now, glyph.startMillis, glyph.endMillis),
-                            durationStrength(segment.durationMillis()), perGlyphMotion, delta);
+                            durationStrength(segment.durationMillis()), motionPlan.glyphMotion(), delta);
                 }
             }
         }
@@ -1714,9 +1713,15 @@ public final class LyricsOverlay implements AutoCloseable {
         double durationStrength = durationStrength(token.visualWordDurationMillis);
         double wordEnvelope = wordEmphasis(wordProgress);
         boolean simple = preferences.isSimpleLyricsMode();
-        boolean perGlyphMotion = !simple && usesPerGlyphMotion(token.visualWordDurationMillis);
-        double wordLift = simple ? 0 : shortWordLift(token.visualWordDurationMillis, wordProgress);
-        double wordScale = simple ? 1 : 1 + wordEnvelope * mix(.016, .045, durationStrength);
+        var motionPlan = token.motionPlan(simple);
+        boolean perGlyphMotion = motionPlan.glyphMotion();
+        boolean segmentMotion = motionPlan.syllableMotion() || perGlyphMotion;
+        double wordLift = motionPlan.wholeWordMotion()
+                ? shortWordLift(token.visualWordDurationMillis, wordProgress) : 0;
+        // A syllable-timed word keeps a stable overall shape. Its current
+        // syllable owns the lift, rather than pulling unsung syllables along.
+        double wordScale = motionPlan.syllableMotion() ? 1
+                : 1 + wordEnvelope * mix(.016, .045, durationStrength);
         double wordCenterX = x + token.rawWidth * scale / 2;
         double wordGlyphScale = scale * wordScale;
         double fillOffset = token.fillOffset(now);
@@ -1740,13 +1745,14 @@ public final class LyricsOverlay implements AutoCloseable {
                 continue;
             }
 
-            double characterScale = perGlyphMotion
-                    ? segment.motion.scale() * glyph.motion.scale() : 1;
+            double characterScale = segmentMotion
+                    ? segment.motion.scale() * (perGlyphMotion ? glyph.motion.scale() : 1) : 1;
             double animatedScale = segmentGlyphScale * characterScale;
             double drawX = baseX + glyph.rawWidth * segmentGlyphScale * (1 - characterScale) / 2;
             double drawY = centerY - renderer().fontHeight * animatedScale / 2
-                    - (perGlyphMotion
-                    ? segment.motion.elevation() + glyph.motion.elevation() : wordLift) * scale;
+                    - (segmentMotion
+                    ? segment.motion.elevation() + (perGlyphMotion ? glyph.motion.elevation() : 0)
+                    : wordLift) * scale;
             double motionGlow = perGlyphMotion
                     ? Math.clamp(Math.max(glyph.motion.glow(), segment.motion.glow()) / 1.65, 0, 1) : 0;
             double boundaryPixels = Math.clamp(fillOffset, 0, Math.max(0, token.rawWidth));
@@ -2472,6 +2478,11 @@ public final class LyricsOverlay implements AutoCloseable {
                 break;
             }
             return Math.clamp(boundary, 0, rawWidth);
+        }
+
+        private dev.fandroid.client.music.LyricsAnimation.TokenMotionPlan motionPlan(boolean simpleMode) {
+            return dev.fandroid.client.music.LyricsAnimation.tokenMotionPlan(
+                    visualWordDurationMillis, segments.size(), simpleMode);
         }
     }
 
