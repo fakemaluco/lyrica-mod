@@ -94,23 +94,30 @@ public final class LyricsAnimation {
         };
     }
 
-    /** Stable halo bed for every word in progress; the leading edge is added separately. */
+    /** Stable halo bed only for held words that animate their glyphs independently. */
     public static double activeWordGlow(long durationMillis, double wordProgress) {
-        if (wordProgress <= 0 || wordProgress >= 1) return 0;
-        double entrance = smooth(Math.clamp(wordProgress / .08, 0, 1));
-        double exit = smooth(Math.clamp((1 - wordProgress) / .08, 0, 1));
+        if (!usesPerGlyphMotion(durationMillis) || wordProgress <= 0 || wordProgress >= 1) return 0;
+        double envelope = activeGlowEnvelope(wordProgress);
         double heldBoost = .15 * sustainedGlowStrength(durationMillis);
-        return (.70 + heldBoost) * entrance * exit;
+        return (.70 + heldBoost) * envelope;
     }
 
     /** Combines the stable word halo with animation energy and a 25% leading-edge pulse. */
     public static double activeGlyphGlow(double motionGlow, long durationMillis,
                                          double wordProgress, double boundaryAmount) {
-        if (wordProgress <= 0 || wordProgress >= 1) return 0;
+        if (!usesPerGlyphMotion(durationMillis) || wordProgress <= 0 || wordProgress >= 1) return 0;
         double bed = activeWordGlow(durationMillis, wordProgress);
         double motion = Math.clamp(motionGlow, 0, 1);
         double boundary = Math.clamp(boundaryAmount, 0, 1) * .25;
-        return Math.clamp(Math.max(bed, motion) + boundary, 0, 1);
+        return Math.clamp((Math.max(bed, motion) + boundary) * activeGlowEnvelope(wordProgress), 0, 1);
+    }
+
+    /** Slow, derivative-free entrance and exit so the framebuffer halo never pops on or off. */
+    public static double activeGlowEnvelope(double wordProgress) {
+        if (wordProgress <= 0 || wordProgress >= 1) return 0;
+        double entrance = smoother(Math.clamp(wordProgress / .18, 0, 1));
+        double exit = smoother(Math.clamp((1 - wordProgress) / .24, 0, 1));
+        return entrance * exit;
     }
 
     /**
@@ -211,7 +218,10 @@ public final class LyricsAnimation {
 
     public static double shortWordLift(long durationMillis, double progress) {
         if (usesPerGlyphMotion(durationMillis)) return 0;
-        return wordEmphasis(progress) * 1.10;
+        if (progress <= 0 || progress >= 1) return 0;
+        // A raised cosine moves the whole word as one block with zero velocity at
+        // both ends and a rounded apex instead of a hard enter/hold/leave corner.
+        return Math.sin(Math.PI * smoother(progress)) * 1.08;
     }
 
     public static double wordEmphasis(double progress) {
@@ -274,6 +284,11 @@ public final class LyricsAnimation {
     public static double smooth(double value) {
         double t = Math.clamp(value, 0, 1);
         return t * t * (3 - 2 * t);
+    }
+
+    public static double smoother(double value) {
+        double t = Math.clamp(value, 0, 1);
+        return t * t * t * (t * (t * 6 - 15) + 10);
     }
 
     public static double mix(double first, double second, double amount) {

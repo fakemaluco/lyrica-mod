@@ -28,6 +28,13 @@ class LyricsAnimationTest {
         assertThat(LyricsAnimation.shortWordLift(500, 0)).isZero();
         assertThat(LyricsAnimation.shortWordLift(500, 1)).isZero();
         assertThat(LyricsAnimation.shortWordLift(2_000, .5)).isZero();
+        assertThat(LyricsAnimation.shortWordLift(500, .10))
+                .isLessThan(LyricsAnimation.shortWordLift(500, .25));
+        assertThat(LyricsAnimation.shortWordLift(500, .25))
+                .isLessThan(LyricsAnimation.shortWordLift(500, .5));
+        assertThat(LyricsAnimation.shortWordLift(500, .25))
+                .isCloseTo(LyricsAnimation.shortWordLift(500, .75),
+                        org.assertj.core.data.Offset.offset(.000001));
     }
 
     @Test
@@ -165,8 +172,10 @@ class LyricsAnimationTest {
     }
 
     @Test
-    void everyActiveWordHasAHaloBedAndNoResidueOutsideItsInterval() {
-        assertThat(LyricsAnimation.activeWordGlow(400, .5)).isEqualTo(.70);
+    void onlyPerGlyphWordsHaveAHaloBedAndNoResidueOutsideItsInterval() {
+        assertThat(LyricsAnimation.activeWordGlow(400, .5)).isZero();
+        assertThat(LyricsAnimation.activeWordGlow(1_399, .5)).isZero();
+        assertThat(LyricsAnimation.activeWordGlow(1_400, .5)).isPositive();
         assertThat(LyricsAnimation.activeWordGlow(5_000, .5)).isEqualTo(.85);
         assertThat(LyricsAnimation.activeWordGlow(5_000, 0)).isZero();
         assertThat(LyricsAnimation.activeWordGlow(5_000, 1)).isZero();
@@ -176,13 +185,25 @@ class LyricsAnimationTest {
 
     @Test
     void leadingEdgeAddsAtMostTwentyFivePercentAndNeverLeavesResidue() {
-        double bed = LyricsAnimation.activeGlyphGlow(0, 400, .5, 0);
-        double edge = LyricsAnimation.activeGlyphGlow(0, 400, .5, 1);
+        double bed = LyricsAnimation.activeGlyphGlow(0, 5_000, .5, 0);
+        double edge = LyricsAnimation.activeGlyphGlow(0, 5_000, .5, 1);
 
-        assertThat(edge - bed).isEqualTo(.25);
+        assertThat(edge - bed).isCloseTo(.15, org.assertj.core.data.Offset.offset(.000001));
+        assertThat(LyricsAnimation.activeGlyphGlow(1, 400, .5, 1)).isZero();
         assertThat(LyricsAnimation.activeGlyphGlow(1, 5_000, 0, 1)).isZero();
         assertThat(LyricsAnimation.activeGlyphGlow(1, 5_000, 1, 1)).isZero();
         assertThat(LyricsAnimation.activeGlyphGlow(1, 5_000, .5, 1)).isEqualTo(1);
+    }
+
+    @Test
+    void activeGlowEntersAndLeavesGradually() {
+        assertThat(LyricsAnimation.activeGlowEnvelope(0)).isZero();
+        assertThat(LyricsAnimation.activeGlowEnvelope(.03)).isBetween(0.0, .10);
+        assertThat(LyricsAnimation.activeGlowEnvelope(.12))
+                .isGreaterThan(LyricsAnimation.activeGlowEnvelope(.03));
+        assertThat(LyricsAnimation.activeGlowEnvelope(.5)).isEqualTo(1);
+        assertThat(LyricsAnimation.activeGlowEnvelope(.94)).isBetween(0.0, .20);
+        assertThat(LyricsAnimation.activeGlowEnvelope(1)).isZero();
     }
 
     @Test

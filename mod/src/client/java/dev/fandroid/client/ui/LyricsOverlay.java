@@ -1271,6 +1271,7 @@ public final class LyricsOverlay implements AutoCloseable {
         double durationStrength = durationStrength(token.visualWordDurationMillis);
         double wordScale = 1 + wordEmphasis(wordProgress) * mix(.016, .045, durationStrength);
         boolean perGlyphMotion = usesPerGlyphMotion(token.visualWordDurationMillis);
+        if (!perGlyphMotion) return;
         double wordLift = shortWordLift(token.visualWordDurationMillis, wordProgress);
         double wordCenterX = x + token.rawWidth * scale / 2;
         double wordGlyphScale = scale * wordScale;
@@ -1756,7 +1757,7 @@ public final class LyricsOverlay implements AutoCloseable {
             double boundaryPixels = Math.clamp(fillOffset, 0, Math.max(0, token.rawWidth));
             double boundaryGlow = boundaryGlow(
                     (boundaryPixels - (glyph.x + glyph.rawWidth / 2)) / Math.max(glyph.rawWidth, 1));
-            double glowAmount = simple ? 0 : activeGlyphGlow(
+            double glowAmount = simple || !perGlyphMotion ? 0 : activeGlyphGlow(
                     Math.max(motionGlow, Math.min(1, wordSustainedGlow / 1.45)),
                     token.visualWordDurationMillis, wordProgress, boundaryGlow);
             // The held word glow can cover its already-filled letters while it is still spoken.

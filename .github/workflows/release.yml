@@ -6,16 +6,9 @@ on:
 
 jobs:
   artifacts:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            helper: fandroid-media-bridge
-          - os: windows-latest
-            helper: fandroid-media-bridge.exe
-          - os: macos-latest
-            helper: fandroid-media-bridge
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -23,27 +16,20 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
       - uses: gradle/actions/setup-gradle@v4
       - run: cargo build --release --locked
         working-directory: media-bridge
-      - run: ./gradlew -Pversion="${GITHUB_REF_NAME#v}" :mod:build :mod-1.21.11:build :backend:installDist --no-daemon
-      - name: Generate helper checksum
-        shell: bash
+      - name: Build standalone Lyrica jars
+        shell: pwsh
         run: |
-          cd media-bridge/target/release
-          sha256sum "${{ matrix.helper }}" > "${{ matrix.helper }}.sha256"
-      - run: npm ci && npm run build
-        working-directory: spicetify-extension
-        if: runner.os == 'Linux'
-      - uses: actions/upload-artifact@v4
+          $releaseVersion = "${{ github.ref_name }}".TrimStart('v')
+          .\gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build "-Pversion=$releaseVersion" --no-daemon
+          New-Item -ItemType Directory -Path release-assets | Out-Null
+          Get-ChildItem lyrics-popup/build/libs,lyrics-popup-1.21.11/build/libs -Filter "lyrica-*.jar" |
+            Where-Object { $_.Name -notmatch "sources|dev" } |
+            Copy-Item -Destination release-assets
+      - name: Publish standalone jars
+        uses: softprops/action-gh-release@v2
         with:
-          name: lyrica-${{ runner.os }}
-          path: |
-            mod/build/libs/lyrica-*.jar
-            mod-1.21.11/build/libs/lyrica-*.jar
-            media-bridge/target/release/${{ matrix.helper }}
-            media-bridge/target/release/${{ matrix.helper }}.sha256
-            spicetify-extension/dist/lyrica.js
+          files: |
+            release-assets/*.jar
