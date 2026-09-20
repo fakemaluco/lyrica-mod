@@ -9,7 +9,7 @@ java {
 }
 
 base {
-    archivesName.set("fandroid")
+    archivesName.set("lyrica")
 }
 
 val hostOs = System.getProperty("os.name", "").lowercase()
@@ -31,7 +31,7 @@ val bundledBridgeResources = layout.buildDirectory.dir("generated/bundledMediaBr
 val stageBundledMediaBridge by tasks.registering(Copy::class) {
     description = "Stages the native media bridge built for this host inside the Fabric JAR"
     from(bridgeExecutable)
-    into(bundledBridgeResources.map { it.dir("fandroid/native/$hostPlatform") })
+    into(bundledBridgeResources.map { it.dir("lyrica/native/$hostPlatform") })
     onlyIf {
         val available = bridgeExecutable.asFile.isFile
         if (!available) {
@@ -76,7 +76,7 @@ dependencies {
 loom {
     splitEnvironmentSourceSets()
     mods {
-        create("fandroid") {
+        create("lyrica") {
             sourceSet(sourceSets.main.get())
             sourceSet(sourceSets.named("client").get())
         }

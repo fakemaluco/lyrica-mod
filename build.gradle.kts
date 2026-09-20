@@ -3,8 +3,8 @@ plugins {
 }
 
 allprojects {
-    group = "dev.fandroid"
-    version = "0.1.0"
+    group = "dev.lyrica"
+    version = providers.gradleProperty("version").orElse("0.8.7").get()
     repositories {
         mavenCentral()
         maven("https://libraries.minecraft.net/")

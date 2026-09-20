@@ -9,7 +9,7 @@ java {
 }
 
 base {
-    archivesName.set("fandroid-1.21.11")
+    archivesName.set("lyrica-1.21.11")
 }
 
 val minecraftVersion = "1.21.11"
@@ -35,7 +35,7 @@ val sharedClientSources = layout.buildDirectory.dir("generated/sharedClientJava"
 
 val stageBundledMediaBridge by tasks.registering(Copy::class) {
     from(bridgeExecutable)
-    into(bundledBridgeResources.map { it.dir("fandroid/native/$hostPlatform") })
+    into(bundledBridgeResources.map { it.dir("lyrica/native/$hostPlatform") })
     onlyIf { bridgeExecutable.asFile.isFile }
 }
 
@@ -96,7 +96,7 @@ dependencies {
 loom {
     splitEnvironmentSourceSets()
     mods {
-        create("fandroid") {
+        create("lyrica") {
             sourceSet(sourceSets.main.get())
             sourceSet(sourceSets.named("client").get())
         }

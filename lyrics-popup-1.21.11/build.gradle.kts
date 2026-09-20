@@ -136,10 +136,10 @@ tasks.named("sourcesJar") { dependsOn(prepareStandaloneClientJava) }
 tasks.processResources {
     dependsOn(stageBundledMediaBridge)
     from(bundledBridgeResources)
-    from(rootProject.file("mod/src/main/resources/assets/fandroid/shaders")) {
+    from(rootProject.file("mod/src/main/resources/assets/lyrica/shaders")) {
         into("assets/relaylyrics/shaders")
     }
-    from(rootProject.file("mod/src/main/resources/assets/fandroid/post_effect")) {
+    from(rootProject.file("mod/src/main/resources/assets/lyrica/post_effect")) {
         into("assets/relaylyrics/post_effect")
     }
     inputs.property("version", project.version)

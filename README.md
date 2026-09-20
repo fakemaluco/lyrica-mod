@@ -1,21 +1,24 @@
-# lyrica-mod / Relay
-# Relay
+# Lyrica
 
-Uma "casa inteligente" Minecraft que traz um celular retrô, mensagens criptografadas e letras de música animadas e sincronizadas direto para o jogo.
+**A better way to experience music lyrics inside Minecraft.**
 
-Funciona como um mod Fabric para **1.21.1** e **1.21.11**. Pressione **Left Alt** para abrir o celular 3:4 (não pausa o jogo) no canto da tela, com apps de música, configurações, e muito mais; a extensão opcional de letras abre um popup de letras arrastável que acompanha a música tocando no sistema.
+Lyrica brings beautifully animated, **Apple-inspired lyrics** directly into Minecraft, featuring **word-by-word synchronization**, smooth animations, and plenty of customization options.
 
-# Como instalar
+The mod adapts to the way you play. Customize when and how lyrics appear, keeping them visible when you want them and out of the way when you don't.
 
-1. Baixe o último arquivo `.jar` da página de [Releases](../../releases)
-2. Tenha a versão correta do Minecraft e o loader (Fabric) instalados
-3. Coloque o arquivo dentro da pasta `mods` do seu Minecraft
-4. Inicie o jogo
-5. Prontinho!
+## Como instalar
 
-Eu gostei muito da forma como o Spicy Lyrics exibe as letras, então quis recriar uma experiência parecida dentro do Minecraft.
+1. Baixe o arquivo `.jar` mais recente na página de [Releases](https://github.com/fakemaluco/lyrica-mod/releases).
+2. Certifique-se de ter a versão correta do **Minecraft** e o loader **Fabric** instalados.
+3. Coloque o arquivo `.jar` dentro da pasta `mods` do Minecraft.
+4. Inicie o jogo.
+5. Prontinho! O Lyrica já estará disponível.
 
-**Status:** projeto ainda em desenvolvimento — bugs e recursos faltando são esperados.
+## Sobre o projeto
+
+Sempre gostei da forma como o **Spicy Lyrics** apresenta letras sincronizadas, então decidi trazer uma experiência parecida para dentro do Minecraft, adaptada para funcionar naturalmente durante o gameplay.
+
+> **Status:** Lyrica ainda está em desenvolvimento. Bugs, mudanças e recursos ainda não implementados são esperados.
 
 <!-- Adicione um preview aqui:
 ![Mod Preview](./previews/preview.gif)

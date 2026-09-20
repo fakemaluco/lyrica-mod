@@ -23,7 +23,7 @@ class RelayResourcesTest {
     @Test
     void everyAppIconIsA128PixelPngWithTransparency() throws Exception {
         for (PhoneApp app : PhoneApp.values()) {
-            String path = "/assets/fandroid/" + app.texture().getPath();
+            String path = "/assets/lyrica/" + app.texture().getPath();
             try (InputStream stream = getClass().getResourceAsStream(path)) {
                 assertThat(stream).as(path).isNotNull();
                 var image = ImageIO.read(stream);
@@ -42,7 +42,7 @@ class RelayResourcesTest {
     }
 
     private Map<String, String> language(String locale) throws Exception {
-        String path = "/assets/fandroid/lang/" + locale + ".json";
+        String path = "/assets/lyrica/lang/" + locale + ".json";
         try (InputStream stream = getClass().getResourceAsStream(path)) {
             assertThat(stream).as(path).isNotNull();
             return ProtocolCodec.mapper().readValue(stream, new TypeReference<>() { });

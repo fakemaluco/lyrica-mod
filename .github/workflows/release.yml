@@ -29,7 +29,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: cargo build --release --locked
         working-directory: media-bridge
-      - run: ./gradlew :mod:build :mod-1.21.11:build :backend:installDist --no-daemon
+      - run: ./gradlew -Pversion="${GITHUB_REF_NAME#v}" :mod:build :mod-1.21.11:build :backend:installDist --no-daemon
       - name: Generate helper checksum
         shell: bash
         run: |
@@ -40,10 +40,10 @@ jobs:
         if: runner.os == 'Linux'
       - uses: actions/upload-artifact@v4
         with:
-          name: fandroid-${{ runner.os }}
+          name: lyrica-${{ runner.os }}
           path: |
-            mod/build/libs/fandroid-*.jar
-            mod-1.21.11/build/libs/fandroid-*.jar
+            mod/build/libs/lyrica-*.jar
+            mod-1.21.11/build/libs/lyrica-*.jar
             media-bridge/target/release/${{ matrix.helper }}
             media-bridge/target/release/${{ matrix.helper }}.sha256
-            spicetify-extension/dist/fandroid.js
+            spicetify-extension/dist/lyrica.js

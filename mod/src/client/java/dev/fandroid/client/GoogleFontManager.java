@@ -30,7 +30,7 @@ import java.util.regex.Pattern;
 
 /** Downloads a selected Google Fonts family into a generated client resource pack. */
 public final class GoogleFontManager {
-    private static final String NAMESPACE = "fandroid";
+    private static final String NAMESPACE = "lyrica";
     private static final String PACK_DIRECTORY = "fandroid-google-font";
     private static final String PACK_ID = "file/" + PACK_DIRECTORY;
     private static final String USER_AGENT =

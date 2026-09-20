@@ -11,6 +11,6 @@ class LyricsFontTest {
         assertThat(LyricsFont.UNIFORM.next()).isEqualTo(LyricsFont.MINECRAFT);
         assertThat(LyricsFont.GOOGLE.next()).isEqualTo(LyricsFont.MINECRAFT);
         assertThat(LyricsFont.MINECRAFT.id().toString()).isEqualTo("minecraft:default");
-        assertThat(LyricsFont.GOOGLE.id().toString()).isEqualTo("fandroid:google");
+        assertThat(LyricsFont.GOOGLE.id().toString()).isEqualTo("lyrica:google");
     }
 }

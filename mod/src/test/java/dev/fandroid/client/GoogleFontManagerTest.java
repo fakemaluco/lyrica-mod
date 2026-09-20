@@ -48,7 +48,7 @@ class GoogleFontManagerTest {
         assertThat(definition).contains("\"size\": 11.0");
         assertThat(definition).contains("\"oversample\": 5.0");
         assertThat(definition).containsSubsequence(
-                "fandroid:google-00.ttf", "fandroid:google-01.ttf", "minecraft:default");
+                "lyrica:google-00.ttf", "lyrica:google-01.ttf", "minecraft:default");
     }
 
     @Test

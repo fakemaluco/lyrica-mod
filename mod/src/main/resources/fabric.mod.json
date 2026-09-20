@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "id": "fandroid",
+  "id": "lyrica",
   "version": "${version}",
-  "name": "Relay",
-  "description": "A Y2K-inspired in-game phone for private messaging, calls, media controls and synchronized lyrics.",
-  "authors": ["Relay contributors"],
+  "name": "Lyrica",
+  "description": "A better way to experience music lyrics inside Minecraft.",
+  "authors": ["Lyrica contributors"],
   "contact": {
-    "sources": "https://github.com/fandroid/fandroid"
+    "sources": "https://github.com/fakemaluco/lyrica-mod"
   },
   "license": "AGPL-3.0-only",
   "environment": "*",

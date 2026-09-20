@@ -6,7 +6,7 @@ import net.minecraft.util.Identifier;
 public enum LyricsFont {
     MINECRAFT("Minecraft", Identifier.ofVanilla("default")),
     UNIFORM("Uniform", Identifier.ofVanilla("uniform")),
-    GOOGLE("Google Fonts", Identifier.of("fandroid", "google"));
+    GOOGLE("Google Fonts", Identifier.of("lyrica", "google"));
 
     private final String label;
     private final Identifier id;
