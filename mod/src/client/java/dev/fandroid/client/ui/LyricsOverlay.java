@@ -45,6 +45,7 @@ import static dev.fandroid.client.music.LyricsAnimation.interludeDotFill;
 import static dev.fandroid.client.music.LyricsAnimation.interludeDotLift;
 import static dev.fandroid.client.music.LyricsAnimation.isRightToLeft;
 import static dev.fandroid.client.music.LyricsAnimation.keyframe;
+import static dev.fandroid.client.music.LyricsAnimation.liftKeyframe;
 import static dev.fandroid.client.music.LyricsAnimation.mix;
 import static dev.fandroid.client.music.LyricsAnimation.smooth;
 import static dev.fandroid.client.music.LyricsAnimation.smoother;
@@ -2870,7 +2871,7 @@ public final class LyricsOverlay implements AutoCloseable {
     private static final class GlyphMotion {
         private final SpringValue scale = new SpringValue(1, 6.0, .92);
         private final SpringValue glow = new SpringValue(0, 7.0, .88);
-        private final SpringValue elevation = new SpringValue(0, 5.4, .90);
+        private final SpringValue elevation = new SpringValue(0, 3.7, .96);
         private void update(double progress, double durationStrength, boolean animated, double delta) {
             if (!animated) {
                 scale.setGoal(1);
@@ -2884,7 +2885,7 @@ public final class LyricsOverlay implements AutoCloseable {
             double peak = mix(1.018, 1.125, durationStrength);
             scale.setGoal(keyframe(progress, 1, .52, peak, 1));
             glow.setGoal(glowKeyframe(progress) * mix(.16, 1.08, durationStrength));
-            elevation.setGoal(glowKeyframe(progress) * mix(.35, .70, durationStrength));
+            elevation.setGoal(liftKeyframe(progress) * mix(.35, .70, durationStrength));
             scale.step(delta);
             glow.step(delta);
             elevation.step(delta);
@@ -2897,7 +2898,7 @@ public final class LyricsOverlay implements AutoCloseable {
     private static final class SegmentMotion {
         private final SpringValue scale = new SpringValue(1, 4.8, .92);
         private final SpringValue glow = new SpringValue(0, 5.8, .88);
-        private final SpringValue elevation = new SpringValue(0, 4.6, .90);
+        private final SpringValue elevation = new SpringValue(0, 3.3, .96);
 
         private void update(double progress, double durationStrength, boolean animated, double delta) {
             if (!animated) {
@@ -2912,7 +2913,7 @@ public final class LyricsOverlay implements AutoCloseable {
             double peak = mix(1.016, 1.080, durationStrength);
             scale.setGoal(keyframe(progress, 1, .50, peak, 1));
             glow.setGoal(glowKeyframe(progress) * mix(.24, 1.28, durationStrength));
-            elevation.setGoal(glowKeyframe(progress) * mix(.30, .60, durationStrength));
+            elevation.setGoal(liftKeyframe(progress) * mix(.30, .60, durationStrength));
             scale.step(delta);
             glow.step(delta);
             elevation.step(delta);

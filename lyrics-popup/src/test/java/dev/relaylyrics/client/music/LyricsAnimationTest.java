@@ -6,6 +6,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class LyricsAnimationTest {
     @Test
+    void liftUsesASlowerRoundedEntranceAndExit() {
+        assertThat(LyricsAnimation.liftKeyframe(0)).isZero();
+        assertThat(LyricsAnimation.liftKeyframe(.12)).isLessThan(.5);
+        assertThat(LyricsAnimation.liftKeyframe(.24)).isLessThan(1);
+        assertThat(LyricsAnimation.liftKeyframe(.30)).isEqualTo(1);
+        assertThat(LyricsAnimation.liftKeyframe(.82)).isGreaterThan(0);
+        assertThat(LyricsAnimation.liftKeyframe(1)).isZero();
+        assertThat(LyricsAnimation.shortWordLift(500, .5))
+                .isLessThan(1.08);
+    }
+
+    @Test
     void syllableTimedWordsAnimateTheirSyllablesInsteadOfTheWholeWord() {
         LyricsAnimation.TokenMotionPlan quickWord = LyricsAnimation.tokenMotionPlan(500, 1, false);
         LyricsAnimation.TokenMotionPlan heldWord = LyricsAnimation.tokenMotionPlan(2_000, 1, false);

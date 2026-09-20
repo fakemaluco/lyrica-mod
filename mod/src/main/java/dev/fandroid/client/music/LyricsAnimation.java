@@ -240,13 +240,23 @@ public final class LyricsAnimation {
         if (progress <= 0) return 0;
         double duration = Math.max(1, durationMillis);
         double elapsed = progress * duration;
-        double enterMillis = Math.clamp(duration * .65, 180, 360);
+        // Give compact words a visible, rounded ascent instead of a fast hop.
+        // The cap keeps very long short-word intervals from feeling delayed.
+        double enterMillis = Math.clamp(duration * .75, 220, 440);
         if (elapsed < enterMillis) return smoother(elapsed / enterMillis) * 1.08;
         // Stay elevated through the spoken interval, then settle while the next
         // word may already be active instead of snapping down beforehand.
         if (elapsed <= duration) return 1.08;
-        double exit = smoother((elapsed - duration) / 520.0);
+        double exit = smoother((elapsed - duration) / 640.0);
         return (1 - exit) * 1.08;
+    }
+
+    /** A gentler timing curve for vertical word, syllable and glyph elevation. */
+    public static double liftKeyframe(double progress) {
+        if (progress <= 0 || progress >= 1) return 0;
+        if (progress < .30) return smoother(progress / .30);
+        if (progress <= .64) return 1;
+        return 1 - smoother((progress - .64) / .36);
     }
 
     public static double wordEmphasis(double progress) {
