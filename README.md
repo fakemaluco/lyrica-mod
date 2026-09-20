@@ -1,10 +1,17 @@
 # Lyrica
 
+[![Latest release](https://img.shields.io/github/v/release/fakemaluco/lyrica-mod?label=release)](https://github.com/fakemaluco/lyrica-mod/releases)
+<a href="https://github.com/fakemaluco/lyrica-mod/stargazers"><img src="https://img.shields.io/github/stars/fakemaluco/lyrica-mod?style=flat&logo=github&label=Stars" height="18"></a>
+
+![Lyrica Banner](banner%20Lyrica%201.png)
+
 **A better way to experience music lyrics inside Minecraft.**
 
 Lyrica brings beautifully animated, **Apple-inspired lyrics** directly into Minecraft, featuring **word-by-word synchronization**, smooth animations, and plenty of customization options.
 
 The mod adapts to the way you play. Customize when and how lyrics appear, keeping them visible when you want them and out of the way when you don't.
+
+![Lyrica preview](gif%201.gif)
 
 ## Como instalar
 
