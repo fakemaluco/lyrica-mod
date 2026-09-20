@@ -3,6 +3,7 @@
   "id": "lyrica",
   "version": "${version}",
   "name": "Lyrica",
+  "icon": "icon.png",
   "description": "A better way to experience music lyrics inside Minecraft.",
   "authors": ["Lyrica contributors"],
   "contact": {
