@@ -142,6 +142,9 @@ tasks.processResources {
     from(rootProject.file("mod/src/main/resources/assets/lyrica/post_effect")) {
         into("assets/relaylyrics/post_effect")
     }
+    from(rootProject.file("mod/src/main/resources/assets/lyrica/textures/gui/lyrics")) {
+        into("assets/lyrica/textures/gui/lyrics")
+    }
     inputs.property("version", project.version)
     filesMatching("fabric.mod.json") {
         expand(mapOf("version" to project.version, "minecraft_dependency" to "~1.21.11",

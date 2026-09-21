@@ -15,6 +15,7 @@ import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -25,6 +26,7 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.EnumMap;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
@@ -40,15 +42,28 @@ public final class CoverArtTexture implements AutoCloseable {
     private final Path cache = FabricLoader.getInstance().getConfigDir().resolve("fandroid/music/artwork");
     private final AtomicLong generation = new AtomicLong();
     private final FluidBackdrop fluidBackdrop = new FluidBackdrop();
+    private final EnumMap<Fallback, TextureState> fallbackTextures = new EnumMap<>(Fallback.class);
     private volatile String requestedUrl;
     private volatile TextureState texture;
     private volatile TextureState previousTexture;
     private volatile long coverTransitionStartedNanos;
     private volatile String status = "NO ARTWORK";
+    private volatile Fallback fallback = Fallback.NONE;
+    private volatile boolean closed;
     private volatile long enhancedBackdropRetryNanos;
     private volatile long lastAttemptNanos;
     private RoundedCover roundedCurrent;
     private RoundedCover roundedPrevious;
+
+    public CoverArtTexture() {
+        loadFallback(Fallback.CONNECT_ACCOUNT, "please_connect.png");
+        loadFallback(Fallback.SONG_NOT_FOUND, "song_not_found.png");
+        loadFallback(Fallback.ERROR, "cover_error.png");
+    }
+
+    public void setFallback(Fallback value) {
+        fallback = value == null ? Fallback.NONE : value;
+    }
 
     public void update(String value) {
         String url = value == null ? null : value.strip();
@@ -73,18 +88,26 @@ public final class CoverArtTexture implements AutoCloseable {
     }
 
     public boolean draw(DrawContext context, int x, int y, int width, int height) {
-        TextureState value = texture;
+        TextureState value = displayedTexture();
         if (value == null) return false;
-        drawCover(context, value, x, y, width, height);
-        return true;
+        try {
+            drawCover(context, value, x, y, width, height);
+            return true;
+        } catch (RuntimeException error) {
+            return drawErrorFallback(context, x, y, width, height, 0, error);
+        }
     }
 
     /** Draws the cover through the same runtime-supersampled rounded clip as the border. */
     public boolean draw(DrawContext context, int x, int y, int width, int height,
                         int cornerRadius) {
-        TextureState value = texture;
+        TextureState value = displayedTexture();
         if (value == null || width <= 0 || height <= 0) return false;
-        return drawRoundedCover(context, value, x, y, width, height, cornerRadius, 1, 1);
+        try {
+            return drawRoundedCover(context, value, x, y, width, height, cornerRadius, 1, 1);
+        } catch (RuntimeException error) {
+            return drawErrorFallback(context, x, y, width, height, cornerRadius, error);
+        }
     }
 
     /** Draws a two-cover slide, clipped strictly to the requested album-art rectangle. */
@@ -95,31 +118,50 @@ public final class CoverArtTexture implements AutoCloseable {
     /** Draws the same transition through a true rounded alpha-shaped clip. */
     public boolean drawTransition(DrawContext context, int x, int y, int width, int height,
                                   int cornerRadius) {
-        TextureState current = texture;
-        if (current == null || width <= 0 || height <= 0) return false;
-        TextureState previous = previousTexture;
-        long started = coverTransitionStartedNanos;
-        if (previous == null || started == 0) {
-            return drawRoundedCover(context, current, x, y, width, height, cornerRadius, 1, 1);
+        try {
+            TextureState current = displayedTexture();
+            if (current == null || width <= 0 || height <= 0) return false;
+            TextureState previous = texture == null ? null : previousTexture;
+            long started = coverTransitionStartedNanos;
+            if (previous == null || started == 0) {
+                return drawRoundedCover(context, current, x, y, width, height, cornerRadius, 1, 1);
+            }
+            double linear = Math.clamp((System.nanoTime() - started)
+                    / (double) COVER_TRANSITION_NANOS, 0, 1);
+            if (linear >= 1) {
+                previousTexture = null;
+                coverTransitionStartedNanos = 0;
+                discardRoundedCover(false);
+                if (previous != current) destroy(previous);
+                return drawRoundedCover(context, current, x, y, width, height, cornerRadius, 1, 1);
+            }
+            int[] offsets = transitionOffsets(easeInOutQuint(linear), width);
+            RoundedGui.scissor(context, x, y, width, height, () -> {
+                drawRoundedCover(context, previous, x + offsets[0], y, width, height,
+                        cornerRadius, 1, 1);
+                // The incoming cover is intentionally rendered last over the stationary old cover.
+                drawRoundedCover(context, current, x + offsets[1], y, width, height,
+                        cornerRadius, 1, 1);
+            });
+            return true;
+        } catch (RuntimeException error) {
+            return drawErrorFallback(context, x, y, width, height, cornerRadius, error);
         }
-        double linear = Math.clamp((System.nanoTime() - started)
-                / (double) COVER_TRANSITION_NANOS, 0, 1);
-        if (linear >= 1) {
-            previousTexture = null;
-            coverTransitionStartedNanos = 0;
-            discardRoundedCover(false);
-            if (previous != current) destroy(previous);
-            return drawRoundedCover(context, current, x, y, width, height, cornerRadius, 1, 1);
+    }
+
+    private boolean drawErrorFallback(DrawContext context, int x, int y, int width, int height,
+                                      int cornerRadius, RuntimeException failure) {
+        if (!status.equals("ARTWORK FAILED")) {
+            status = "ARTWORK FAILED";
+            FanDroidMod.LOGGER.warn("Cover rendering failed; using bundled error artwork", failure);
         }
-        int[] offsets = transitionOffsets(easeInOutQuint(linear), width);
-        RoundedGui.scissor(context, x, y, width, height, () -> {
-            drawRoundedCover(context, previous, x + offsets[0], y, width, height,
-                    cornerRadius, 1, 1);
-            // The incoming cover is intentionally rendered last over the stationary old cover.
-            drawRoundedCover(context, current, x + offsets[1], y, width, height,
-                    cornerRadius, 1, 1);
-        });
-        return true;
+        TextureState error = fallbackTextures.get(Fallback.ERROR);
+        if (error == null || error == texture) return false;
+        try {
+            return drawRoundedCover(context, error, x, y, width, height, cornerRadius, 1, 1);
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     /** Replays the slide when two consecutive tracks intentionally reuse the same album artwork. */
@@ -182,7 +224,7 @@ public final class CoverArtTexture implements AutoCloseable {
     public boolean drawBackdrop(DrawContext context, int x, int y, int width, int height,
                                 int blurStrength, double speedMultiplier, double opacity,
                                 int cornerRadius, BackdropFx fx) {
-        TextureState value = texture;
+        TextureState value = displayedTexture();
         if (value == null) return false;
         int strength = Math.clamp(blurStrength, 0, 3);
         double backgroundOpacity = Math.clamp(opacity, 0, 1);
@@ -310,11 +352,59 @@ public final class CoverArtTexture implements AutoCloseable {
     }
 
     public int accentColor() {
-        TextureState value = texture;
+        TextureState value = displayedTexture();
         return value == null ? 0 : value.accent();
     }
 
     public String status() { return status; }
+
+    private TextureState displayedTexture() {
+        TextureState current = texture;
+        if (current != null && !status.equals("ARTWORK FAILED")) return current;
+        Fallback selected = status.equals("ARTWORK FAILED") ? Fallback.ERROR : fallback;
+        return fallbackTextures.get(selected);
+    }
+
+    private void loadFallback(Fallback type, String fileName) {
+        CompletableFuture.runAsync(() -> {
+            String path = "/assets/lyrica/textures/gui/lyrics/" + fileName;
+            try (InputStream stream = CoverArtTexture.class.getResourceAsStream(path)) {
+                if (stream == null) throw new IOException("missing bundled cover " + path);
+                byte[] bytes = stream.readNBytes(MAX_IMAGE_BYTES + 1);
+                if (bytes.length == 0 || bytes.length > MAX_IMAGE_BYTES) {
+                    throw new IOException("empty or oversized bundled cover " + path);
+                }
+                MinecraftClient.getInstance().execute(() -> installFallback(type, bytes));
+            } catch (Exception error) {
+                FanDroidMod.LOGGER.warn("Could not load bundled {} cover: {}", type, error.toString());
+            }
+        });
+    }
+
+    private void installFallback(Fallback type, byte[] bytes) {
+        if (closed) return;
+        NativeImage image = null;
+        try {
+            image = decode(bytes);
+            if (image.getWidth() <= 0 || image.getHeight() <= 0
+                    || image.getWidth() > MAX_DIMENSION || image.getHeight() > MAX_DIMENSION) {
+                throw new IOException("invalid bundled cover dimensions");
+            }
+            PaletteData palette = extractPalette(image);
+            NativeImageBackedTexture nativeTexture = PlatformTextures.fromImage(
+                    "Lyrica " + type.name().toLowerCase(Locale.ROOT) + " cover", image);
+            Identifier id = PlatformTextures.register("lyrica_cover_" + type.name().toLowerCase(Locale.ROOT),
+                    nativeTexture);
+            TextureState previous = fallbackTextures.put(type, new TextureState(id, image,
+                    image.getWidth(), image.getHeight(), palette.accent(), palette.colors()));
+            image = null;
+            destroy(previous);
+        } catch (Exception error) {
+            FanDroidMod.LOGGER.warn("Could not decode bundled {} cover: {}", type, error.toString());
+        } finally {
+            if (image != null) image.close();
+        }
+    }
 
     private void load(String url, long expectedGeneration) {
         try {
@@ -697,11 +787,21 @@ public final class CoverArtTexture implements AutoCloseable {
 
     @Override
     public void close() {
+        closed = true;
         generation.incrementAndGet();
         MinecraftClient.getInstance().execute(() -> {
             destroyTexture();
+            fallbackTextures.values().forEach(CoverArtTexture::destroy);
+            fallbackTextures.clear();
             fluidBackdrop.close();
         });
+    }
+
+    public enum Fallback {
+        NONE,
+        CONNECT_ACCOUNT,
+        SONG_NOT_FOUND,
+        ERROR
     }
 
     /** Reactive parameters for the fluid backdrop (hue, bloom, spectral tint). */

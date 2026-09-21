@@ -67,7 +67,7 @@ public final class SpicyLyricsParser {
     private static List<LyricVocalGroup> parseSyllableGroups(JsonNode content) {
         List<LyricVocalGroup> groups = new ArrayList<>();
         for (JsonNode group : content) {
-            boolean opposite = group.path("OppositeAligned").asBoolean(false);
+            boolean opposite = oppositeAligned(group);
             LyricLine lead = syllableLine(group.path("Lead"), opposite, false);
             if (lead == null) continue;
             List<LyricLine> backingLines = new ArrayList<>();
@@ -156,7 +156,7 @@ public final class SpicyLyricsParser {
             long end = Math.max(start, millis(node.path("EndTime")));
             String translation = firstText(node, "TranslatedText", "Translation");
             String romanization = text(node, "TransliteratedText");
-            boolean opposite = node.path("OppositeAligned").asBoolean(false);
+            boolean opposite = oppositeAligned(node);
             LyricLine lead = new LyricLine(start, end, line,
                     List.of(new TimedWord(start, end, line, false, blankToNull(romanization))),
                     opposite ? "v2" : "v1", false, blankToNull(translation), blankToNull(romanization));
@@ -205,6 +205,16 @@ public final class SpicyLyricsParser {
             if (!value.isBlank()) return value;
         }
         return "";
+    }
+
+    private static boolean oppositeAligned(JsonNode node) {
+        for (String field : List.of("OppositeAligned", "oppositeAligned", "opposite_aligned")) {
+            JsonNode value = node.path(field);
+            if (value.isBoolean()) return value.asBoolean();
+            if (value.isTextual()) return Boolean.parseBoolean(value.asText().strip());
+        }
+        String alignment = firstText(node, "Alignment", "alignment").strip().toLowerCase(Locale.ROOT);
+        return alignment.equals("opposite") || alignment.equals("right");
     }
 
     private static String songwriters(JsonNode root) {

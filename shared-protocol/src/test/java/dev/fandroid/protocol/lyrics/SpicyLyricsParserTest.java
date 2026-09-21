@@ -64,6 +64,20 @@ class SpicyLyricsParserTest {
     }
 
     @Test
+    void acceptsApiAlignmentAliasesForDuets() {
+        String json = """
+                {"Type":"Line","Content":[
+                  {"Text":"camel case","StartTime":0.0,"EndTime":1.0,"oppositeAligned":true},
+                  {"Text":"named side","StartTime":1.0,"EndTime":2.0,"alignment":"right"}]}
+                """;
+
+        var groups = parser.parse(json.getBytes(StandardCharsets.UTF_8)).document().groups();
+
+        assertThat(groups).extracting(LyricVocalGroup::alignment)
+                .containsExactly(LyricAlignment.OPPOSITE, LyricAlignment.OPPOSITE);
+    }
+
+    @Test
     void readsOfficialApiEnvelopeAndAttribution() {
         String json = """
                 {"Status":200,"Type":"object","Body":{"Type":"Line","source":"spicy_lyrics",

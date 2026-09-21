@@ -84,6 +84,7 @@ public final class MusicService implements AutoCloseable {
         });
         if (connector instanceof MediaBridgeConnector bridge) bridge.subscribeLyrics(this::acceptSpicyLyrics);
         syncMusicSource();
+        refreshIdleArtworkFallback();
         overlay.setArtworkTexture(artwork);
     }
 
@@ -106,9 +107,12 @@ public final class MusicService implements AutoCloseable {
     }
 
     public CompletableFuture<java.net.URI> connectSpotifyAccount(String clientId) {
-        return spotifyAccount.connect(clientId);
+        return spotifyAccount.connect(clientId).whenComplete((ignored, error) -> refreshIdleArtworkFallback());
     }
-    public void disconnectSpotifyAccount() { spotifyAccount.disconnect(); }
+    public void disconnectSpotifyAccount() {
+        spotifyAccount.disconnect();
+        refreshIdleArtworkFallback();
+    }
     public boolean spotifyAccountConnected() { return spotifyAccount.connected(); }
     public String spotifyAccountStatus() { return spotifyAccount.status(); }
 
@@ -124,11 +128,18 @@ public final class MusicService implements AutoCloseable {
         if (changedTrack && nextArtworkUrl != null && nextArtworkUrl.equals(artworkUrl)) {
             artwork.transitionCurrent();
         }
+        String previousArtworkUrl = artworkUrl;
         artworkUrl = nextArtworkUrl;
         if (nextArtworkUrl != null) {
+            refreshIdleArtworkFallback();
             artwork.update(nextArtworkUrl);
-        } else if (changedTrack && (value.title() == null || value.title().equals("Nothing playing"))) {
+        } else if (changedTrack || previousArtworkUrl != null) {
             artwork.update(null);
+            if (value.title() == null || value.title().equals("Nothing playing")) {
+                refreshIdleArtworkFallback();
+            } else {
+                refreshIdleArtworkFallback();
+            }
         }
         overlay.setPlayback(value);
         if (value.title() == null || value.title().equals("Nothing playing")) {
@@ -169,6 +180,7 @@ public final class MusicService implements AutoCloseable {
         importCandidates = List.of();
         overlay.beginLookup();
         lyricsStatus = "Finding lyrics...";
+        refreshIdleArtworkFallback();
 
         String spotifyId = SpicyLyricsApiClient.spotifyTrackId(value.spotifyUri());
         FanDroidMod.LOGGER.info("Looking up synced lyrics for '{}' by '{}'{}", value.title(), value.artist(),
@@ -210,6 +222,9 @@ public final class MusicService implements AutoCloseable {
             if (result.payload().isPresent()) {
                 parseAndApplySpicy(new SpicetifyLyricsPayload(resolvedUri, "spicy-json",
                         new String(result.payload().get(), StandardCharsets.UTF_8), "Spicy Lyrics API"), key, true);
+            } else if (result.status() == SpicyLyricsApiClient.Status.FAILED
+                    || result.status() == SpicyLyricsApiClient.Status.MISSING_KEY) {
+                markLookupError(result.message());
             } else {
                 markUnavailable(result.message());
             }
@@ -328,8 +343,23 @@ public final class MusicService implements AutoCloseable {
 
     private void markUnavailable(String message) {
         lyricsStatus = message;
+        refreshIdleArtworkFallback();
         overlay.markUnavailable(message);
         FanDroidMod.LOGGER.info(message);
+    }
+
+    private void markLookupError(String message) {
+        lyricsStatus = message;
+        artwork.setFallback(CoverArtTexture.Fallback.ERROR);
+        overlay.markUnavailable(message);
+        FanDroidMod.LOGGER.warn(message);
+    }
+
+    private void refreshIdleArtworkFallback() {
+        boolean connected = spotifyAccount.connected()
+                || connector instanceof MediaBridgeConnector bridge && bridge.spicetifyConnected();
+        artwork.setFallback(connected ? CoverArtTexture.Fallback.SONG_NOT_FOUND
+                : CoverArtTexture.Fallback.CONNECT_ACCOUNT);
     }
 
     private boolean stillNeedsFallback(String key) {
@@ -415,6 +445,9 @@ public final class MusicService implements AutoCloseable {
                     payload.source(), document.lines().size());
             if (persist) persistSpicy(payload, songwriters);
         } catch (Exception error) {
+            artwork.setFallback(CoverArtTexture.Fallback.ERROR);
+            lyricsStatus = "Could not read synchronized lyrics";
+            overlay.markUnavailable(lyricsStatus);
             FanDroidMod.LOGGER.warn("Could not parse lyrics supplied by Spicy Lyrics", error);
         }
     }

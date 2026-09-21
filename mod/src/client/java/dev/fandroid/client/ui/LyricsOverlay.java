@@ -1239,8 +1239,7 @@ public final class LyricsOverlay implements AutoCloseable {
                                           double focusY, double scroll, long now) {
         LyricsTextAlignment alignment = preferences.getLyricsAlignment();
         boolean centered = alignment == LyricsTextAlignment.CENTER;
-        boolean opposite = alignment == LyricsTextAlignment.SOURCE
-                && group.group.alignment() == LyricAlignment.OPPOSITE;
+        boolean opposite = oppositeAligned(alignment, group.group.alignment());
         PreparedLine prepared = group.lead;
         double focusScale = group.motion.scale();
         double baseScale = prepared.scale;
@@ -1389,8 +1388,7 @@ public final class LyricsOverlay implements AutoCloseable {
             double groupY = baseY + group.motion.elevation();
             LyricsTextAlignment alignment = preferences.getLyricsAlignment();
             boolean centered = alignment == LyricsTextAlignment.CENTER;
-            boolean opposite = alignment == LyricsTextAlignment.SOURCE
-                    && group.group.alignment() == LyricAlignment.OPPOSITE;
+            boolean opposite = oppositeAligned(alignment, group.group.alignment());
 
             int regionY = (int) Math.floor(groupY - 6);
             HitRegion region = new HitRegion(x + 7, regionY, width - 14,
@@ -1916,8 +1914,7 @@ public final class LyricsOverlay implements AutoCloseable {
         double progress = Math.clamp(elapsed / (double) gap, 0, 1);
         double visibility = interlude.visibility();
         LyricsTextAlignment selectedAlignment = preferences.getLyricsAlignment();
-        boolean opposite = selectedAlignment == LyricsTextAlignment.SOURCE
-                && alignment == LyricAlignment.OPPOSITE;
+        boolean opposite = oppositeAligned(selectedAlignment, alignment);
         int dotsStartX = selectedAlignment == LyricsTextAlignment.CENTER
                 ? x + width / 2 - 21 : opposite ? x + width - 66 : x + 24;
         int dotsY = (int) Math.clamp(dotsPosition, y + 14, y + height - 14);
@@ -1941,6 +1938,11 @@ public final class LyricsOverlay implements AutoCloseable {
                                 dot.opacity() * fill * lyricsSurfaceOpacity));
             }
         }
+    }
+
+    /** A duet keeps its vocal side unless the user explicitly centers every lyric line. */
+    static boolean oppositeAligned(LyricsTextAlignment selected, LyricAlignment source) {
+        return selected != LyricsTextAlignment.CENTER && source == LyricAlignment.OPPOSITE;
     }
 
     private static void drawDotOutline(DrawContext context, int centerX, int centerY,
