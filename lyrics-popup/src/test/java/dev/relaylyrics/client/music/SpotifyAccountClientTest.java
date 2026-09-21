@@ -29,12 +29,12 @@ class SpotifyAccountClientTest {
     }
 
     @Test
-    void rejectsWeakOrAmbiguousCatalogMatches() throws Exception {
+    void acceptsEquivalentCatalogDuplicatesButRejectsWeakMatches() throws Exception {
         JsonNode weak = ProtocolCodec.mapper().readTree("""
                 [{"id":"1234567890123456789012","name":"Dynamite Remix","duration_ms":199054,
                   "artists":[{"name":"Unrelated Artist"}],"album":{"name":"Other"}}]
                 """);
-        JsonNode ambiguous = ProtocolCodec.mapper().readTree("""
+        JsonNode equivalentDuplicates = ProtocolCodec.mapper().readTree("""
                 [
                   {"id":"1234567890123456789012","name":"Dynamite","duration_ms":199054,
                    "artists":[{"name":"BTS"}],"album":{"name":"BE"}},
@@ -45,7 +45,28 @@ class SpotifyAccountClientTest {
 
         PlaybackSnapshot track = snapshot("Dynamite", "BTS", "BE", 199_054);
         assertThat(SpotifyAccountClient.bestTrackId(track, weak)).isNull();
-        assertThat(SpotifyAccountClient.bestTrackId(track, ambiguous)).isNull();
+        assertThat(SpotifyAccountClient.bestTrackId(track, equivalentDuplicates)).isEqualTo(EXACT_ID);
+    }
+
+    @Test
+    void resolvesAmiantoDespiteDuplicateOriginalRecording() throws Exception {
+        JsonNode items = ProtocolCodec.mapper().readTree("""
+                [
+                  {"id":"3SliIEDG2MqiurzdU60QRq","name":"Amianto","duration_ms":257252,
+                   "artists":[{"name":"Supercombo"}],"album":{"name":"Amianto"}},
+                  {"id":"5IFNS2BcvVkJjF9q3XvNSK","name":"Amianto - Acústica","duration_ms":169779,
+                   "artists":[{"name":"Supercombo"}],"album":{"name":"Amianto"}},
+                  {"id":"0Uv33NbC03tRQxpkYY87TV","name":"Amianto","duration_ms":240267,
+                   "artists":[{"name":"Supercombo"},{"name":"Liniker e os Caramelows"}],
+                   "album":{"name":"Session da Tarde: 1ª Temporada"}},
+                  {"id":"3utVM4ldh78ta02hLOpFeF","name":"Amianto","duration_ms":257252,
+                   "artists":[{"name":"Supercombo"}],"album":{"name":"Amianto"}}
+                ]
+                """);
+
+        assertThat(SpotifyAccountClient.bestTrackId(
+                snapshot("Amianto", "Supercombo", "Amianto", 257_252), items))
+                .isEqualTo("3SliIEDG2MqiurzdU60QRq");
     }
 
     private static PlaybackSnapshot snapshot(String title, String artist, String album, long duration) {

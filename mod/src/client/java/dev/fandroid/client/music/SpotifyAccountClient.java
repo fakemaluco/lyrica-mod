@@ -32,6 +32,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -108,9 +109,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
 
     static String bestTrackId(PlaybackSnapshot track, JsonNode items) {
         if (track == null || items == null || !items.isArray()) return null;
-        String bestId = null;
-        double best = 0;
-        double second = 0;
+        List<SearchCandidate> matches = new ArrayList<>();
         for (JsonNode item : items) {
             String id = item.path("id").asText("");
             if (!id.matches("[A-Za-z0-9]{22}")) continue;
@@ -126,17 +125,24 @@ public final class SpotifyAccountClient implements AutoCloseable {
             long candidateDuration = item.path("duration_ms").asLong(0);
             double duration = durationSimilarity(track.durationMillis(), candidateDuration);
             double score = metadata * .88 + duration * .12;
-            if (score > best) {
-                second = best;
-                best = score;
-                bestId = id;
-            } else if (score > second) {
-                second = score;
-            }
+            String signature = LyricsMatchScorer.canonicalKey(item.path("name").asText(""),
+                    String.join(", ", artists), item.path("album").path("name").asText(""))
+                    + '\n' + Math.round(candidateDuration / 2_000.0);
+            matches.add(new SearchCandidate(id, score, signature));
         }
-        if (best < .86 || second > 0 && best - second < .018) return null;
-        return bestId;
+        matches.sort(Comparator.comparingDouble(SearchCandidate::score).reversed());
+        if (matches.isEmpty() || matches.getFirst().score() < .86) return null;
+        SearchCandidate best = matches.getFirst();
+        for (int index = 1; index < matches.size(); index++) {
+            SearchCandidate other = matches.get(index);
+            if (other.signature().equals(best.signature())) continue;
+            if (best.score() - other.score() < .018) return null;
+            break;
+        }
+        return best.id();
     }
+
+    private record SearchCandidate(String id, double score, String signature) { }
 
     private static double durationSimilarity(long expected, long candidate) {
         if (expected <= 0 || candidate <= 0) return .5;
