@@ -42,6 +42,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
         GoogleFontManager.restore(preferences().getGoogleFontFamily(),
                 preferences().getLyricsFontWeight().cssWeight(), overlay::fontChanged);
         InventoryLyricsInteraction.register();
+        WorldLyricsRenderHook.register();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             overlay.tick();
             InventoryLyricsController.tick(client);

@@ -48,6 +48,7 @@ public final class ClientPreferences {
     private double lyricsReactiveBloomAmount = 100;
     private boolean lyricsReactiveSpectral;
     private double lyricsReactiveSpectralAmount = 100;
+    private boolean worldLyrics;
     private boolean lyricsAnimations = true;
     private boolean lyricsBorder = true;
     private boolean inventoryPopup = true;
@@ -225,6 +226,8 @@ public final class ClientPreferences {
     public void setLyricsReactiveSpectralAmount(double value) {
         lyricsReactiveSpectralAmount = Math.clamp(value, 0, 300);
     }
+    public boolean isWorldLyrics() { return worldLyrics; }
+    public void setWorldLyrics(boolean value) { worldLyrics = value; }
 
     public enum ReactiveSource {
         VOLUME, WORDS, WAVEFORM;

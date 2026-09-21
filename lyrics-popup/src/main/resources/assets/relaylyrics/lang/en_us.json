@@ -15,6 +15,7 @@
   "config.relaylyrics.category.typography": "Typography",
   "config.relaylyrics.category.connection": "Connection",
   "config.relaylyrics.category.experimental": "Experimental",
+  "config.relaylyrics.world_lyrics": "Lyrics placed in the world",
   "config.relaylyrics.reactive": "Music-reactive background",
   "config.relaylyrics.reactive_source": "Reactive source",
   "config.relaylyrics.reactive_source.volume": "Volume",

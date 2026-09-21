@@ -217,6 +217,9 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
                         () -> valueOrDash(music == null ? null : music.lyricsStatusDetail()), null, null);
             }
             case EXPERIMENTAL -> {
+                y = addToggle(y, "config.relaylyrics.world_lyrics", preferences::isWorldLyrics,
+                        () -> preferences.setWorldLyrics(true),
+                        () -> preferences.setWorldLyrics(false));
                 y = addRow(y, Text.translatable("config.relaylyrics.reactive_source"),
                         () -> enumValue("config.relaylyrics.reactive_source.",
                                 preferences.getLyricsReactiveSource().name()),
@@ -402,6 +405,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
         preferences.setInventoryPopup(true);
         preferences.setInventoryNowPlaying(true);
         preferences.setModernMode(false);
+        preferences.setWorldLyrics(false);
         preferences.setMusicSource(MusicSource.AUTOMATIC);
         preferences.setLyricsRenderType(dev.relaylyrics.client.LyricsRenderType.NON_INTRUSIVE);
         preferences.setLyricsTextShadow(true);

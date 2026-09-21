@@ -234,6 +234,7 @@ public final class LyricsOverlay implements AutoCloseable {
     public LyricsDocument document() { return document; }
     public String syncLabel() { return syncLabel; }
     public RenderStats renderStats() { return renderStats; }
+    public long currentPositionMillis() { return positionMillis(); }
 
     public void setPlayback(PlaybackSnapshot playback) {
         this.playback = playback;

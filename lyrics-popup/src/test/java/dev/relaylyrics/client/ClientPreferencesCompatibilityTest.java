@@ -26,6 +26,7 @@ final class ClientPreferencesCompatibilityTest {
         assertThat(preferences.isInventoryPopup()).isTrue();
         assertThat(preferences.isInventoryNowPlaying()).isTrue();
         assertThat(preferences.isModernMode()).isFalse();
+        assertThat(preferences.isWorldLyrics()).isFalse();
         assertThat(preferences.getMusicSource()).isEqualTo(MusicSource.AUTOMATIC);
         assertThat(preferences.getLyricsRenderType()).isEqualTo(LyricsRenderType.NON_INTRUSIVE);
         assertThat(preferences.getLyricsWidth()).isEqualTo(420);
@@ -75,5 +76,16 @@ final class ClientPreferencesCompatibilityTest {
         assertThat(preferences.isLyricsTextShadow()).isFalse();
         assertThat(preferences.isLyricsBold()).isTrue();
         assertThat(preferences.getLyricsFontWeight()).isEqualTo(LyricsFontWeight.BOLD);
+    }
+
+    @Test
+    void persistsTheExperimentalWorldLyricsToggle() throws Exception {
+        ClientPreferences preferences = ProtocolCodec.mapper().readValue(
+                "{\"worldLyrics\":true}", ClientPreferences.class);
+
+        assertThat(preferences.isWorldLyrics()).isTrue();
+        ClientPreferences restored = ProtocolCodec.mapper().readValue(
+                ProtocolCodec.mapper().writeValueAsBytes(preferences), ClientPreferences.class);
+        assertThat(restored.isWorldLyrics()).isTrue();
     }
 }
