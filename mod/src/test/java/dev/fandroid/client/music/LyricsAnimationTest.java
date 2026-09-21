@@ -51,6 +51,17 @@ class LyricsAnimationTest {
     }
 
     @Test
+    void longSyllablesUseGlyphMotionWithoutAnimatingTheirSiblingFragments() {
+        LyricsAnimation.TokenMotionPlan syllables = LyricsAnimation.tokenMotionPlan(3_000, 3, false);
+
+        assertThat(syllables.syllableMotion()).isTrue();
+        assertThat(syllables.glyphMotion()).isFalse();
+        assertThat(syllables.glyphMotionForFragment(999)).isFalse();
+        assertThat(syllables.glyphMotionForFragment(1_000)).isTrue();
+        assertThat(syllables.glyphMotionForFragment(1_001)).isTrue();
+    }
+
+    @Test
     void timingProgressIsClampedAndHandlesZeroLengthFragments() {
         assertThat(LyricsAnimation.timedProgress(900, 1_000, 2_000)).isZero();
         assertThat(LyricsAnimation.timedProgress(1_500, 1_000, 2_000)).isEqualTo(.5);

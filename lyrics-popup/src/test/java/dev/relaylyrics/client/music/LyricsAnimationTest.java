@@ -41,8 +41,12 @@ class LyricsAnimationTest {
         assertThat(syllableWord.syllableMotion()).isTrue();
         assertThat(syllableWord.wholeWordMotion()).isFalse();
         assertThat(syllableWord.glyphMotion()).isFalse();
+        assertThat(syllableWord.glyphMotionForFragment(999)).isFalse();
+        assertThat(syllableWord.glyphMotionForFragment(1_000)).isTrue();
+        assertThat(syllableWord.glyphMotionForFragment(1_001)).isTrue();
         assertThat(heldSyllableWord.syllableMotion()).isTrue();
         assertThat(heldSyllableWord.glyphMotion()).isFalse();
+        assertThat(heldSyllableWord.glyphMotionForFragment(500)).isFalse();
         assertThat(LyricsAnimation.tokenMotionPlan(2_000, 3, true))
                 .isEqualTo(new LyricsAnimation.TokenMotionPlan(false, false, false));
     }

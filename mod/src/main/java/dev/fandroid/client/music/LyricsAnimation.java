@@ -241,9 +241,9 @@ public final class LyricsAnimation {
     }
 
     /**
-     * Chooses one motion owner for a visual word. Syllable-timed words deliberately
-     * take precedence over the duration heuristic: moving their whole word would
-     * make future syllables jump before their own timing begins.
+     * Chooses the outer motion owner for a visual word. Syllable-timed words never
+     * move as a whole; each fragment may additionally articulate its own glyphs
+     * when that fragment independently reaches the held-duration threshold.
      */
     public static TokenMotionPlan tokenMotionPlan(long durationMillis, int fragmentCount,
                                                    boolean simpleMode) {
@@ -257,6 +257,11 @@ public final class LyricsAnimation {
     public record TokenMotionPlan(boolean wholeWordMotion, boolean syllableMotion,
                                   boolean glyphMotion) {
         private static final TokenMotionPlan NONE = new TokenMotionPlan(false, false, false);
+
+        /** A long synchronized syllable may articulate its own letters without moving sibling syllables. */
+        public boolean glyphMotionForFragment(long fragmentDurationMillis) {
+            return glyphMotion || (syllableMotion && usesPerGlyphMotion(fragmentDurationMillis));
+        }
     }
 
     public static double shortWordLift(long durationMillis, double progress) {

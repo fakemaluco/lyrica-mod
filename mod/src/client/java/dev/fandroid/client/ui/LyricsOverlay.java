@@ -1269,38 +1269,43 @@ public final class LyricsOverlay implements AutoCloseable {
                 ? now >= token.timing.startMillis() ? 1 : -1
                 : (now - token.timing.startMillis())
                 / (double) (token.timing.endMillis() - token.timing.startMillis());
-        double durationStrength = individualMotionStrength(token.visualWordDurationMillis);
         var motionPlan = token.motionPlan(false);
-        boolean perGlyphMotion = motionPlan.glyphMotion();
-        if (!perGlyphMotion) return;
-        double wordScale = 1 + wordEmphasis(wordProgress) * mix(.016, .045, durationStrength);
+        double durationStrength = motionPlan.glyphMotion()
+                ? individualMotionStrength(token.visualWordDurationMillis) : 0;
+        double wordScale = motionPlan.syllableMotion() ? 1
+                : 1 + wordEmphasis(wordProgress) * mix(.016, .045, durationStrength);
         double wordCenterX = x + token.rawWidth * scale / 2;
         double wordGlyphScale = scale * wordScale;
         double fillOffset = token.fillOffset(now);
         var fill = fillInterval(token.rawWidth, fillOffset / token.rawWidth, isRightToLeft(token.text));
         double fillLeft = wordCenterX + (x + fill.start() * scale - wordCenterX) * wordScale;
         double fillRight = wordCenterX + (x + fill.end() * scale - wordCenterX) * wordScale;
-        double wordSustainedGlow = sustainedWordGlow(token.visualWordDurationMillis, wordProgress);
         for (Glyph glyph : token.glyphs) {
             if (glyph.startMillis == Long.MIN_VALUE) continue;
             Segment segment = token.segments.get(glyph.segmentIndex);
+            boolean glyphMotion = motionPlan.glyphMotionForFragment(segment.durationMillis());
+            if (!glyphMotion) continue;
+            double glowProgress = motionPlan.syllableMotion()
+                    ? timedProgress(now, segment.startMillis, segment.endMillis) : wordProgress;
+            long glowDuration = motionPlan.syllableMotion()
+                    ? segment.durationMillis() : token.visualWordDurationMillis;
+            double wordSustainedGlow = sustainedWordGlow(glowDuration, glowProgress);
             double restingX = x + glyph.x * scale;
             double baseX = wordCenterX + (restingX - wordCenterX) * wordScale;
-            double characterScale = perGlyphMotion
-                    ? segment.motion.scale() * glyph.motion.scale() : 1;
+            double characterScale = segment.motion.scale() * glyph.motion.scale();
             double animatedScale = wordGlyphScale * characterScale;
             double drawX = baseX + glyph.rawWidth * wordGlyphScale * (1 - characterScale) / 2;
             double drawY = y + renderer().fontHeight * scale / 2
                     - renderer().fontHeight * animatedScale / 2
                     - (segment.motion.elevation() + glyph.motion.elevation()) * scale;
-            double motionGlow = perGlyphMotion
-                    ? Math.clamp(Math.max(glyph.motion.glow(), segment.motion.glow()) / 1.65, 0, 1) : 0;
+            double motionGlow = Math.clamp(
+                    Math.max(glyph.motion.glow(), segment.motion.glow()) / 1.65, 0, 1);
             double boundaryPixels = Math.clamp(fillOffset, 0, Math.max(0, token.rawWidth));
             double edgeGlow = boundaryGlow(
                     (boundaryPixels - (glyph.x + glyph.rawWidth / 2)) / Math.max(glyph.rawWidth, 1));
             double glowAmount = activeGlyphGlow(
                     Math.max(motionGlow, Math.min(1, wordSustainedGlow / 1.45)),
-                    token.visualWordDurationMillis, wordProgress, edgeGlow);
+                    glowDuration, glowProgress, edgeGlow);
             if (!activeGlowProfile(glowAmount,
                     preferences.getLyricsGlowIntensity().multiplier()).needsBloom()) continue;
             double glyphRight = drawX + glyph.rawWidth * animatedScale;
@@ -1342,9 +1347,9 @@ public final class LyricsOverlay implements AutoCloseable {
                 for (Glyph glyph : token.glyphs) {
                     if (glyph.startMillis == Long.MIN_VALUE) continue;
                     Segment segment = token.segments.get(glyph.segmentIndex);
+                    boolean glyphMotion = motionPlan.glyphMotionForFragment(segment.durationMillis());
                     glyph.motion.update(timedProgress(now, glyph.startMillis, glyph.endMillis),
-                            individualMotionStrength(segment.durationMillis()),
-                            motionPlan.glyphMotion(), delta);
+                            individualMotionStrength(segment.durationMillis()), glyphMotion, delta);
                 }
             }
         }
@@ -1734,9 +1739,9 @@ public final class LyricsOverlay implements AutoCloseable {
         var fill = fillInterval(token.rawWidth, fillOffset / token.rawWidth, isRightToLeft(token.text));
         double fillLeft = wordCenterX + (x + fill.start() * scale - wordCenterX) * wordScale;
         double fillRight = wordCenterX + (x + fill.end() * scale - wordCenterX) * wordScale;
-        double wordSustainedGlow = sustainedWordGlow(token.visualWordDurationMillis, wordProgress);
         for (Glyph glyph : token.glyphs) {
             Segment segment = token.segments.get(glyph.segmentIndex);
+            boolean glyphMotion = motionPlan.glyphMotionForFragment(segment.durationMillis());
             double restingX = x + glyph.x * scale;
             double baseX = wordCenterX + (restingX - wordCenterX) * wordScale;
             double segmentGlyphScale = wordGlyphScale;
@@ -1752,21 +1757,25 @@ public final class LyricsOverlay implements AutoCloseable {
             }
 
             double characterScale = segmentMotion
-                    ? segment.motion.scale() * (perGlyphMotion ? glyph.motion.scale() : 1) : 1;
+                    ? segment.motion.scale() * (glyphMotion ? glyph.motion.scale() : 1) : 1;
             double animatedScale = segmentGlyphScale * characterScale;
             double drawX = baseX + glyph.rawWidth * segmentGlyphScale * (1 - characterScale) / 2;
             double drawY = centerY - renderer().fontHeight * animatedScale / 2
                     - (segmentMotion
-                    ? segment.motion.elevation() + (perGlyphMotion ? glyph.motion.elevation() : 0)
+                    ? segment.motion.elevation() + (glyphMotion ? glyph.motion.elevation() : 0)
                     : wordLift) * scale;
-            double motionGlow = perGlyphMotion
+            double motionGlow = glyphMotion
                     ? Math.clamp(Math.max(glyph.motion.glow(), segment.motion.glow()) / 1.65, 0, 1) : 0;
+            double glowProgress = motionPlan.syllableMotion() ? segmentProgress : wordProgress;
+            long glowDuration = motionPlan.syllableMotion()
+                    ? segment.durationMillis() : token.visualWordDurationMillis;
+            double wordSustainedGlow = sustainedWordGlow(glowDuration, glowProgress);
             double boundaryPixels = Math.clamp(fillOffset, 0, Math.max(0, token.rawWidth));
             double boundaryGlow = boundaryGlow(
                     (boundaryPixels - (glyph.x + glyph.rawWidth / 2)) / Math.max(glyph.rawWidth, 1));
-            double glowAmount = simple || !perGlyphMotion ? 0 : activeGlyphGlow(
+            double glowAmount = simple || !glyphMotion ? 0 : activeGlyphGlow(
                     Math.max(motionGlow, Math.min(1, wordSustainedGlow / 1.45)),
-                    token.visualWordDurationMillis, wordProgress, boundaryGlow);
+                    glowDuration, glowProgress, boundaryGlow);
             if (simple) glowAmount = 0;
             int activeColor = ACTIVE_TEXT;
             if (pass.activeGlow()) {
