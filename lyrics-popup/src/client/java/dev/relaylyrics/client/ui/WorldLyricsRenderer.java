@@ -27,7 +27,7 @@ import java.util.Set;
 public final class WorldLyricsRenderer {
     private static final double FORWARD_DISTANCE = 4.35;
     private static final double ROW_SPACING = .82;
-    private static final float BASE_PIXEL_SCALE = .022F;
+    private static final float BASE_PIXEL_SCALE = .040F;
     private static final Map<LineKey, Anchor> ANCHORS = new HashMap<>();
     private static Object activeWorld;
 
@@ -85,7 +85,7 @@ public final class WorldLyricsRenderer {
             if (token.startsWord() && totalWidth > 0) totalWidth += spaceWidth;
             totalWidth += renderer.getWidth(styled(token.text(), preferences));
         }
-        float fit = Math.min(1F, 220F / Math.max(1, totalWidth));
+        float fit = Math.min(1F, 320F / Math.max(1, totalWidth));
         float pixelScale = BASE_PIXEL_SCALE * fit * (planned.backing() ? .78F : 1F);
         double visibility = WorldLyricsPlan.lineVisibility(line, now) * (planned.backing() ? .68 : 1);
         if (visibility <= .01) return;
@@ -99,7 +99,7 @@ public final class WorldLyricsRenderer {
             int width = renderer.getWidth(text);
             double emphasis = preferences.isLyricsAnimations() ? token.emphasis(now) : 0;
             double towardViewer = emphasis * .24;
-            double elevation = emphasis * .16;
+            double elevation = emphasis * .20;
             float tokenScale = pixelScale * (float) (1 + emphasis * .09);
             double tokenCenter = cursor + width * pixelScale / 2.0;
             int alpha = (int) Math.round(255 * visibility * tokenOpacity(token, now));
@@ -110,12 +110,12 @@ public final class WorldLyricsRenderer {
             double z = anchor.z + anchor.rightZ * tokenCenter
                     - anchor.forwardZ * towardViewer;
             matrices.push();
-            matrices.translate(x - cameraPos.x, anchor.y + elevation - cameraPos.y,
+            double baselineY = anchor.y + renderer.fontHeight * tokenScale + elevation;
+            matrices.translate(x - cameraPos.x, baselineY - cameraPos.y,
                     z - cameraPos.z);
             matrices.multiply(new Quaternionf()
-                    .rotateY((float) Math.toRadians(180 - anchor.yaw))
-                    .rotateX((float) (-Math.PI / 2)));
-            matrices.scale(tokenScale, tokenScale, tokenScale);
+                    .rotateY((float) Math.toRadians(180 - anchor.yaw)));
+            matrices.scale(tokenScale, -tokenScale, tokenScale);
             renderer.draw(text, -width / 2.0F, 0, color, preferences.isLyricsTextShadow(),
                     matrices.peek().getPositionMatrix(), consumers,
                     TextRenderer.TextLayerType.NORMAL, 0, LightmapTextureManager.MAX_LIGHT_COORDINATE);
@@ -157,7 +157,7 @@ public final class WorldLyricsRenderer {
         Vec3d end = new Vec3d(x, cameraY - 10, z);
         HitResult hit = client.world.raycast(new RaycastContext(start, end,
                 RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, client.player));
-        return hit.getType() == HitResult.Type.BLOCK ? hit.getPos().y + .025 : client.player.getY() + .025;
+        return hit.getType() == HitResult.Type.BLOCK ? hit.getPos().y + .04 : client.player.getY() + .04;
     }
 
     private record LineKey(long start, long end, String text, String agent, boolean backing) { }

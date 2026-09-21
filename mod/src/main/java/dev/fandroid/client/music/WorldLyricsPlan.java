@@ -18,8 +18,16 @@ public final class WorldLyricsPlan {
     private WorldLyricsPlan() { }
 
     public static List<WorldLine> visibleLines(LyricsDocument document, long now) {
-        if (document == null || document.groups().isEmpty()) return List.of();
+        if (document == null) return List.of();
         List<WorldLine> result = new ArrayList<>();
+        if (document.groups().isEmpty()) {
+            for (LyricLine line : document.lines()) {
+                addIfVisible(result, line, LyricAlignment.NORMAL, false, now);
+            }
+            result.sort(Comparator.comparingLong(line -> line.line().startMillis()));
+            if (result.size() <= MAX_VISIBLE_LINES) return List.copyOf(result);
+            return List.copyOf(result.subList(result.size() - MAX_VISIBLE_LINES, result.size()));
+        }
         for (LyricVocalGroup group : document.groups()) {
             addIfVisible(result, group.lead(), group.alignment(), false, now);
             for (LyricLine backing : group.backingVocals()) {
