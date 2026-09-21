@@ -77,10 +77,10 @@ public final class MusicService implements AutoCloseable {
             path = hotUpdate;
         }
         connector = MediaBridgeConnector.start(path);
-        spotifyAccount = new SpotifyAccountClient(preferences, this::update);
+        spotifyAccount = new SpotifyAccountClient(preferences, this::update,
+                () -> !(connector instanceof MediaBridgeConnector bridge) || !bridge.spicetifyConnected());
         connector.subscribe(value -> {
-            if (preferences.getMusicSource() != MusicSource.SPOTIFY_ACCOUNT
-                    || !spotifyAccount.hasActivePlayback()) update(value);
+            if (!spotifyAccount.shouldOverrideBridge()) update(value);
         });
         if (connector instanceof MediaBridgeConnector bridge) bridge.subscribeLyrics(this::acceptSpicyLyrics);
         syncMusicSource();
@@ -480,7 +480,7 @@ public final class MusicService implements AutoCloseable {
 
     private void routeCommand(MusicCommand command) {
         syncMusicSource();
-        if (preferences.getMusicSource() == MusicSource.SPOTIFY_ACCOUNT) {
+        if (spotifyAccount.shouldOverrideBridge()) {
             spotifyAccount.command(command);
         } else {
             connector.command(command);

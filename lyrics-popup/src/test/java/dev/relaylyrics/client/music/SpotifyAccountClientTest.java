@@ -2,6 +2,7 @@ package dev.relaylyrics.client.music;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import dev.relaylyrics.protocol.ProtocolCodec;
+import dev.relaylyrics.client.MusicSource;
 import dev.relaylyrics.protocol.music.MusicCapabilities;
 import dev.relaylyrics.protocol.music.PlaybackSnapshot;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class SpotifyAccountClientTest {
     private static final String EXACT_ID = "1234567890123456789012";
+
+    @Test
+    void accountPlaybackIsPreferredInAutomaticAndExplicitAccountModes() {
+        assertThat(SpotifyAccountClient.preferredSource(MusicSource.AUTOMATIC, true)).isTrue();
+        assertThat(SpotifyAccountClient.preferredSource(MusicSource.AUTOMATIC, false)).isFalse();
+        assertThat(SpotifyAccountClient.preferredSource(MusicSource.SPOTIFY_ACCOUNT, false)).isTrue();
+        assertThat(SpotifyAccountClient.preferredSource(MusicSource.WINDOWS_MEDIA, true)).isFalse();
+        assertThat(SpotifyAccountClient.preferredSource(MusicSource.SPICETIFY_BRIDGE, true)).isFalse();
+    }
 
     @Test
     void selectsExactMetadataAndDurationMatch() throws Exception {

@@ -37,6 +37,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /** Spotify Web API account connector using desktop-safe OAuth Authorization Code + PKCE. */
@@ -46,6 +47,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
             + "user-modify-playback-state user-library-read user-library-modify";
     private final ClientPreferences preferences;
     private final Consumer<PlaybackSnapshot> snapshots;
+    private final BooleanSupplier automaticAccountAllowed;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final Path tokenFile = FabricLoader.getInstance().getConfigDir()
             .resolve("fandroid/spotify-account.json");
@@ -62,8 +64,14 @@ public final class SpotifyAccountClient implements AutoCloseable {
     private volatile boolean liked;
 
     public SpotifyAccountClient(ClientPreferences preferences, Consumer<PlaybackSnapshot> snapshots) {
+        this(preferences, snapshots, () -> true);
+    }
+
+    public SpotifyAccountClient(ClientPreferences preferences, Consumer<PlaybackSnapshot> snapshots,
+                                BooleanSupplier automaticAccountAllowed) {
         this.preferences = preferences;
         this.snapshots = snapshots;
+        this.automaticAccountAllowed = automaticAccountAllowed;
         loadTokens();
         Thread.ofVirtual().name("relay-spotify-account").start(this::pollLoop);
     }
@@ -71,6 +79,18 @@ public final class SpotifyAccountClient implements AutoCloseable {
     public boolean connected() { return !refreshToken.isBlank() || !accessToken.isBlank(); }
     public String status() { return status; }
     public boolean hasActivePlayback() { return meaningful(latest); }
+    public boolean shouldOverrideBridge() {
+        return shouldUseAccountSource() && hasActivePlayback();
+    }
+
+    static boolean preferredSource(MusicSource source, boolean automaticAllowed) {
+        return source == MusicSource.SPOTIFY_ACCOUNT
+                || source == MusicSource.AUTOMATIC && automaticAllowed;
+    }
+
+    private boolean shouldUseAccountSource() {
+        return preferredSource(preferences.getMusicSource(), automaticAccountAllowed.getAsBoolean());
+    }
 
     /** Resolves metadata supplied by Windows Media to a conservative Spotify track match. */
     public String resolveTrackId(PlaybackSnapshot track) {
@@ -125,8 +145,10 @@ public final class SpotifyAccountClient implements AutoCloseable {
             long candidateDuration = item.path("duration_ms").asLong(0);
             double duration = durationSimilarity(track.durationMillis(), candidateDuration);
             double score = metadata * .88 + duration * .12;
+            // The same recording is frequently listed once per album/compilation. Album must not
+            // make those catalog aliases ambiguous; title, artists and duration still separate versions.
             String signature = LyricsMatchScorer.canonicalKey(item.path("name").asText(""),
-                    String.join(", ", artists), item.path("album").path("name").asText(""))
+                    String.join(", ", artists), "")
                     + '\n' + Math.round(candidateDuration / 2_000.0);
             matches.add(new SearchCandidate(id, score, signature));
         }
@@ -255,7 +277,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
     private void pollLoop() {
         while (!closed) {
             try {
-                if (preferences.getMusicSource() == MusicSource.SPOTIFY_ACCOUNT && connected()) poll();
+                if (shouldUseAccountSource() && connected()) poll();
                 Thread.sleep(500);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
@@ -322,7 +344,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
     private void accept(PlaybackSnapshot value) {
         latest = value;
         // An empty Web API poll must not erase a valid Windows Media fallback.
-        if (preferences.getMusicSource() == MusicSource.SPOTIFY_ACCOUNT && meaningful(value)) {
+        if (shouldUseAccountSource() && meaningful(value)) {
             snapshots.accept(value);
         }
     }
