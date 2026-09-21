@@ -89,7 +89,9 @@ public final class WorldLyricsRenderer {
         float pixelScale = BASE_PIXEL_SCALE * fit * (planned.backing() ? .78F : 1F);
         double visibility = WorldLyricsPlan.lineVisibility(line, now) * (planned.backing() ? .68 : 1);
         if (visibility <= .01) return;
-        double cursor = -totalWidth * pixelScale / 2.0;
+        double alignmentOffset = planned.alignment().name().equals("OPPOSITE")
+                ? totalWidth * pixelScale * .30 : 0;
+        double cursor = -totalWidth * pixelScale / 2.0 + alignmentOffset;
 
         for (WorldLyricsPlan.Token token : tokens) {
             if (token.startsWord() && cursor > -totalWidth * pixelScale / 2.0) {
@@ -106,15 +108,14 @@ public final class WorldLyricsRenderer {
             int color = Math.clamp(alpha, 8, 255) << 24 | 0xFFFFFF;
 
             double x = anchor.x + anchor.rightX * tokenCenter
-                    - anchor.forwardX * towardViewer;
+                    - anchor.normalX * towardViewer;
             double z = anchor.z + anchor.rightZ * tokenCenter
-                    - anchor.forwardZ * towardViewer;
+                    - anchor.normalZ * towardViewer;
             matrices.push();
             double baselineY = anchor.y + renderer.fontHeight * tokenScale + elevation;
             matrices.translate(x - cameraPos.x, baselineY - cameraPos.y,
                     z - cameraPos.z);
-            matrices.multiply(new Quaternionf()
-                    .rotateY((float) Math.toRadians(180 - anchor.yaw)));
+            matrices.multiply(new Quaternionf().rotateY(anchor.rotationYaw));
             matrices.scale(tokenScale, -tokenScale, tokenScale);
             renderer.draw(text, -width / 2.0F, 0, color, preferences.isLyricsTextShadow(),
                     matrices.peek().getPositionMatrix(), consumers,
@@ -146,10 +147,33 @@ public final class WorldLyricsRenderer {
         double forwardZ = Math.cos(radians);
         double rightX = -forwardZ;
         double rightZ = forwardX;
-        double x = cameraPos.x + forwardX * (FORWARD_DISTANCE + row);
-        double z = cameraPos.z + forwardZ * (FORWARD_DISTANCE + row);
+        double distance = FORWARD_DISTANCE + Math.min(2.2, Math.abs(row) * .45);
+        double x = cameraPos.x + forwardX * distance;
+        double z = cameraPos.z + forwardZ * distance;
+        Surface surface = findSurface(client, cameraPos, x, z);
+        if (surface != null) {
+            return new Anchor(surface.x, surface.y, surface.z, yaw,
+                    surface.normalX, surface.normalZ, -surface.normalZ, surface.normalX,
+                    (float) Math.atan2(-surface.normalX, surface.normalZ));
+        }
         double y = findGround(client, x, z, cameraPos.y);
-        return new Anchor(x, y, z, yaw, forwardX, forwardZ, rightX, rightZ);
+        return new Anchor(x, y, z, yaw, forwardX, forwardZ, rightX, rightZ,
+                (float) Math.toRadians(180 - yaw));
+    }
+
+    private static Surface findSurface(MinecraftClient client, Vec3d cameraPos, double x, double z) {
+        Vec3d start = client.player.getCameraPosVec(1F);
+        Vec3d look = client.player.getRotationVec(1F);
+        Vec3d end = start.add(look.multiply(6.0));
+        HitResult hit = client.world.raycast(new RaycastContext(start, end,
+                RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, client.player));
+        if (hit.getType() != HitResult.Type.BLOCK || hit.getPos().distanceTo(cameraPos) > 7.0) return null;
+        var side = ((net.minecraft.util.hit.BlockHitResult) hit).getSide();
+        if (!side.getAxis().isHorizontal()) return null;
+        return new Surface(hit.getPos().x + side.getOffsetX() * .035,
+                hit.getPos().y + side.getOffsetY() * .035,
+                hit.getPos().z + side.getOffsetZ() * .035,
+                side.getOffsetX(), side.getOffsetZ());
     }
 
     private static double findGround(MinecraftClient client, double x, double z, double cameraY) {
@@ -161,6 +185,8 @@ public final class WorldLyricsRenderer {
     }
 
     private record LineKey(long start, long end, String text, String agent, boolean backing) { }
+    private record Surface(double x, double y, double z, double normalX, double normalZ) { }
     private record Anchor(double x, double y, double z, float yaw,
-                          double forwardX, double forwardZ, double rightX, double rightZ) { }
+                          double normalX, double normalZ, double rightX, double rightZ,
+                          float rotationYaw) { }
 }
