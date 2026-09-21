@@ -79,4 +79,12 @@ public final class PlatformTextures {
         int b = Byte.toUnsignedInt(image.getBlue(x, y));
         return a << 24 | r << 16 | g << 8 | b;
     }
+
+    static void setColorArgb(NativeImage image, int x, int y, int argb) {
+        int a = argb >>> 24;
+        int r = argb >>> 16 & 255;
+        int g = argb >>> 8 & 255;
+        int b = argb & 255;
+        image.setColor(x, y, a << 24 | b << 16 | g << 8 | r);
+    }
 }

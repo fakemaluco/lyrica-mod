@@ -812,9 +812,9 @@ public final class CoverArtTexture implements AutoCloseable {
                         alpha = Math.clamp((int) Math.round(
                                 Math.clamp(.5 - distance, 0, 1) * 255), 0, 255);
                     }
-                    target.setColor(px, py,
-                            alpha << 24 | (int) Math.round(b) << 16
-                                    | (int) Math.round(g) << 8 | (int) Math.round(r));
+                    PlatformTextures.setColorArgb(target, px, py,
+                            alpha << 24 | (int) Math.round(r) << 16
+                                    | (int) Math.round(g) << 8 | (int) Math.round(b));
                 }
             }
             texture.upload();

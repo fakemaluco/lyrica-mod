@@ -4,7 +4,7 @@ plugins {
 
 allprojects {
     group = "dev.lyrica"
-    version = providers.gradleProperty("version").orElse("0.8.19").get()
+    version = providers.gradleProperty("version").orElse("0.8.20").get()
     repositories {
         mavenCentral()
         maven("https://libraries.minecraft.net/")

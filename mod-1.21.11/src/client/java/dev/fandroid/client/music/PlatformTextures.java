@@ -28,8 +28,7 @@ public final class PlatformTextures {
         return Math.max(1.0, MinecraftClient.getInstance().getWindow().getScaleFactor());
     }
 
-    /** The 1.21.11 GUI renderer can corrupt freshly generated cover composites. */
-    public static boolean supportsRoundedCoverComposite() { return false; }
+    public static boolean supportsRoundedCoverComposite() { return true; }
 
     public static Identifier register(String name, NativeImageBackedTexture texture) {
         Identifier id = Identifier.of("fandroid", "dynamic/" + name.replaceAll("[^a-z0-9_/.-]", "_"));
@@ -61,6 +60,10 @@ public final class PlatformTextures {
 
     static int colorArgb(NativeImage image, int x, int y) {
         return image.getColorArgb(x, y);
+    }
+
+    static void setColorArgb(NativeImage image, int x, int y, int argb) {
+        image.setColorArgb(x, y, argb);
     }
 
     /**
