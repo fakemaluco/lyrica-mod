@@ -253,7 +253,7 @@ public final class CoverArtTexture implements AutoCloseable {
                                      int x, int y, int width, int height,
                                      int cornerRadius, double opacity, double brightness) {
         if (width <= 0 || height <= 0) return false;
-        if (cornerRadius <= 0) {
+        if (cornerRadius <= 0 || !PlatformTextures.supportsRoundedCoverComposite()) {
             drawCover(context, state, x, y, width, height, opacity, brightness);
             return true;
         }

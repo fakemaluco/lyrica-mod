@@ -7,6 +7,7 @@ import dev.fandroid.FanDroidMod;
 import dev.fandroid.client.ClientPreferences;
 import dev.fandroid.client.MusicSource;
 import dev.fandroid.protocol.ProtocolCodec;
+import dev.fandroid.protocol.lyrics.LyricsMatchScorer;
 import dev.fandroid.protocol.music.MusicAction;
 import dev.fandroid.protocol.music.MusicCapabilities;
 import dev.fandroid.protocol.music.MusicCommand;
@@ -68,6 +69,91 @@ public final class SpotifyAccountClient implements AutoCloseable {
 
     public boolean connected() { return !refreshToken.isBlank() || !accessToken.isBlank(); }
     public String status() { return status; }
+    public boolean hasActivePlayback() { return meaningful(latest); }
+
+    /** Resolves metadata supplied by Windows Media to a conservative Spotify track match. */
+    public String resolveTrackId(PlaybackSnapshot track) {
+        return resolveTrackId(track, true);
+    }
+
+    private String resolveTrackId(PlaybackSnapshot track, boolean allowRefresh) {
+        String existing = SpicyLyricsApiClient.spotifyTrackId(track.spotifyUri());
+        if (existing != null) return existing;
+        if (!connected() || !meaningful(track)) return null;
+        try {
+            String token = validToken();
+            if (token == null) return null;
+            String query = "track:" + safeSearchTerm(track.title());
+            if (track.artist() != null && !track.artist().isBlank()) {
+                query += " artist:" + safeSearchTerm(track.artist());
+            }
+            HttpRequest request = HttpRequest.newBuilder(URI.create(
+                            "https://api.spotify.com/v1/search?q=" + encode(query)
+                                    + "&type=track&limit=8"))
+                    .timeout(Duration.ofSeconds(10))
+                    .header("Authorization", "Bearer " + token).GET().build();
+            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 401 && allowRefresh && refresh()) {
+                return resolveTrackId(track, false);
+            }
+            if (response.statusCode() != 200) return null;
+            JsonNode items = ProtocolCodec.mapper().readTree(response.body()).path("tracks").path("items");
+            return bestTrackId(track, items);
+        } catch (Exception error) {
+            FanDroidMod.LOGGER.debug("Could not resolve Spotify track ID from media metadata: {}",
+                    error.toString());
+            return null;
+        }
+    }
+
+    static String bestTrackId(PlaybackSnapshot track, JsonNode items) {
+        if (track == null || items == null || !items.isArray()) return null;
+        String bestId = null;
+        double best = 0;
+        double second = 0;
+        for (JsonNode item : items) {
+            String id = item.path("id").asText("");
+            if (!id.matches("[A-Za-z0-9]{22}")) continue;
+            List<String> artists = new ArrayList<>();
+            item.path("artists").forEach(artist -> {
+                String name = artist.path("name").asText("");
+                if (!name.isBlank()) artists.add(name);
+            });
+            double metadata = LyricsMatchScorer.score(track.title(), track.artist(), track.album(),
+                    item.path("name").asText(""), String.join(", ", artists),
+                    item.path("album").path("name").asText(""));
+            if (metadata < .78) continue;
+            long candidateDuration = item.path("duration_ms").asLong(0);
+            double duration = durationSimilarity(track.durationMillis(), candidateDuration);
+            double score = metadata * .88 + duration * .12;
+            if (score > best) {
+                second = best;
+                best = score;
+                bestId = id;
+            } else if (score > second) {
+                second = score;
+            }
+        }
+        if (best < .86 || second > 0 && best - second < .018) return null;
+        return bestId;
+    }
+
+    private static double durationSimilarity(long expected, long candidate) {
+        if (expected <= 0 || candidate <= 0) return .5;
+        double difference = Math.abs(expected - candidate) / (double) Math.max(expected, candidate);
+        return Math.clamp(1 - difference / .12, 0, 1);
+    }
+
+    private static boolean meaningful(PlaybackSnapshot value) {
+        return value != null && value.title() != null && !value.title().isBlank()
+                && !value.title().equals("Nothing playing");
+    }
+
+    private static String safeSearchTerm(String value) {
+        if (value == null) return "";
+        return value.replace(':', ' ').replace('"', ' ')
+                .replaceAll("[\\p{Cntrl}]+", " ").strip();
+    }
 
     public CompletableFuture<URI> connect(String clientId) {
         String id = clientId == null ? "" : clientId.strip();
@@ -229,7 +315,10 @@ public final class SpotifyAccountClient implements AutoCloseable {
 
     private void accept(PlaybackSnapshot value) {
         latest = value;
-        if (preferences.getMusicSource() == MusicSource.SPOTIFY_ACCOUNT) snapshots.accept(value);
+        // An empty Web API poll must not erase a valid Windows Media fallback.
+        if (preferences.getMusicSource() == MusicSource.SPOTIFY_ACCOUNT && meaningful(value)) {
+            snapshots.accept(value);
+        }
     }
 
     private boolean checkLiked(String token, String uri) throws Exception {

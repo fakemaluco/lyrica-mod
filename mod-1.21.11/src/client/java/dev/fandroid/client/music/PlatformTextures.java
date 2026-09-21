@@ -28,6 +28,9 @@ public final class PlatformTextures {
         return Math.max(1.0, MinecraftClient.getInstance().getWindow().getScaleFactor());
     }
 
+    /** The 1.21.11 GUI renderer can corrupt freshly generated cover composites. */
+    public static boolean supportsRoundedCoverComposite() { return false; }
+
     public static Identifier register(String name, NativeImageBackedTexture texture) {
         Identifier id = Identifier.of("fandroid", "dynamic/" + name.replaceAll("[^a-z0-9_/.-]", "_"));
         MinecraftClient.getInstance().getTextureManager().registerTexture(id, texture);

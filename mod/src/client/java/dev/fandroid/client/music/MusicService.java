@@ -77,11 +77,12 @@ public final class MusicService implements AutoCloseable {
             path = hotUpdate;
         }
         connector = MediaBridgeConnector.start(path);
+        spotifyAccount = new SpotifyAccountClient(preferences, this::update);
         connector.subscribe(value -> {
-            if (preferences.getMusicSource() != MusicSource.SPOTIFY_ACCOUNT) update(value);
+            if (preferences.getMusicSource() != MusicSource.SPOTIFY_ACCOUNT
+                    || !spotifyAccount.hasActivePlayback()) update(value);
         });
         if (connector instanceof MediaBridgeConnector bridge) bridge.subscribeLyrics(this::acceptSpicyLyrics);
-        spotifyAccount = new SpotifyAccountClient(preferences, this::update);
         syncMusicSource();
         overlay.setArtworkTexture(artwork);
     }
@@ -92,7 +93,9 @@ public final class MusicService implements AutoCloseable {
 
     public void syncMusicSource() {
         if (connector instanceof MediaBridgeConnector bridge) {
-            bridge.setSource(preferences.getMusicSource().name());
+            MusicSource selected = preferences.getMusicSource();
+            bridge.setSource(selected == MusicSource.SPOTIFY_ACCOUNT
+                    ? MusicSource.WINDOWS_MEDIA.name() : selected.name());
         }
     }
 
@@ -187,19 +190,25 @@ public final class MusicService implements AutoCloseable {
         } else {
             lyricsStatus = "Finding lyrics...";
         }
-        if (spotifyId != null && prefersSpicetifyLyrics()) {
-            loadCachedSpicy(value.spotifyUri(), key, spotifyId);
+        String resolvedId = spotifyId == null ? spotifyAccount.resolveTrackId(value) : spotifyId;
+        if (!key.equals(lookupKey)) return;
+        if (spotifyId == null && resolvedId != null) {
+            FanDroidMod.LOGGER.info("Resolved Windows Media metadata to Spotify track {}", resolvedId);
         }
-        beginNetworkLookup(value, key, spotifyId);
+        String resolvedUri = resolvedId == null ? value.spotifyUri() : "spotify:track:" + resolvedId;
+        if (resolvedId != null && prefersSpicetifyLyrics()) {
+            loadCachedSpicy(resolvedUri, key, resolvedId);
+        }
+        beginNetworkLookup(value, key, resolvedId, resolvedUri);
     }
 
-    private void beginNetworkLookup(PlaybackSnapshot value, String key, String spotifyId) {
+    private void beginNetworkLookup(PlaybackSnapshot value, String key, String spotifyId, String resolvedUri) {
         if (!stillNeedsFallback(key)) return;
         lyricsStatus = "Searching Spicy Lyrics...";
         spicyApi.find(spotifyId).thenAccept(result -> {
             if (!stillNeedsFallback(key)) return;
             if (result.payload().isPresent()) {
-                parseAndApplySpicy(new SpicetifyLyricsPayload(value.spotifyUri(), "spicy-json",
+                parseAndApplySpicy(new SpicetifyLyricsPayload(resolvedUri, "spicy-json",
                         new String(result.payload().get(), StandardCharsets.UTF_8), "Spicy Lyrics API"), key, true);
             } else {
                 markUnavailable(result.message());

@@ -26,6 +26,8 @@ public final class PlatformTextures {
         return Math.max(1.0, MinecraftClient.getInstance().getWindow().getScaleFactor());
     }
 
+    public static boolean supportsRoundedCoverComposite() { return true; }
+
     public static Identifier register(String name, NativeImageBackedTexture texture) {
         return MinecraftClient.getInstance().getTextureManager().registerDynamicTexture(name, texture);
     }
