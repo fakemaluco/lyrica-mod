@@ -17,13 +17,19 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 import org.joml.Quaternionf;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /** Draws synchronized lyric phrases as local-only world geometry, never as entities or GUI. */
 public final class WorldLyricsRenderer {
     private static final double FORWARD_DISTANCE = 4.35;
     private static final double ROW_SPACING = .82;
     private static final float BASE_PIXEL_SCALE = .040F;
+    private static final Map<LineKey, Anchor> ANCHORS = new HashMap<>();
+    private static Object activeWorld;
 
     private WorldLyricsRenderer() { }
 
@@ -33,22 +39,33 @@ public final class WorldLyricsRenderer {
         LyricsOverlay overlay = dev.relaylyrics.client.RelayLyricsClient.overlay();
         if (!preferences.isWorldLyrics() || overlay == null || client.player == null
                 || client.world == null || matrices == null || consumers == null) {
+            ANCHORS.clear();
             return;
+        }
+        if (activeWorld != client.world) {
+            ANCHORS.clear();
+            activeWorld = client.world;
         }
 
         long now = overlay.currentPositionMillis();
         List<WorldLyricsPlan.WorldLine> lines = WorldLyricsPlan.visibleLines(overlay.document(), now);
         if (lines.isEmpty()) {
+            ANCHORS.clear();
             return;
         }
 
+        Set<LineKey> visible = new HashSet<>();
         for (int index = 0; index < lines.size(); index++) {
             WorldLyricsPlan.WorldLine planned = lines.get(index);
             LyricLine line = planned.line();
+            LineKey key = new LineKey(line.startMillis(), line.endMillis(), line.text(), line.agent(),
+                    planned.backing());
+            visible.add(key);
             double row = (index - (lines.size() - 1) / 2.0) * ROW_SPACING;
-            Anchor anchor = createAnchor(client, cameraPos, row);
+            Anchor anchor = ANCHORS.computeIfAbsent(key, ignored -> createAnchor(client, cameraPos, row));
             renderLine(matrices, consumers, cameraPos, anchor, planned, now, preferences);
         }
+        ANCHORS.keySet().removeIf(key -> !visible.contains(key));
     }
 
     private static void renderLine(MatrixStack matrices, VertexConsumerProvider consumers, Vec3d cameraPos,
@@ -69,9 +86,7 @@ public final class WorldLyricsRenderer {
             totalWidth += renderer.getWidth(styled(token.text(), preferences));
         }
         float fit = Math.min(1F, 320F / Math.max(1, totalWidth));
-        double distanceScale = Math.clamp(4.35 / Math.max(.75, anchor.distance), .72, 1.35);
-        float pixelScale = BASE_PIXEL_SCALE * fit * (float) distanceScale
-                * (planned.backing() ? .78F : 1F);
+        float pixelScale = BASE_PIXEL_SCALE * fit * (planned.backing() ? .78F : 1F);
         double visibility = WorldLyricsPlan.lineVisibility(line, now) * (planned.backing() ? .68 : 1);
         if (visibility <= .01) return;
         double alignmentOffset = planned.alignment().name().equals("OPPOSITE")
@@ -139,12 +154,11 @@ public final class WorldLyricsRenderer {
         if (surface != null) {
             return new Anchor(surface.x, surface.y, surface.z, yaw,
                     surface.normalX, surface.normalZ, -surface.normalZ, surface.normalX,
-                    (float) Math.atan2(-surface.normalX, surface.normalZ),
-                    surface.distance);
+                    (float) Math.atan2(-surface.normalX, surface.normalZ));
         }
         double y = findGround(client, x, z, cameraPos.y);
         return new Anchor(x, y, z, yaw, forwardX, forwardZ, rightX, rightZ,
-                (float) Math.toRadians(180 - yaw), distance);
+                (float) Math.toRadians(180 - yaw));
     }
 
     private static Surface findSurface(MinecraftClient client, Vec3d cameraPos, double x, double z) {
@@ -159,7 +173,7 @@ public final class WorldLyricsRenderer {
         return new Surface(hit.getPos().x + side.getOffsetX() * .035,
                 hit.getPos().y + side.getOffsetY() * .035,
                 hit.getPos().z + side.getOffsetZ() * .035,
-                side.getOffsetX(), side.getOffsetZ(), hit.getPos().distanceTo(cameraPos));
+                side.getOffsetX(), side.getOffsetZ());
     }
 
     private static double findGround(MinecraftClient client, double x, double z, double cameraY) {
@@ -170,9 +184,9 @@ public final class WorldLyricsRenderer {
         return hit.getType() == HitResult.Type.BLOCK ? hit.getPos().y + .04 : client.player.getY() + .04;
     }
 
-    private record Surface(double x, double y, double z, double normalX, double normalZ,
-                           double distance) { }
+    private record LineKey(long start, long end, String text, String agent, boolean backing) { }
+    private record Surface(double x, double y, double z, double normalX, double normalZ) { }
     private record Anchor(double x, double y, double z, float yaw,
                           double normalX, double normalZ, double rightX, double rightZ,
-                          float rotationYaw, double distance) { }
+                          float rotationYaw) { }
 }
