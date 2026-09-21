@@ -25,9 +25,9 @@ import java.util.Set;
 
 /** Draws synchronized lyric phrases as local-only world geometry, never as entities or GUI. */
 public final class WorldLyricsRenderer {
-    private static final double FORWARD_DISTANCE = 4.35;
+    private static final double FORWARD_DISTANCE = 6.25;
     private static final double ROW_SPACING = .82;
-    private static final float BASE_PIXEL_SCALE = .040F;
+    private static final float BASE_PIXEL_SCALE = .055F;
     private static final Map<LineKey, Anchor> ANCHORS = new HashMap<>();
     private static Object activeWorld;
 
@@ -85,8 +85,11 @@ public final class WorldLyricsRenderer {
             if (token.startsWord() && totalWidth > 0) totalWidth += spaceWidth;
             totalWidth += renderer.getWidth(styled(token.text(), preferences));
         }
-        float fit = Math.min(1F, 320F / Math.max(1, totalWidth));
-        float pixelScale = BASE_PIXEL_SCALE * fit * (planned.backing() ? .78F : 1F);
+        float fit = Math.min(1F, 420F / Math.max(1, totalWidth));
+        boolean airborne = client.player.getAbilities().flying || !client.player.isOnGround();
+        float airborneScale = airborne ? 1.85F : 1F;
+        float pixelScale = BASE_PIXEL_SCALE * fit * airborneScale
+                * (planned.backing() ? .78F : 1F);
         double visibility = WorldLyricsPlan.lineVisibility(line, now) * (planned.backing() ? .68 : 1);
         if (visibility <= .01) return;
         double alignmentOffset = planned.alignment().name().equals("OPPOSITE")
@@ -147,7 +150,9 @@ public final class WorldLyricsRenderer {
         double forwardZ = Math.cos(radians);
         double rightX = -forwardZ;
         double rightZ = forwardX;
-        double distance = FORWARD_DISTANCE + Math.min(2.2, Math.abs(row) * .45);
+        boolean airborne = client.player.getAbilities().flying || !client.player.isOnGround();
+        double distance = (airborne ? 9.5 : FORWARD_DISTANCE)
+                + Math.min(3.0, Math.abs(row) * .55);
         double x = cameraPos.x + forwardX * distance;
         double z = cameraPos.z + forwardZ * distance;
         Surface surface = findSurface(client, cameraPos, x, z);
