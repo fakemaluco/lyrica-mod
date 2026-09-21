@@ -42,8 +42,9 @@ public final class LyricsRenderText {
     /** True when either the line or its synced fragments provide a transliteration. */
     public static boolean hasRomanization(LyricLine line) {
         if (line.romanization() != null && !line.romanization().isBlank()) return true;
-        return line.words().stream().anyMatch(word -> word.romanization() != null
-                && !word.romanization().isBlank());
+        if (line.words().stream().anyMatch(word -> word.romanization() != null
+                && !word.romanization().isBlank())) return true;
+        return LyricsRomanizer.romanize(line.text()) != null;
     }
 
     private static List<VisualWord> groupVisualWords(List<TimedWord> source) {
@@ -75,21 +76,26 @@ public final class LyricsRenderText {
 
     private static List<TimedWord> romanizedSourceWords(LyricLine line) {
         List<TimedWord> source = sourceWords(line);
-        boolean hasFragmentRomanization = source.stream().anyMatch(word -> word.romanization() != null
-                && !word.romanization().isBlank());
+        String suppliedLineRomanization = line.romanization() != null && !line.romanization().isBlank()
+                ? line.romanization() : null;
+        String lineRomanization = suppliedOrGenerated(line.romanization(), line.text());
+        boolean hasFragmentRomanization = source.stream().anyMatch(word ->
+                suppliedOrGenerated(word.romanization(), word.text()) != null);
         if (hasFragmentRomanization) {
             List<TimedWord> romanized = new ArrayList<>(source.size());
             for (TimedWord word : source) {
-                String text = word.romanization() == null || word.romanization().isBlank()
-                        ? word.text() : word.romanization();
+                String generated = suppliedOrGenerated(word.romanization(), word.text());
+                String text = generated == null ? word.text() : generated;
                 romanized.add(new TimedWord(word.startMillis(), word.endMillis(), text,
-                        word.joinPrevious(), word.romanization()));
+                        word.joinPrevious(), generated));
             }
             List<TimedWord> timedRomanized = List.copyOf(romanized);
-            if (line.romanization() == null || line.romanization().isBlank()) {
+            // A locally generated whole-line value must never override a provider's per-fragment
+            // spelling. It is only used below when the source has no timed fragments to convert.
+            if (suppliedLineRomanization == null) {
                 return timedRomanized;
             }
-            List<String> displayedWords = textChunks(line.romanization());
+            List<String> displayedWords = textChunks(suppliedLineRomanization);
             List<TimedWord> boundaryAligned = alignRomanizedFragments(timedRomanized, displayedWords);
             if (!boundaryAligned.isEmpty()) return boundaryAligned;
             List<VisualWord> fragmentWords = groupVisualWords(timedRomanized);
@@ -105,10 +111,10 @@ public final class LyricsRenderText {
             }
         }
 
-        if (line.romanization() == null || line.romanization().isBlank()) return source;
+        if (lineRomanization == null) return source;
 
         List<VisualWord> originalWords = groupVisualWords(source);
-        List<String> romanizedWords = textChunks(line.romanization());
+        List<String> romanizedWords = textChunks(lineRomanization);
         if (!originalWords.isEmpty() && romanizedWords.size() == originalWords.size()) {
             List<TimedWord> aligned = new ArrayList<>(romanizedWords.size());
             for (int index = 0; index < romanizedWords.size(); index++) {
@@ -118,7 +124,11 @@ public final class LyricsRenderText {
             }
             return List.copyOf(aligned);
         }
-        return splitTextByTiming(line.romanization(), line.startMillis(), line.endMillis());
+        return splitTextByTiming(lineRomanization, line.startMillis(), line.endMillis());
+    }
+
+    private static String suppliedOrGenerated(String supplied, String original) {
+        return supplied != null && !supplied.isBlank() ? supplied : LyricsRomanizer.romanize(original);
     }
 
     /**

@@ -21,3 +21,8 @@ to that implementation.
 Lyrics are requested at runtime through the official
 [Spicy Lyrics API](https://developers.spicylyrics.org/docs). No lyrics are
 bundled with Lyrica.
+
+## Unicode ICU4J
+
+Missing provider-supplied romanization is generated locally with ICU4J's
+Unicode transliterators. ICU4J is distributed under the Unicode License V3.
