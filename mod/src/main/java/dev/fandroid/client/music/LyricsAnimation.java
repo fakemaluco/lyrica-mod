@@ -102,6 +102,17 @@ public final class LyricsAnimation {
         return (.70 + heldBoost) * envelope;
     }
 
+    /**
+     * Keeps a partially filled glyph's shadow matched to its still-muted face.
+     * The shadow approaches active opacity only after most of the glyph is white,
+     * preventing a black flash at the beginning of a word.
+     */
+    public static double progressiveShadowOpacity(double futureAlpha, double activeAlpha,
+                                                   double coverage) {
+        double lateFill = smoother(Math.clamp((coverage - .72) / .28, 0, 1));
+        return mix(Math.clamp(futureAlpha, 0, 1), Math.clamp(activeAlpha, 0, 1), lateFill);
+    }
+
     /** Combines the stable word halo with animation energy and a 25% leading-edge pulse. */
     public static double activeGlyphGlow(double motionGlow, long durationMillis,
                                          double wordProgress, double boundaryAmount) {

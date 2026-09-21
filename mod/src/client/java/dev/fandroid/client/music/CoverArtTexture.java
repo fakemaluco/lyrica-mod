@@ -253,8 +253,16 @@ public final class CoverArtTexture implements AutoCloseable {
                                      int x, int y, int width, int height,
                                      int cornerRadius, double opacity, double brightness) {
         if (width <= 0 || height <= 0) return false;
-        if (cornerRadius <= 0 || !PlatformTextures.supportsRoundedCoverComposite()) {
+        if (cornerRadius <= 0) {
             drawCover(context, state, x, y, width, height, opacity, brightness);
+            return true;
+        }
+        if (!PlatformTextures.supportsRoundedCoverComposite()) {
+            // 1.21.11 corrupts freshly uploaded CPU composites on some render stacks.
+            // Clip the original high-quality artwork instead, preserving rounded corners
+            // without creating another dynamic texture.
+            RoundedGui.clipped(context, x, y, width, height, cornerRadius,
+                    () -> drawCover(context, state, x, y, width, height, opacity, brightness));
             return true;
         }
         RoundedCover rounded = roundedCover(state, width, height, cornerRadius);

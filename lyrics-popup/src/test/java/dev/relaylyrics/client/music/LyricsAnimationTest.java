@@ -6,6 +6,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class LyricsAnimationTest {
     @Test
+    void shadowStaysMutedUntilMostOfTheGlyphIsFilled() {
+        double future = .20;
+        assertThat(LyricsAnimation.progressiveShadowOpacity(future, 1, 0)).isEqualTo(future);
+        assertThat(LyricsAnimation.progressiveShadowOpacity(future, 1, .72)).isEqualTo(future);
+        assertThat(LyricsAnimation.progressiveShadowOpacity(future, 1, .86))
+                .isBetween(future, 1.0);
+        assertThat(LyricsAnimation.progressiveShadowOpacity(future, 1, 1)).isEqualTo(1);
+    }
+
+    @Test
     void liftUsesASlowerRoundedEntranceAndExit() {
         assertThat(LyricsAnimation.liftKeyframe(0)).isZero();
         assertThat(LyricsAnimation.liftKeyframe(.12)).isLessThan(.5);

@@ -47,8 +47,8 @@ import static dev.fandroid.client.music.LyricsAnimation.isRightToLeft;
 import static dev.fandroid.client.music.LyricsAnimation.keyframe;
 import static dev.fandroid.client.music.LyricsAnimation.liftKeyframe;
 import static dev.fandroid.client.music.LyricsAnimation.mix;
+import static dev.fandroid.client.music.LyricsAnimation.progressiveShadowOpacity;
 import static dev.fandroid.client.music.LyricsAnimation.smooth;
-import static dev.fandroid.client.music.LyricsAnimation.smoother;
 import static dev.fandroid.client.music.LyricsAnimation.shortWordLift;
 import static dev.fandroid.client.music.LyricsAnimation.sustainedWordGlow;
 import static dev.fandroid.client.music.LyricsAnimation.timedProgress;
@@ -1811,7 +1811,7 @@ public final class LyricsOverlay implements AutoCloseable {
         // it once for the future text and again for the clipped active text caused
         // the black flash at the instant a word started.
         drawScaledShadowOnly(context, renderer(), glyph.text, x, y,
-                opacity * mix(futureAlpha, activeAlpha, smoother(coverage)), scale);
+                opacity * progressiveShadowOpacity(futureAlpha, activeAlpha, coverage), scale);
         if (fillRight <= x + .01 || fillLeft >= glyphRight - .01) {
             drawScaledWithoutShadow(context, renderer(), glyph.text, x, y,
                     multiplyAlpha(futureColor, opacity), scale);
