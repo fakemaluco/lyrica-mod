@@ -5,6 +5,7 @@ import dev.fandroid.client.LyricsFont;
 import dev.fandroid.client.LyricsFontWeight;
 import dev.fandroid.client.LyricsTextAlignment;
 import dev.fandroid.client.music.CoverArtTexture;
+import dev.fandroid.client.music.LyricsAnimation;
 import dev.fandroid.client.music.LyricsRenderText;
 import dev.fandroid.client.music.LyricsViewport;
 import dev.fandroid.client.music.ManualLyricsScroll;
@@ -43,6 +44,7 @@ import static dev.fandroid.client.music.LyricsAnimation.focusProfile;
 import static dev.fandroid.client.music.LyricsAnimation.glowKeyframe;
 import static dev.fandroid.client.music.LyricsAnimation.interludeDotFill;
 import static dev.fandroid.client.music.LyricsAnimation.interludeDotLift;
+import static dev.fandroid.client.music.LyricsAnimation.interludeProgress;
 import static dev.fandroid.client.music.LyricsAnimation.individualMotionStrength;
 import static dev.fandroid.client.music.LyricsAnimation.isRightToLeft;
 import static dev.fandroid.client.music.LyricsAnimation.keyframe;
@@ -71,7 +73,7 @@ public final class LyricsOverlay implements AutoCloseable {
     public static void initializeRenderingBackend() {
         LyricsBloomRenderer.register();
     }
-    private static final long INTERLUDE_MIN_GAP_MILLIS = 1_500;
+    private static final long INTERLUDE_MIN_GAP_MILLIS = LyricsAnimation.INTERLUDE_MIN_GAP_MILLIS;
     private static final int INTERLUDE_LAYOUT_HEIGHT = 30;
     private static final double PHONE_LYRICS_SCALE = 1.72;
     private static final String[] HEART_MASK = {
@@ -1911,7 +1913,7 @@ public final class LyricsOverlay implements AutoCloseable {
             dotsPosition = focusY + scene.groupTop(active, interlude) - scroll + prepared.motion.elevation()
                     + prepared.contentHeight + prepared.interludeInset;
         }
-        double progress = Math.clamp(elapsed / (double) gap, 0, 1);
+        double progress = interludeProgress(elapsed, gap);
         double visibility = interlude.visibility();
         LyricsTextAlignment selectedAlignment = preferences.getLyricsAlignment();
         boolean opposite = oppositeAligned(selectedAlignment, alignment);
@@ -1965,12 +1967,7 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     static double interludeLayoutVisibility(long elapsedMillis, long gapMillis) {
-        if (gapMillis < INTERLUDE_MIN_GAP_MILLIS || elapsedMillis <= 0
-                || elapsedMillis >= gapMillis) return 0;
-        double transition = Math.min(320, Math.max(140, gapMillis * .18));
-        double enter = smooth(elapsedMillis / transition);
-        double leave = smooth((gapMillis - elapsedMillis) / transition);
-        return Math.min(enter, leave);
+        return LyricsAnimation.interludeVisibility(elapsedMillis, gapMillis);
     }
 
     private LineLayout layout(LyricLine line, int width, double scale, boolean romanized) {

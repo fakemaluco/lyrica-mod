@@ -273,4 +273,15 @@ class LyricsAnimationTest {
         assertThat(LyricsAnimation.interludeDotFill(.90, 1)).isEqualTo(1);
         assertThat(LyricsAnimation.interludeDotLift(.90, 2)).isPositive();
     }
+
+    @Test
+    void interludeUsesThreeSecondThresholdAndFinishesDotsBeforeTheNextLine() {
+        assertThat(LyricsAnimation.interludeVisibility(500, 2_999)).isZero();
+        assertThat(LyricsAnimation.interludeVisibility(70, 3_000)).isBetween(0.0, 1.0);
+        assertThat(LyricsAnimation.interludeVisibility(140, 3_000)).isEqualTo(1);
+        assertThat(LyricsAnimation.interludeVisibility(2_700, 3_000)).isBetween(0.0, 1.0);
+        assertThat(LyricsAnimation.interludeVisibility(2_900, 3_000)).isZero();
+        assertThat(LyricsAnimation.interludeProgress(1_225, 3_000)).isEqualTo(.5);
+        assertThat(LyricsAnimation.interludeProgress(2_450, 3_000)).isEqualTo(1);
+    }
 }

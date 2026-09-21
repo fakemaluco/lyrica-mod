@@ -2,6 +2,11 @@ package dev.fandroid.client.music;
 
 /** Pure timing curves shared by compatible and enhanced lyric render passes. */
 public final class LyricsAnimation {
+    public static final long INTERLUDE_MIN_GAP_MILLIS = 3_000;
+    private static final long INTERLUDE_DOT_TIMELINE_TRIM_MILLIS = 550;
+    private static final long INTERLUDE_PRE_HIDE_MILLIS = 500;
+    private static final long INTERLUDE_EXIT_MILLIS = 400;
+    private static final long INTERLUDE_ENTER_MILLIS = 140;
     /** Spicy-style neutral palette used by the word-fill animation. */
     public static final int ACTIVE_TEXT = 0xFFFFFFFF;
     public static final int UPCOMING_TEXT = 0xFFE2E4E7;
@@ -337,6 +342,25 @@ public final class LyricsAnimation {
     public static double interludeDotLift(double intervalProgress, int dotIndex) {
         double local = Math.clamp(intervalProgress, 0, 1) * 3 - Math.clamp(dotIndex, 0, 2);
         return glowKeyframe(Math.clamp(local, 0, 1));
+    }
+
+    /** Spicy-style dot timeline: all three dots finish 550 ms before the next lyric. */
+    public static double interludeProgress(long elapsedMillis, long gapMillis) {
+        if (elapsedMillis <= 0 || gapMillis <= INTERLUDE_DOT_TIMELINE_TRIM_MILLIS) return 0;
+        long activeTimeline = gapMillis - INTERLUDE_DOT_TIMELINE_TRIM_MILLIS;
+        return Math.clamp(elapsedMillis / (double) activeTimeline, 0, 1);
+    }
+
+    /** Fast 140 ms entrance, then a 400 ms collapse beginning 500 ms before the lyric. */
+    public static double interludeVisibility(long elapsedMillis, long gapMillis) {
+        if (gapMillis < INTERLUDE_MIN_GAP_MILLIS || elapsedMillis <= 0
+                || elapsedMillis >= gapMillis) return 0;
+        double enter = smooth(elapsedMillis / (double) INTERLUDE_ENTER_MILLIS);
+        long remaining = gapMillis - elapsedMillis;
+        double leave = remaining >= INTERLUDE_PRE_HIDE_MILLIS ? 1
+                : smooth((remaining - (INTERLUDE_PRE_HIDE_MILLIS - INTERLUDE_EXIT_MILLIS))
+                / (double) INTERLUDE_EXIT_MILLIS);
+        return Math.min(enter, leave);
     }
 
     public static double keyframe(double progress, double start, double peakAt, double peak, double end) {
