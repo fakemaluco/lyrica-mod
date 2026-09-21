@@ -30,11 +30,13 @@ class LyricsAnimationTest {
     @Test
     void syllableTimedWordsAnimateTheirSyllablesInsteadOfTheWholeWord() {
         LyricsAnimation.TokenMotionPlan quickWord = LyricsAnimation.tokenMotionPlan(500, 1, false);
-        LyricsAnimation.TokenMotionPlan heldWord = LyricsAnimation.tokenMotionPlan(2_000, 1, false);
+        LyricsAnimation.TokenMotionPlan almostHeldWord = LyricsAnimation.tokenMotionPlan(999, 1, false);
+        LyricsAnimation.TokenMotionPlan heldWord = LyricsAnimation.tokenMotionPlan(1_000, 1, false);
         LyricsAnimation.TokenMotionPlan syllableWord = LyricsAnimation.tokenMotionPlan(500, 3, false);
         LyricsAnimation.TokenMotionPlan heldSyllableWord = LyricsAnimation.tokenMotionPlan(2_000, 3, false);
 
         assertThat(quickWord.wholeWordMotion()).isTrue();
+        assertThat(almostHeldWord.wholeWordMotion()).isTrue();
         assertThat(heldWord.glyphMotion()).isTrue();
         assertThat(syllableWord.syllableMotion()).isTrue();
         assertThat(syllableWord.wholeWordMotion()).isFalse();
@@ -43,5 +45,17 @@ class LyricsAnimationTest {
         assertThat(heldSyllableWord.glyphMotion()).isFalse();
         assertThat(LyricsAnimation.tokenMotionPlan(2_000, 3, true))
                 .isEqualTo(new LyricsAnimation.TokenMotionPlan(false, false, false));
+    }
+
+    @Test
+    void oneSecondHandoffIsVisibleAndDoesNotSnapFromWholeWordMotion() {
+        assertThat(LyricsAnimation.individualMotionStrength(999)).isZero();
+        assertThat(LyricsAnimation.individualMotionStrength(1_000)).isEqualTo(.55);
+        assertThat(LyricsAnimation.individualMotionStrength(1_001)).isGreaterThanOrEqualTo(.55);
+        assertThat(LyricsAnimation.individualMotionStrength(1_750)).isBetween(.55, 1.0);
+        assertThat(LyricsAnimation.individualMotionStrength(2_500)).isEqualTo(1);
+        assertThat(LyricsAnimation.shortWordLift(999, .75))
+                .isLessThan(LyricsAnimation.shortWordLift(800, .75));
+        assertThat(LyricsAnimation.shortWordLift(1_000, .75)).isZero();
     }
 }

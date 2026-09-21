@@ -15,7 +15,9 @@ public final class LyricsAnimation {
     private static final double DISTANT_MIN_SCALE = .90;
     private static final double DISTANT_MIN_BRIGHTNESS = .52;
     private static final double MAX_BLUR_RADIUS = 3.6;
-    private static final long PER_GLYPH_MOTION_MIN_MILLIS = 1_400;
+    private static final long PER_GLYPH_MOTION_MIN_MILLIS = 1_000;
+    private static final long WHOLE_WORD_LIFT_TAPER_START_MILLIS = 800;
+    private static final long PER_GLYPH_FULL_STRENGTH_MILLIS = 2_500;
 
     private LyricsAnimation() { }
 
@@ -228,6 +230,17 @@ public final class LyricsAnimation {
     }
 
     /**
+     * Makes the first individually animated words visibly articulate instead of
+     * inheriting the very weak low-duration end of the general emphasis curve.
+     */
+    public static double individualMotionStrength(long durationMillis) {
+        if (!usesPerGlyphMotion(durationMillis)) return 0;
+        double progress = (durationMillis - PER_GLYPH_MOTION_MIN_MILLIS)
+                / (double) (PER_GLYPH_FULL_STRENGTH_MILLIS - PER_GLYPH_MOTION_MIN_MILLIS);
+        return mix(.55, 1, smoother(progress));
+    }
+
+    /**
      * Chooses one motion owner for a visual word. Syllable-timed words deliberately
      * take precedence over the duration heuristic: moving their whole word would
      * make future syllables jump before their own timing begins.
@@ -251,15 +264,20 @@ public final class LyricsAnimation {
         if (progress <= 0) return 0;
         double duration = Math.max(1, durationMillis);
         double elapsed = progress * duration;
+        // Near the one-second handoff, ease down the block motion so switching
+        // to independently animated glyphs does not create a visual step.
+        double taper = smoother((duration - WHOLE_WORD_LIFT_TAPER_START_MILLIS)
+                / (double) (PER_GLYPH_MOTION_MIN_MILLIS - WHOLE_WORD_LIFT_TAPER_START_MILLIS));
+        double liftAmount = 1.08 * mix(1, .72, taper);
         // Give compact words a visible, rounded ascent instead of a fast hop.
         // The cap keeps very long short-word intervals from feeling delayed.
         double enterMillis = Math.clamp(duration * .75, 220, 440);
-        if (elapsed < enterMillis) return smoother(elapsed / enterMillis) * 1.08;
+        if (elapsed < enterMillis) return smoother(elapsed / enterMillis) * liftAmount;
         // Stay elevated through the spoken interval, then settle while the next
         // word may already be active instead of snapping down beforehand.
-        if (elapsed <= duration) return 1.08;
+        if (elapsed <= duration) return liftAmount;
         double exit = smoother((elapsed - duration) / 640.0);
-        return (1 - exit) * 1.08;
+        return (1 - exit) * liftAmount;
     }
 
     /** A gentler timing curve for vertical word, syllable and glyph elevation. */

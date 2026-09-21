@@ -22,8 +22,9 @@ class LyricsAnimationTest {
 
     @Test
     void quickWordsLiftAsAWholeAndHeldWordsUsePerGlyphMotion() {
-        assertThat(LyricsAnimation.usesPerGlyphMotion(1_399)).isFalse();
-        assertThat(LyricsAnimation.usesPerGlyphMotion(1_400)).isTrue();
+        assertThat(LyricsAnimation.usesPerGlyphMotion(999)).isFalse();
+        assertThat(LyricsAnimation.usesPerGlyphMotion(1_000)).isTrue();
+        assertThat(LyricsAnimation.usesPerGlyphMotion(1_001)).isTrue();
         assertThat(LyricsAnimation.shortWordLift(500, .5)).isGreaterThan(.9);
         assertThat(LyricsAnimation.shortWordLift(500, 0)).isZero();
         assertThat(LyricsAnimation.shortWordLift(500, 1)).isGreaterThan(1);
@@ -36,6 +37,17 @@ class LyricsAnimationTest {
                 .isLessThan(LyricsAnimation.shortWordLift(500, .5));
         assertThat(LyricsAnimation.shortWordLift(500, .75))
                 .isEqualTo(LyricsAnimation.shortWordLift(500, 1));
+        assertThat(LyricsAnimation.shortWordLift(999, .75))
+                .isLessThan(LyricsAnimation.shortWordLift(800, .75));
+    }
+
+    @Test
+    void individualMotionStartsVisibleAndBuildsSmoothlyForHeldWords() {
+        assertThat(LyricsAnimation.individualMotionStrength(999)).isZero();
+        assertThat(LyricsAnimation.individualMotionStrength(1_000)).isEqualTo(.55);
+        assertThat(LyricsAnimation.individualMotionStrength(1_001)).isGreaterThanOrEqualTo(.55);
+        assertThat(LyricsAnimation.individualMotionStrength(1_750)).isBetween(.55, 1.0);
+        assertThat(LyricsAnimation.individualMotionStrength(2_500)).isEqualTo(1);
     }
 
     @Test
@@ -175,8 +187,8 @@ class LyricsAnimationTest {
     @Test
     void onlyPerGlyphWordsHaveAHaloBedAndNoResidueOutsideItsInterval() {
         assertThat(LyricsAnimation.activeWordGlow(400, .5)).isZero();
-        assertThat(LyricsAnimation.activeWordGlow(1_399, .5)).isZero();
-        assertThat(LyricsAnimation.activeWordGlow(1_400, .5)).isPositive();
+        assertThat(LyricsAnimation.activeWordGlow(999, .5)).isZero();
+        assertThat(LyricsAnimation.activeWordGlow(1_000, .5)).isPositive();
         assertThat(LyricsAnimation.activeWordGlow(5_000, .5)).isEqualTo(.85);
         assertThat(LyricsAnimation.activeWordGlow(5_000, 0)).isZero();
         assertThat(LyricsAnimation.activeWordGlow(5_000, 1)).isZero();

@@ -43,6 +43,7 @@ import static dev.fandroid.client.music.LyricsAnimation.focusProfile;
 import static dev.fandroid.client.music.LyricsAnimation.glowKeyframe;
 import static dev.fandroid.client.music.LyricsAnimation.interludeDotFill;
 import static dev.fandroid.client.music.LyricsAnimation.interludeDotLift;
+import static dev.fandroid.client.music.LyricsAnimation.individualMotionStrength;
 import static dev.fandroid.client.music.LyricsAnimation.isRightToLeft;
 import static dev.fandroid.client.music.LyricsAnimation.keyframe;
 import static dev.fandroid.client.music.LyricsAnimation.liftKeyframe;
@@ -1268,7 +1269,7 @@ public final class LyricsOverlay implements AutoCloseable {
                 ? now >= token.timing.startMillis() ? 1 : -1
                 : (now - token.timing.startMillis())
                 / (double) (token.timing.endMillis() - token.timing.startMillis());
-        double durationStrength = durationStrength(token.visualWordDurationMillis);
+        double durationStrength = individualMotionStrength(token.visualWordDurationMillis);
         var motionPlan = token.motionPlan(false);
         boolean perGlyphMotion = motionPlan.glyphMotion();
         if (!perGlyphMotion) return;
@@ -1342,7 +1343,8 @@ public final class LyricsOverlay implements AutoCloseable {
                     if (glyph.startMillis == Long.MIN_VALUE) continue;
                     Segment segment = token.segments.get(glyph.segmentIndex);
                     glyph.motion.update(timedProgress(now, glyph.startMillis, glyph.endMillis),
-                            durationStrength(segment.durationMillis()), motionPlan.glyphMotion(), delta);
+                            individualMotionStrength(segment.durationMillis()),
+                            motionPlan.glyphMotion(), delta);
                 }
             }
         }
@@ -1717,6 +1719,9 @@ public final class LyricsOverlay implements AutoCloseable {
         var motionPlan = token.motionPlan(simple);
         boolean perGlyphMotion = motionPlan.glyphMotion();
         boolean segmentMotion = motionPlan.syllableMotion() || perGlyphMotion;
+        if (perGlyphMotion) {
+            durationStrength = individualMotionStrength(token.visualWordDurationMillis);
+        }
         double wordLift = motionPlan.wholeWordMotion()
                 ? shortWordLift(token.visualWordDurationMillis, wordProgress) : 0;
         // A syllable-timed word keeps a stable overall shape. Its current
