@@ -235,6 +235,11 @@ public final class LyricsOverlay implements AutoCloseable {
     public String syncLabel() { return syncLabel; }
     public RenderStats renderStats() { return renderStats; }
     public long currentPositionMillis() { return positionMillis(); }
+    private long worldPlaybackRevision;
+    public record WorldPlayback(String track, long positionMillis, boolean playing, long revision) { }
+    public WorldPlayback worldPlayback() {
+        return new WorldPlayback(playbackTrackKey(playback), positionMillis(), playback.playing(), worldPlaybackRevision);
+    }
 
     public void setPlayback(PlaybackSnapshot playback) {
         this.playback = playback;
@@ -242,6 +247,7 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     public void seekTo(long positionMillis) {
+        worldPlaybackRevision++;
         clock.seekTo(positionMillis);
         playbackProgress.snap(playbackTrackKey(playback), positionMillis, playback.durationMillis());
         phoneScroll.reset();
@@ -313,8 +319,12 @@ public final class LyricsOverlay implements AutoCloseable {
         return Math.clamp(1 - Math.abs(2 * t - 1), 0, 1);
     }
 
+    private long fontLayoutRevision;
+    public long fontLayoutRevision() { return fontLayoutRevision; }
+
     /** Clears width and scene caches after the runtime font resource changes. */
     public void fontChanged() {
+        fontLayoutRevision++;
         synchronized (layoutCache) { layoutCache.clear(); }
         synchronized (sceneCache) { sceneCache.clear(); }
         synchronized (styledTextCache) { styledTextCache.clear(); }

@@ -2,6 +2,7 @@ package dev.relaylyrics.client;
 
 import dev.relaylyrics.FanDroidMod;
 import dev.relaylyrics.protocol.ProtocolCodec;
+import dev.relaylyrics.client.music.WorldLyricsDirector;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.nio.file.Files;
@@ -49,6 +50,28 @@ public final class ClientPreferences {
     private boolean lyricsReactiveSpectral;
     private double lyricsReactiveSpectralAmount = 100;
     private boolean worldLyrics;
+    private WorldIntensity worldLyricsIntensity = WorldIntensity.NORMAL;
+    private boolean worldLyricsPlayerReactions = true;
+    private double worldLyricsSize = 1.2;
+    private boolean worldLyricsAutoWalls = true;
+    private boolean worldLyricsCinematic = true;
+    private Boolean worldLyricsAutomatic;
+    private WorldLyricsDirector.Preset worldLyricsPreset;
+    private WorldLyricsDirector.Variation worldLyricsVariation = WorldLyricsDirector.Variation.MEDIUM;
+    private WorldLyricsDirector.Quality worldLyricsQuality = WorldLyricsDirector.Quality.MEDIUM;
+    private int worldLyricsPresetMask = (1 << WorldLyricsDirector.Preset.values().length) - 1;
+    private double worldLyricsMinimumDistance = 6;
+    private double worldLyricsMaximumDistance = 192;
+    private int worldLyricsPositionVersion = 2;
+    private double worldLyricsDistanceSensitivity = 1;
+    private double worldLyricsArcRadius = .65;
+    private double worldLyricsCenterGap = .32;
+    private double worldLyricsDepth = .10;
+    private double worldLyricsAnimationIntensity = 1;
+    private double worldLyricsAnimationSpeed = 1;
+    private boolean worldLyricsTrails;
+    private int worldLyricsSideColor = 0x56647A;
+    private int worldLyricsFaceColor = 0xFFFFFF;
     private boolean lyricsAnimations = true;
     private boolean lyricsBorder = true;
     private boolean inventoryPopup = true;
@@ -62,7 +85,7 @@ public final class ClientPreferences {
         Path file = file();
         try {
             if (Files.isRegularFile(file)) {
-                return ProtocolCodec.mapper().readValue(Files.readAllBytes(file), ClientPreferences.class);
+                return decode(Files.readAllBytes(file));
             }
         } catch (Exception exception) {
             FanDroidMod.LOGGER.warn("Could not read Relay Lyrics preferences; using defaults", exception);
@@ -228,6 +251,120 @@ public final class ClientPreferences {
     }
     public boolean isWorldLyrics() { return worldLyrics; }
     public void setWorldLyrics(boolean value) { worldLyrics = value; }
+    public void enableWorldLyricsWithModernDefaults() {
+        if (worldLyricsPreset == null) {
+            worldLyricsPreset = WorldLyricsDirector.Preset.CINEMA;
+            worldLyricsAutomatic = true;
+        }
+        worldLyrics = true;
+    }
+
+    static ClientPreferences decode(byte[] bytes) throws java.io.IOException {
+        var json = ProtocolCodec.mapper().readTree(bytes);
+        ClientPreferences result = ProtocolCodec.mapper().treeToValue(json, ClientPreferences.class);
+        if (!json.has("worldLyricsPositionVersion") && result.worldLyricsMaximumDistance <= 16) {
+            result.worldLyricsMinimumDistance = 6;
+            result.worldLyricsMaximumDistance = 192;
+        }
+        if (!json.has("worldLyricsPositionVersion") && result.worldLyricsPresetMask == 63)
+            result.worldLyricsPresetMask |= 1 << WorldLyricsDirector.Preset.LANDSCAPE.ordinal();
+        result.worldLyricsPositionVersion = 2;
+        return result;
+    }
+    public int getWorldLyricsPositionVersion() { return worldLyricsPositionVersion; }
+    public void setWorldLyricsPositionVersion(int value) { worldLyricsPositionVersion = value; }
+
+    public WorldIntensity getWorldLyricsIntensity() {
+        return worldLyricsIntensity == null ? WorldIntensity.NORMAL : worldLyricsIntensity;
+    }
+    public void setWorldLyricsIntensity(WorldIntensity value) { worldLyricsIntensity = value; }
+    public boolean isWorldLyricsPlayerReactions() { return worldLyricsPlayerReactions; }
+    public void setWorldLyricsPlayerReactions(boolean value) { worldLyricsPlayerReactions = value; }
+    public double getWorldLyricsSize() { return Double.isFinite(worldLyricsSize) ? Math.clamp(worldLyricsSize, .75, 2) : 1.2; }
+    public void setWorldLyricsSize(double value) { worldLyricsSize = Double.isFinite(value) ? Math.clamp(value, .75, 2) : 1.2; }
+    public boolean isWorldLyricsAutoWalls() { return worldLyricsAutoWalls; }
+    public void setWorldLyricsAutoWalls(boolean value) { worldLyricsAutoWalls = value; }
+    public boolean isWorldLyricsCinematic() { return worldLyricsCinematic; }
+    public void setWorldLyricsCinematic(boolean value) { worldLyricsCinematic = value; }
+    public boolean isWorldLyricsAutomatic() {
+        return worldLyricsAutomatic == null ? worldLyricsPreset != null || !worldLyrics : worldLyricsAutomatic;
+    }
+    public void setWorldLyricsAutomatic(boolean value) { worldLyricsAutomatic = value; }
+    public WorldLyricsDirector.Preset getWorldLyricsPreset() {
+        return worldLyricsPreset == null
+                ? (worldLyrics ? WorldLyricsDirector.Preset.CLASSIC : WorldLyricsDirector.Preset.CINEMA)
+                : worldLyricsPreset;
+    }
+    public boolean isLegacyWorldLyricsConfiguration() { return worldLyrics && worldLyricsPreset == null; }
+    public void setWorldLyricsPreset(WorldLyricsDirector.Preset value) {
+        worldLyricsPreset = value == null ? WorldLyricsDirector.Preset.CINEMA : value;
+    }
+    public WorldLyricsDirector.Variation getWorldLyricsVariation() {
+        return worldLyricsVariation == null ? WorldLyricsDirector.Variation.MEDIUM : worldLyricsVariation;
+    }
+    public void setWorldLyricsVariation(WorldLyricsDirector.Variation value) {
+        worldLyricsVariation = value == null ? WorldLyricsDirector.Variation.MEDIUM : value;
+    }
+    public WorldLyricsDirector.Quality getWorldLyricsQuality() {
+        return worldLyricsQuality == null ? WorldLyricsDirector.Quality.MEDIUM : worldLyricsQuality;
+    }
+    public void setWorldLyricsQuality(WorldLyricsDirector.Quality value) {
+        worldLyricsQuality = value == null ? WorldLyricsDirector.Quality.MEDIUM : value;
+    }
+    public boolean isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset preset) {
+        int sanitized = worldLyricsPresetMask & ((1 << WorldLyricsDirector.Preset.values().length) - 1);
+        return sanitized == 0 || (sanitized & (1 << preset.ordinal())) != 0;
+    }
+    public void setWorldLyricsPresetEnabled(WorldLyricsDirector.Preset preset, boolean enabled) {
+        if (enabled) worldLyricsPresetMask |= 1 << preset.ordinal();
+        else {
+            int candidate = worldLyricsPresetMask & ~(1 << preset.ordinal());
+            if (candidate != 0) worldLyricsPresetMask = candidate;
+        }
+    }
+    public java.util.Set<WorldLyricsDirector.Preset> getEnabledWorldLyricsPresets() {
+        java.util.EnumSet<WorldLyricsDirector.Preset> result = java.util.EnumSet.noneOf(WorldLyricsDirector.Preset.class);
+        for (var preset : WorldLyricsDirector.Preset.values()) if (isWorldLyricsPresetEnabled(preset)) result.add(preset);
+        return result;
+    }
+    public double getWorldLyricsMinimumDistance() { return finite(worldLyricsMinimumDistance, 6, 3, 64); }
+    public void setWorldLyricsMinimumDistance(double value) {
+        worldLyricsMinimumDistance = finite(value, 6, 3, Math.min(64, getWorldLyricsMaximumDistance()));
+    }
+    public double getWorldLyricsMaximumDistance() { return finite(worldLyricsMaximumDistance, 192, getWorldLyricsMinimumDistance(), 256); }
+    public void setWorldLyricsMaximumDistance(double value) {
+        worldLyricsMaximumDistance = finite(value, 192, getWorldLyricsMinimumDistance(), 256);
+    }
+    public double getWorldLyricsDistanceSensitivity() { return finite(worldLyricsDistanceSensitivity, 1, 0, 2); }
+    public void setWorldLyricsDistanceSensitivity(double value) { worldLyricsDistanceSensitivity = finite(value, 1, 0, 2); }
+    public double getWorldLyricsArcRadius() { return finite(worldLyricsArcRadius, .65, 0, 1); }
+    public void setWorldLyricsArcRadius(double value) { worldLyricsArcRadius = finite(value, .65, 0, 1); }
+    public double getWorldLyricsCenterGap() { return finite(worldLyricsCenterGap, .32, 0, .8); }
+    public void setWorldLyricsCenterGap(double value) { worldLyricsCenterGap = finite(value, .32, 0, .8); }
+    public double getWorldLyricsDepth() { return finite(worldLyricsDepth, .10, 0, .30); }
+    public void setWorldLyricsDepth(double value) { worldLyricsDepth = finite(value, .10, 0, .30); }
+    public double getWorldLyricsAnimationIntensity() { return finite(worldLyricsAnimationIntensity, 1, 0, 2); }
+    public void setWorldLyricsAnimationIntensity(double value) { worldLyricsAnimationIntensity = finite(value, 1, 0, 2); }
+    public double getWorldLyricsAnimationSpeed() { return finite(worldLyricsAnimationSpeed, 1, .25, 2); }
+    public void setWorldLyricsAnimationSpeed(double value) { worldLyricsAnimationSpeed = finite(value, 1, .25, 2); }
+    public boolean isWorldLyricsTrails() { return worldLyricsTrails; }
+    public void setWorldLyricsTrails(boolean value) { worldLyricsTrails = value; }
+    public int getWorldLyricsSideColor() { return worldLyricsSideColor & 0xFFFFFF; }
+    public void setWorldLyricsSideColor(int value) { worldLyricsSideColor = value & 0xFFFFFF; }
+    public int getWorldLyricsFaceColor() { return worldLyricsFaceColor & 0xFFFFFF; }
+    public void setWorldLyricsFaceColor(int value) { worldLyricsFaceColor = value & 0xFFFFFF; }
+
+    private static double finite(double value, double fallback, double minimum, double maximum) {
+        return Double.isFinite(value) ? Math.clamp(value, minimum, maximum) : fallback;
+    }
+
+    public enum WorldIntensity {
+        SOFT(.6), NORMAL(1), INTENSE(1.4);
+        public final double multiplier;
+        WorldIntensity(double multiplier) { this.multiplier = multiplier; }
+        public WorldIntensity next() { return values()[(ordinal() + 1) % values().length]; }
+        public WorldIntensity previous() { return values()[(ordinal() + values().length - 1) % values().length]; }
+    }
 
     public enum ReactiveSource {
         VOLUME, WORDS, WAVEFORM;

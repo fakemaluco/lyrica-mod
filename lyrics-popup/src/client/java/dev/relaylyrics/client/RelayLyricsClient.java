@@ -16,6 +16,8 @@ public final class RelayLyricsClient implements ClientModInitializer {
     private static LyricsOverlay overlay;
     private static MusicService music;
     private static boolean disabledByRelay;
+    private static boolean meshProbeArmed;
+    private static int meshProbeTicks;
 
     public static ClientPreferences preferences() {
         if (preferences == null) preferences = ClientPreferences.load();
@@ -38,13 +40,35 @@ public final class RelayLyricsClient implements ClientModInitializer {
         CompatibilityManager.initialize();
 
         overlay = new LyricsOverlay(preferences());
-        music = new MusicService(overlay, preferences());
+        if (!Boolean.getBoolean("lyrica.worldMeshSelfTest")) music = new MusicService(overlay, preferences());
         GoogleFontManager.restore(preferences().getGoogleFontFamily(),
                 preferences().getLyricsFontWeight().cssWeight(), overlay::fontChanged);
         InventoryLyricsInteraction.register();
         WorldLyricsRenderHook.register();
+        net.fabricmc.fabric.api.resource.ResourceManagerHelper.get(net.minecraft.resource.ResourceType.CLIENT_RESOURCES)
+                .registerReloadListener(new net.fabricmc.fabric.api.resource.SimpleSynchronousResourceReloadListener() {
+                    public net.minecraft.util.Identifier getFabricId() { return net.minecraft.util.Identifier.of("relaylyrics", "world_mesh"); }
+                    public void reload(net.minecraft.resource.ResourceManager manager) {
+                        MinecraftClient.getInstance().execute(() -> {
+                            dev.relaylyrics.client.ui.WorldTextMesh.clear();
+                            overlay.fontChanged();
+                        });
+                    }
+                });
+        if (Boolean.getBoolean("lyrica.worldMeshSelfTest"))
+            ClientLifecycleEvents.CLIENT_STARTED.register(client -> meshProbeArmed = true);
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (meshProbeArmed && client.getOverlay() == null && ++meshProbeTicks >= 10) {
+                meshProbeArmed = false;
+                try {
+                    dev.relaylyrics.client.ui.WorldTextMesh.verifyFontCapture();
+                    LyricsConfigScreen.verifyWorldTabVisibility();
+                }
+                finally { client.scheduleStop(); }
+            }
             overlay.tick();
+            dev.relaylyrics.client.ui.WorldLyricsRenderer.tickPlayerMotion(client);
+            dev.relaylyrics.client.ui.WorldTextMesh.tick();
             InventoryLyricsController.tick(client);
         });
         // Keep the normal HUD pass as a fallback. Inventory screens receive a

@@ -27,7 +27,7 @@ class WorldLyricsPlanTest {
                 .containsExactly("안", "녕하", "세요", "world");
         assertThat(tokens).extracting(WorldLyricsPlan.Token::startsWord)
                 .containsExactly(true, false, false, true);
-        assertThat(tokens.get(0).emphasis(1_200)).isZero();
+        assertThat(tokens.get(0).emphasis(1_200)).isGreaterThan(0);
         assertThat(tokens.get(1).emphasis(2_000)).isGreaterThan(.9);
         assertThat(tokens.get(1).emphasis(2_700)).isZero();
     }

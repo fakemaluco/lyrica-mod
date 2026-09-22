@@ -6,6 +6,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 /** Minecraft 1.21.1 world-render adapter. */
 public final class WorldLyricsRenderHook {
     private WorldLyricsRenderHook() { }
+    public static boolean gliding(net.minecraft.client.network.ClientPlayerEntity player) { return player.isFallFlying(); }
 
     public static void register() {
         WorldRenderEvents.AFTER_ENTITIES.register(context -> WorldLyricsRenderer.render(
