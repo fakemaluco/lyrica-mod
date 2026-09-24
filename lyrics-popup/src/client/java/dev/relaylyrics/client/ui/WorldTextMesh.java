@@ -42,6 +42,10 @@ public final class WorldTextMesh {
                     || sink.minZ != 0 || sink.maxZ != 3 || !sink.sawFront || !sink.sawSide
                     || sink.sideAfterFront || sink.frontWinding <= 0)
                 throw new IllegalStateException("Extruded vertices or synchronized clipping failed");
+            Capture beveled = new Capture();
+            if (!draw(sample, new Matrix4f().scale(1, -1, 1), ignored -> beveled, 0, 3,
+                    0xFFFFFF, 0x56647A, 1, null, false, true) || beveled.maxZ <= 3)
+                throw new IllegalStateException("Beveled rim was not emitted");
         } finally { CACHE.remove(sample); }
         dev.relaylyrics.FanDroidMod.LOGGER.info("World mesh GPU self-test passed: {} glyphs, {} quads, {} ms",
                 glyphs.size(), mesh.faces, (System.nanoTime() - start) / 1_000_000.0);
@@ -80,6 +84,11 @@ public final class WorldTextMesh {
 
     static boolean draw(Text text, Matrix4f matrix, VertexConsumerProvider target, float xOffset, float depth,
                         int faceColor, int sideColor, float alpha, Float fillBoundary, boolean rtl) {
+        return draw(text, matrix, target, xOffset, depth, faceColor, sideColor, alpha, fillBoundary, rtl, false);
+    }
+
+    static boolean draw(Text text, Matrix4f matrix, VertexConsumerProvider target, float xOffset, float depth,
+                        int faceColor, int sideColor, float alpha, Float fillBoundary, boolean rtl, boolean bevel) {
         Entry entry = CACHE.get(text);
         if (entry == null) {
             if (QUEUE.size() < 128) { Text key = text.copy(); CACHE.put(key, new Entry()); QUEUE.add(key); }
@@ -91,7 +100,7 @@ public final class WorldTextMesh {
         Vector3f point = new Vector3f();
         // Text layers can blend without writing depth. Draw the back and contour first so
         // the colored face is composited nearest the viewer even on those layers.
-        for (int pass = 0; pass < 3; pass++) for (Part part : mesh.parts) {
+        for (int pass = 0; pass < (bevel ? 4 : 3); pass++) for (Part part : mesh.parts) {
             VertexConsumer consumer = target.getBuffer(part.glyph.layer);
             WorldTextFill.Clipper clipper = fillBoundary == null ? null
                     : new WorldTextFill.Clipper(consumer, inverse, fillBoundary, rtl);
@@ -99,20 +108,23 @@ public final class WorldTextMesh {
             Glyph g = part.glyph;
             for (WorldGlyphMesh.Face face : part.faces) {
                 boolean front = face.side() == WorldGlyphMesh.Side.FRONT;
-                if (pass != (front ? 2 : face.side() == WorldGlyphMesh.Side.BACK ? 0 : 1)) continue;
-                boolean cap = front || face.side() == WorldGlyphMesh.Side.BACK;
+                boolean rim = pass == 3;
+                if (rim ? front || face.side() == WorldGlyphMesh.Side.BACK
+                        : pass != (front ? 2 : face.side() == WorldGlyphMesh.Side.BACK ? 0 : 1)) continue;
+                boolean cap = !rim && (front || face.side() == WorldGlyphMesh.Side.BACK);
                 float shade = switch (face.side()) {
                     case FRONT -> 1; case BACK -> .6f; case TOP -> .90f;
                     case BOTTOM -> .50f; case LEFT -> .68f; case RIGHT -> .80f;
                 };
-                int rgb = front ? faceColor : sideColor;
+                int rgb = front || rim ? faceColor : sideColor;
+                if (rim) shade = face.side() == WorldGlyphMesh.Side.TOP ? .94f : .72f;
                 int r = Math.round((rgb >> 16 & 255) * shade), b = Math.round((rgb & 255) * shade);
                 int green = Math.round((rgb >> 8 & 255) * shade);
                 // The caller reflects local Y to make font coordinates upright. Reverse
                 // the winding here so the front cap still faces the viewer after that reflection.
                 for (int v = 0; v < 4; v++) {
                     int winding = 3 - v;
-                    int px, py; float z;
+                    float px, py, z;
                     switch (face.side()) {
                         case FRONT, BACK -> {
                             int corner = front ? winding : 3 - winding;
@@ -122,12 +134,16 @@ public final class WorldTextMesh {
                         case LEFT, RIGHT -> {
                             int corner = face.side() == WorldGlyphMesh.Side.LEFT ? winding : 3 - winding;
                             px = face.x0(); py = corner >= 2 ? face.y1() : face.y0();
-                            z = corner == 1 || corner == 2 ? depth : 0;
+                            boolean inner = corner == 1 || corner == 2;
+                            if (rim && inner) px += face.side() == WorldGlyphMesh.Side.LEFT ? .45f : -.45f;
+                            z = rim ? depth + (inner ? Math.min(.65f, depth * .2f) : 0) : inner ? depth : 0;
                         }
                         default -> {
                             int corner = face.side() == WorldGlyphMesh.Side.BOTTOM ? winding : 3 - winding;
                             px = corner >= 2 ? face.x1() : face.x0(); py = face.y0();
-                            z = corner == 1 || corner == 2 ? depth : 0;
+                            boolean inner = corner == 1 || corner == 2;
+                            if (rim && inner) py += face.side() == WorldGlyphMesh.Side.TOP ? .45f : -.45f;
+                            z = rim ? depth + (inner ? Math.min(.65f, depth * .2f) : 0) : inner ? depth : 0;
                         }
                     }
                     float x = g.x0 + (g.x1 - g.x0) * px / g.width + xOffset;

@@ -7,6 +7,18 @@ import java.util.EnumSet;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class WorldLyricsDirectorTest {
+    @Test void terrainAndIntroStylesHaveDistinctSpatialEntrances() {
+        var ground = WorldLyricsDirector.Preset.GROUND;
+        var intro = WorldLyricsDirector.Preset.INTRO;
+        assertThat(ground.entrance).isEqualTo(WorldLyricsDirector.Entrance.FALL);
+        assertThat(intro.entrance).isEqualTo(WorldLyricsDirector.Entrance.POP);
+        assertThat(intro.depth).isGreaterThan(ground.depth);
+        var settings = new WorldLyricsDirector.Settings(false, intro,
+                EnumSet.allOf(WorldLyricsDirector.Preset.class), WorldLyricsDirector.Variation.MEDIUM,
+                6, 192, 1, .65, .32, .10, 1, 1, false, WorldLyricsDirector.Quality.MEDIUM);
+        assertThat(WorldLyricsDirector.choose(0, "opening", 1, 1200, false, false, 0, settings).preset())
+                .isEqualTo(intro);
+    }
     private static WorldLyricsDirector.Settings distantSettings() {
         return new WorldLyricsDirector.Settings(true, WorldLyricsDirector.Preset.CINEMA,
                 EnumSet.allOf(WorldLyricsDirector.Preset.class), WorldLyricsDirector.Variation.MEDIUM,

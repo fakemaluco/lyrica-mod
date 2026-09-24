@@ -339,6 +339,8 @@ public final class WorldLyricsRenderer {
                     case CASCADE -> slide = phase * .26;
                     case ROTATE -> rotation = phase * 7;
                     case DEPTH -> transitionDepth = phase * -.12;
+                    case FALL -> slide = phase * .60;
+                    case POP -> { zoom *= 1 - .22 * phase; transitionDepth = phase * -.10; }
                     case DISSOLVE -> { }
                 }
             }
@@ -409,7 +411,8 @@ public final class WorldLyricsRenderer {
                             matrices.peek().getPositionMatrix(), consumers, (float) (-piece.width / 2),
                             (float) (extrude / scale), preferences.getWorldLyricsFaceColor(), preferences.getWorldLyricsSideColor(),
                             (float) (visibility * (layout.timed && progress >= 1 ? .82 : 1)),
-                            layout.timed && progress < 1 ? (float) boundary : null, piece.rtl);
+                            layout.timed && progress < 1 ? (float) boundary : null, piece.rtl(),
+                            composition.preset() == WorldLyricsDirector.Preset.INTRO);
                     if (!meshDrawn) drawFace(renderer, piece, layout.timed, progress, boundary, visibility,
                             preferences.getWorldLyricsFaceColor(), preferences.isLyricsTextShadow(), matrices, consumers);
                     matrices.pop();
@@ -478,7 +481,8 @@ public final class WorldLyricsRenderer {
                                        WorldLyricsDirector.Composition composition, double requestedDistance) {
         // Close walls cannot provide the reading horizon needed during running or gliding.
         if (autoWalls && STATE.blocksPerSecond() < 4 && !STATE.flying()
-                && composition.preset() != WorldLyricsDirector.Preset.LANDSCAPE) {
+                && composition.preset() != WorldLyricsDirector.Preset.LANDSCAPE
+                && composition.preset() != WorldLyricsDirector.Preset.GROUND) {
             Anchor wall = findSurface(client, camera, bands);
             if (wall != null) return wall;
         }
@@ -486,20 +490,30 @@ public final class WorldLyricsRenderer {
         if (STATE.blocksPerSecond() > 4) offset *= .25;
         double yaw = Math.toRadians(client.gameRenderer.getCamera().getYaw() + offset);
         double pitch = Math.toRadians(client.gameRenderer.getCamera().getPitch());
+        boolean groundedStyle = composition.preset() == WorldLyricsDirector.Preset.GROUND && !STATE.flying();
+        if (groundedStyle) pitch = 0;
         Vec3d direction = new Vec3d(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
         Vec3d travelDirection = travel(client).normalize();
         if (STATE.blocksPerSecond() > 4 && direction.dotProduct(travelDirection) > .4)
             direction = direction.multiply(.65).add(travelDirection.multiply(.35)).normalize();
-        double distance = Math.max(.75, Math.min(requestedDistance, Math.max(24, client.options.getViewDistance().getValue() * 14)));
+        double distance = Math.max(.75, Math.min(groundedStyle ? Math.min(requestedDistance, 18) : requestedDistance,
+                Math.max(24, client.options.getViewDistance().getValue() * 14)));
         // Keep the fallback in front of obstacles too; never create a panel beyond the first block.
         Vec3d hitTarget = camera.add(direction.multiply(distance));
         var obstacle = ray(client, camera, hitTarget);
         if (obstacle.getType() == HitResult.Type.BLOCK) distance = Math.max(.75, camera.distanceTo(obstacle.getPos()) - .5);
         Vec3d center = camera.add(direction.multiply(distance));
         double height = 2.25 * bands * Math.max(.5, distance / 6);
+        if (groundedStyle) height = Math.min(height, 3 * bands);
         Vec3d normal = direction.negate();
         Vec3d right = new Vec3d(normal.z, 0, -normal.x).normalize();
         if (right.lengthSquared() < .001) right = new Vec3d(-Math.cos(yaw), 0, -Math.sin(yaw));
+        if (groundedStyle) {
+            Vec3d start = center.add(0, 5, 0);
+            BlockHitResult floor = ray(client, start, center.add(0, -14, 0));
+            if (floor.getType() == HitResult.Type.BLOCK && floor.getSide() == Direction.UP)
+                center = new Vec3d(center.x, floor.getPos().y + height * .5 + .35, center.z);
+        }
         center = liftAboveGround(client, center, right, distance, height, composition.depth());
         Anchor candidate = new Anchor(center.x, center.y, center.z, normal.x, normal.y, normal.z,
                 right.x, right.z, (float) Math.atan2(normal.x, normal.z), false,

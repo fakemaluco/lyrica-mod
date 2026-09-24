@@ -8,11 +8,16 @@ intensidade e reação são Normal e ligado; o recurso 3D continua opt-in.
 
 ## Direção visual e controles novos
 
-O diretor automático escolhe entre Clássico, Cinema, Escultura, Arco, Cascata, Voo e Paisagem
+O diretor automático escolhe entre Clássico, Cinema, Escultura, Arco, Cascata, Voo,
+Paisagem, Terreno e Intro chanfrada
 quando uma nova frase nasce. O preset da frase não muda até ela sair. Frases
 simultâneas compartilham a mesma composição. É possível desligar o diretor, escolher
 um preset fixo, selecionar quais participam da rotação e ajustar sua frequência.
 Configurações antigas continuam no estilo Clássico; uma primeira ativação usa Cinema.
+Terreno mantém uma composição menor junto ao solo para quem está a pé e entra com
+uma queda curta. Intro chanfrada acrescenta uma borda 3D inclinada ao contorno dos
+glifos e surge com expansão de escala e profundidade. Os novos estilos podem ser
+fixados manualmente ou incluídos na rotação automática.
 
 O jogador parado coloca novas frases a 6 blocos. A distância utiliza a velocidade
 completa em blocos por segundo e o tempo restante da frase, com 1,25 segundo de

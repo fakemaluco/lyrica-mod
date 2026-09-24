@@ -6,6 +6,12 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class WorldLyricsPreferencesTest {
+    @Test void existingSevenStyleSelectionReceivesTheNewPresets() throws Exception {
+        var restored = ClientPreferences.decode("{\"worldLyricsPositionVersion\":2,\"worldLyricsPresetMask\":127}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(restored.isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset.GROUND)).isTrue();
+        assertThat(restored.isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset.INTRO)).isTrue();
+    }
     @Test void previousShortDistanceLimitMigratesWithoutChangingTheSelectedStyle() throws Exception {
         var restored = ClientPreferences.decode("{\"worldLyrics\":true,\"worldLyricsMaximumDistance\":10,\"worldLyricsPreset\":\"SCULPTURE\"}"
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));

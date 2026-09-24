@@ -62,7 +62,7 @@ public final class ClientPreferences {
     private int worldLyricsPresetMask = (1 << WorldLyricsDirector.Preset.values().length) - 1;
     private double worldLyricsMinimumDistance = 6;
     private double worldLyricsMaximumDistance = 192;
-    private int worldLyricsPositionVersion = 2;
+    private int worldLyricsPositionVersion = 3;
     private double worldLyricsDistanceSensitivity = 1;
     private double worldLyricsArcRadius = .65;
     private double worldLyricsCenterGap = .32;
@@ -268,7 +268,10 @@ public final class ClientPreferences {
         }
         if (!json.has("worldLyricsPositionVersion") && result.worldLyricsPresetMask == 63)
             result.worldLyricsPresetMask |= 1 << WorldLyricsDirector.Preset.LANDSCAPE.ordinal();
-        result.worldLyricsPositionVersion = 2;
+        if (result.worldLyricsPositionVersion < 3 && result.worldLyricsPresetMask == 127)
+            result.worldLyricsPresetMask |= 1 << WorldLyricsDirector.Preset.GROUND.ordinal()
+                    | 1 << WorldLyricsDirector.Preset.INTRO.ordinal();
+        result.worldLyricsPositionVersion = 3;
         return result;
     }
     public int getWorldLyricsPositionVersion() { return worldLyricsPositionVersion; }

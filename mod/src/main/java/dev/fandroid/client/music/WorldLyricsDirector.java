@@ -17,7 +17,9 @@ public final class WorldLyricsDirector {
         ARC(Placement.ARC, Entrance.ROTATE, Motion.TILT_SEQUENCE, .09, false),
         CASCADE(Placement.DIAGONAL, Entrance.CASCADE, Motion.WAVE, .075, false),
         FLIGHT(Placement.FRONT, Entrance.DISSOLVE, Motion.BREATHE, .11, false),
-        LANDSCAPE(Placement.FRONT, Entrance.DISSOLVE, Motion.BREATHE, .14, false);
+        LANDSCAPE(Placement.FRONT, Entrance.DISSOLVE, Motion.BREATHE, .14, false),
+        GROUND(Placement.FRONT, Entrance.FALL, Motion.WORD_JUMP, .10, false),
+        INTRO(Placement.FRONT, Entrance.POP, Motion.DEPTH_PULSE, .20, false);
 
         public final Placement placement;
         public final Entrance entrance;
@@ -33,7 +35,7 @@ public final class WorldLyricsDirector {
     }
 
     public enum Placement { FRONT, ALTERNATE, ARC, DIAGONAL }
-    public enum Entrance { DISSOLVE, SLIDE, CASCADE, ROTATE, DEPTH }
+    public enum Entrance { DISSOLVE, SLIDE, CASCADE, ROTATE, DEPTH, FALL, POP }
     public enum Motion { WAVE, WORD_JUMP, BREATHE, TILT_SEQUENCE, DEPTH_PULSE }
     public enum Variation { LOW(4), MEDIUM(2), HIGH(1);
         public final int holdPhrases;
@@ -88,6 +90,9 @@ public final class WorldLyricsDirector {
         Preset preset = settings.automatic() ? choices.get(Math.floorMod(seed, choices.size())) : settings.selected();
         if (settings.automatic() && !wall && speed > .72 && choices.contains(Preset.FLIGHT)) {
             preset = Preset.FLIGHT;
+        } else if (settings.automatic() && !wall && speed < .28 && durationMillis >= 1_200
+                && Math.floorMod(seed, 3) == 0 && choices.contains(Preset.GROUND)) {
+            preset = Preset.GROUND;
         } else if (settings.automatic() && durationMillis > 3_000 && wordCount <= 5
                 && choices.contains(Preset.SCULPTURE)) {
             preset = Preset.SCULPTURE;
