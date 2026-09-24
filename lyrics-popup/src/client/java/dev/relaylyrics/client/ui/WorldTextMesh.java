@@ -36,8 +36,11 @@ public final class WorldTextMesh {
         Entry probe = new Entry(); probe.mesh = CompletableFuture.completedFuture(mesh); CACHE.put(sample, probe);
         Capture sink = new Capture();
         try {
-            if (!draw(sample, new Matrix4f(), ignored -> sink, 0, 3, 0xFFFFFF, 0x56647A, 1, 12f, false)
-                    || sink.minZ != 0 || sink.maxZ != 3)
+            // World lyrics flip local Y, so test the winding after that reflection.
+            if (!draw(sample, new Matrix4f().scale(1, -1, 1), ignored -> sink, 0, 3,
+                    0xFFFFFF, 0x56647A, 1, 12f, false)
+                    || sink.minZ != 0 || sink.maxZ != 3 || !sink.sawFront || !sink.sawSide
+                    || sink.sideAfterFront || sink.frontWinding <= 0)
                 throw new IllegalStateException("Extruded vertices or synchronized clipping failed");
         } finally { CACHE.remove(sample); }
         dev.relaylyrics.FanDroidMod.LOGGER.info("World mesh GPU self-test passed: {} glyphs, {} quads, {} ms",
@@ -86,7 +89,9 @@ public final class WorldTextMesh {
         if (mesh == null) return false;
         Matrix4f inverse = fillBoundary == null ? null : new Matrix4f(matrix).invert();
         Vector3f point = new Vector3f();
-        for (Part part : mesh.parts) {
+        // Text layers can blend without writing depth. Draw the back and contour first so
+        // the colored face is composited nearest the viewer even on those layers.
+        for (int pass = 0; pass < 3; pass++) for (Part part : mesh.parts) {
             VertexConsumer consumer = target.getBuffer(part.glyph.layer);
             WorldTextFill.Clipper clipper = fillBoundary == null ? null
                     : new WorldTextFill.Clipper(consumer, inverse, fillBoundary, rtl);
@@ -94,6 +99,7 @@ public final class WorldTextMesh {
             Glyph g = part.glyph;
             for (WorldGlyphMesh.Face face : part.faces) {
                 boolean front = face.side() == WorldGlyphMesh.Side.FRONT;
+                if (pass != (front ? 2 : face.side() == WorldGlyphMesh.Side.BACK ? 0 : 1)) continue;
                 boolean cap = front || face.side() == WorldGlyphMesh.Side.BACK;
                 float shade = switch (face.side()) {
                     case FRONT -> 1; case BACK -> .6f; case TOP -> .90f;
@@ -102,22 +108,24 @@ public final class WorldTextMesh {
                 int rgb = front ? faceColor : sideColor;
                 int r = Math.round((rgb >> 16 & 255) * shade), b = Math.round((rgb & 255) * shade);
                 int green = Math.round((rgb >> 8 & 255) * shade);
-                // Consistent outward winding in local coordinates. The font render layer is double-sided.
+                // The caller reflects local Y to make font coordinates upright. Reverse
+                // the winding here so the front cap still faces the viewer after that reflection.
                 for (int v = 0; v < 4; v++) {
+                    int winding = 3 - v;
                     int px, py; float z;
                     switch (face.side()) {
                         case FRONT, BACK -> {
-                            int corner = front ? v : 3 - v;
+                            int corner = front ? winding : 3 - winding;
                             px = corner == 1 || corner == 2 ? face.x1() : face.x0();
                             py = corner >= 2 ? face.y1() : face.y0(); z = front ? depth : 0;
                         }
                         case LEFT, RIGHT -> {
-                            int corner = face.side() == WorldGlyphMesh.Side.LEFT ? v : 3 - v;
+                            int corner = face.side() == WorldGlyphMesh.Side.LEFT ? winding : 3 - winding;
                             px = face.x0(); py = corner >= 2 ? face.y1() : face.y0();
                             z = corner == 1 || corner == 2 ? depth : 0;
                         }
                         default -> {
-                            int corner = face.side() == WorldGlyphMesh.Side.BOTTOM ? v : 3 - v;
+                            int corner = face.side() == WorldGlyphMesh.Side.BOTTOM ? winding : 3 - winding;
                             px = corner >= 2 ? face.x1() : face.x0(); py = face.y0();
                             z = corner == 1 || corner == 2 ? depth : 0;
                         }
@@ -175,7 +183,13 @@ public final class WorldTextMesh {
         final List<Quad> quads = new ArrayList<>();
         float x0, y0, x1, y1, u0, v0, u1, v1; int count;
         float minZ = Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
+        float lastX, lastY;
+        boolean sawFront, sawSide, sideAfterFront;
+        float frontWinding;
+        float[] frontX = new float[3], frontY = new float[3];
+        int frontVertices;
         public VertexConsumer vertex(float x, float y, float z) {
+            lastX = x; lastY = y;
             minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
             if (count == 4) flush();
             if (count++ == 0) { x0 = x1 = x; y0 = y1 = y; u0 = v0 = Float.MAX_VALUE; u1 = v1 = -Float.MAX_VALUE; }
@@ -183,7 +197,18 @@ public final class WorldTextMesh {
             return this;
         }
         public VertexConsumer texture(float u, float v) { u0 = Math.min(u0, u); v0 = Math.min(v0, v); u1 = Math.max(u1, u); v1 = Math.max(v1, v); return this; }
-        public VertexConsumer color(int r, int g, int b, int a) { return this; }
+        public VertexConsumer color(int r, int g, int b, int a) {
+            if (r == 255 && g == 255 && b == 255) {
+                sawFront = true;
+                if (frontVertices < 3) {
+                    frontX[frontVertices] = lastX; frontY[frontVertices] = lastY;
+                    if (++frontVertices == 3) frontWinding = (frontX[1] - frontX[0]) * (frontY[2] - frontY[0])
+                            - (frontY[1] - frontY[0]) * (frontX[2] - frontX[0]);
+                }
+            }
+            else { sawSide = true; if (sawFront) sideAfterFront = true; }
+            return this;
+        }
         public VertexConsumer color(int argb) { return this; }
         public VertexConsumer overlay(int u, int v) { return this; }
         public VertexConsumer light(int u, int v) { return this; }

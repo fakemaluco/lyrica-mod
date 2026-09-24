@@ -69,8 +69,6 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
         int y = 64;
         switch (category) {
             case GENERAL -> {
-                y = addToggle(y, "config.relaylyrics.world_lyrics", preferences::isWorldLyrics,
-                        preferences::enableWorldLyricsWithModernDefaults, () -> preferences.setWorldLyrics(false));
                 y = addToggle(y, "config.relaylyrics.visible", preferences::isLyricsVisible,
                         () -> preferences.setLyricsVisible(true), () -> preferences.setLyricsVisible(false));
                 y = addToggle(y, "config.relaylyrics.pinned", preferences::isLyricsPinned,
@@ -333,6 +331,8 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
                         }, null);
             }
             case EXPERIMENTAL -> {
+                y = addToggle(y, "config.relaylyrics.world_lyrics", preferences::isWorldLyrics,
+                        preferences::enableWorldLyricsWithModernDefaults, () -> preferences.setWorldLyrics(false));
                 y = addRow(y, Text.translatable("config.relaylyrics.reactive_source"),
                         () -> enumValue("config.relaylyrics.reactive_source.",
                                 preferences.getLyricsReactiveSource().name()),
@@ -456,6 +456,9 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
             LyricsConfigScreen screen = new LyricsConfigScreen(previous);
             client.setScreen(screen);
             screen.expectWorldTab(false);
+            screen.category = Category.EXPERIMENTAL;
+            screen.rebuild();
+            screen.expectWorldToggle();
             screen.apply(preferences::enableWorldLyricsWithModernDefaults);
             screen.expectWorldTab(true);
             screen.apply(() -> preferences.setWorldLyrics(false));
@@ -472,6 +475,12 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
         boolean present = children().stream().anyMatch(child -> child instanceof ButtonWidget button
                 && button.getY() == 28 && button.getMessage().getString().equals(title));
         if (present != expected) throw new IllegalStateException("Unexpected world configuration tab visibility");
+    }
+
+    private void expectWorldToggle() {
+        String label = Text.translatable("config.relaylyrics.world_lyrics").getString();
+        if (rows.stream().noneMatch(row -> row.label.getString().equals(label)))
+            throw new IllegalStateException("World lyrics toggle missing from Experimental settings");
     }
 
     private int addWorldSection(int y, String key) {

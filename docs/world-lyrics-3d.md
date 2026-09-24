@@ -1,6 +1,6 @@
 # Letras no mundo 3D
 
-Na aba **Geral**, ative **Letras posicionadas no mundo**. A aba **Mundo 3D** aparece
+Na aba **Experimental**, ative **Letras posicionadas no mundo**. A aba **Mundo 3D** aparece
 imediatamente e desaparece ao desligar a opção. Nela, escolha a **Intensidade 3D**
 (Suave, Normal ou Intensa) e configure **Reagir ao jogador**. O controle geral
 **Animações** desliga todos os movimentos, incluindo as reações. Os padrões de
@@ -25,8 +25,11 @@ arco são relativas à mira no instante em que a frase aparece, mantendo-se fixa
 mundo. A orientação considera a inclinação da câmera e a trajetória de voo. Quando
 uma posição lateral é bloqueada, usa-se a posição frontal segura. Paredes próximas
 não são escolhidas durante corrida, voo ou no preset Paisagem. Se uma aceleração
-fizer o jogador alcançar a frase antes do fim, o grupo recebe uma nova âncora fixa
-mais adiante, com entrada de 180 ms; não acompanha a câmera a cada quadro.
+fizer o jogador alcançar a frase antes do fim, o grupo desliza suavemente até uma
+nova âncora fixa mais adiante. A trajetória considera o terreno entre os pontos;
+não acompanha a câmera a cada quadro. Pausar a música congela esse deslocamento.
+Ao criar uma âncora livre, o terreno sob o centro e as extremidades é medido e a
+composição sobe quando seu limite inferior encostaria no chão.
 O painel oferece controles de tamanho, distância, sensibilidade, raio, região livre
 da mira, profundidade, cores frontal e lateral, força e velocidade das animações,
 rastros e qualidade. Há restauração por grupo e um botão para recriar a frase atual.
@@ -36,7 +39,9 @@ renderizados pelo Minecraft. Há frente, verso e faces laterais apenas no contor
 exposto, incluindo os contornos internos de letras como O e B. Retângulos vizinhos
 são unidos; não existem paredes internas entre pixels adjacentes. Fontes bitmap
 preservam o contorno pixelado, enquanto fontes com sobreamostragem usam a resolução
-do atlas. O preenchimento sincronizado também corta a geometria lateral.
+do atlas. A frente branca tem orientação voltada ao jogador após a escala vertical
+do texto, e é desenhada depois do verso e das laterais. O preenchimento sincronizado
+também corta a geometria lateral.
 
 A leitura do atlas ocorre somente na preparação pendente de novos textos, até duas
 capturas por tick; a construção da malha usa um worker. O desenho consulta o cache,
