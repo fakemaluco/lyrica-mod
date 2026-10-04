@@ -62,7 +62,14 @@ public final class ClientPreferences {
     private int worldLyricsPresetMask = (1 << WorldLyricsDirector.Preset.values().length) - 1;
     private double worldLyricsMinimumDistance = 6;
     private double worldLyricsMaximumDistance = 192;
-    private int worldLyricsPositionVersion = 3;
+    private int worldLyricsPositionVersion = 4;
+    private WorldLyricsDirector.SurfacePreference worldLyricsSurfacePreference = WorldLyricsDirector.SurfacePreference.CONTEXT;
+    private WorldLyricsDirector.Material worldLyricsMaterial = WorldLyricsDirector.Material.AUTO;
+    private WorldLyricsDirector.Entrance worldLyricsEntranceOverride;
+    private boolean worldLyricsBevel = true;
+    private double worldLyricsBevelWidth = .45;
+    private boolean worldLyricsContactShadow = true;
+    private boolean worldLyricsWorldLight = true;
     private double worldLyricsDistanceSensitivity = 1;
     private double worldLyricsArcRadius = .65;
     private double worldLyricsCenterGap = .32;
@@ -262,6 +269,8 @@ public final class ClientPreferences {
     static ClientPreferences decode(byte[] bytes) throws java.io.IOException {
         var json = ProtocolCodec.mapper().readTree(bytes);
         ClientPreferences result = ProtocolCodec.mapper().treeToValue(json, ClientPreferences.class);
+        if (!json.has("worldLyricsPresetMask") && result.worldLyrics)
+            result.worldLyricsPresetMask = (1 << WorldLyricsDirector.Preset.MURAL.ordinal()) - 1;
         if (!json.has("worldLyricsPositionVersion") && result.worldLyricsMaximumDistance <= 16) {
             result.worldLyricsMinimumDistance = 6;
             result.worldLyricsMaximumDistance = 192;
@@ -271,7 +280,11 @@ public final class ClientPreferences {
         if (result.worldLyricsPositionVersion < 3 && result.worldLyricsPresetMask == 127)
             result.worldLyricsPresetMask |= 1 << WorldLyricsDirector.Preset.GROUND.ordinal()
                     | 1 << WorldLyricsDirector.Preset.INTRO.ordinal();
-        result.worldLyricsPositionVersion = 3;
+        if (result.worldLyricsPositionVersion < 4) {
+            // Existing masks retain their explicit choices; new styles are opt-in for those users.
+            result.worldLyricsSurfacePreference = WorldLyricsDirector.SurfacePreference.CONTEXT;
+        }
+        result.worldLyricsPositionVersion = 4;
         return result;
     }
     public int getWorldLyricsPositionVersion() { return worldLyricsPositionVersion; }
@@ -287,6 +300,28 @@ public final class ClientPreferences {
     public void setWorldLyricsSize(double value) { worldLyricsSize = Double.isFinite(value) ? Math.clamp(value, .75, 2) : 1.2; }
     public boolean isWorldLyricsAutoWalls() { return worldLyricsAutoWalls; }
     public void setWorldLyricsAutoWalls(boolean value) { worldLyricsAutoWalls = value; }
+    public WorldLyricsDirector.SurfacePreference getWorldLyricsSurfacePreference() {
+        return worldLyricsSurfacePreference == null ? WorldLyricsDirector.SurfacePreference.CONTEXT : worldLyricsSurfacePreference;
+    }
+    public void setWorldLyricsSurfacePreference(WorldLyricsDirector.SurfacePreference value) {
+        worldLyricsSurfacePreference = value == null ? WorldLyricsDirector.SurfacePreference.CONTEXT : value;
+    }
+    public WorldLyricsDirector.Material getWorldLyricsMaterial() {
+        return worldLyricsMaterial == null ? WorldLyricsDirector.Material.AUTO : worldLyricsMaterial;
+    }
+    public void setWorldLyricsMaterial(WorldLyricsDirector.Material value) {
+        worldLyricsMaterial = value == null ? WorldLyricsDirector.Material.AUTO : value;
+    }
+    public WorldLyricsDirector.Entrance getWorldLyricsEntranceOverride() { return worldLyricsEntranceOverride; }
+    public void setWorldLyricsEntranceOverride(WorldLyricsDirector.Entrance value) { worldLyricsEntranceOverride = value; }
+    public boolean isWorldLyricsBevel() { return worldLyricsBevel; }
+    public void setWorldLyricsBevel(boolean value) { worldLyricsBevel = value; }
+    public double getWorldLyricsBevelWidth() { return finite(worldLyricsBevelWidth, .45, .15, 1.2); }
+    public void setWorldLyricsBevelWidth(double value) { worldLyricsBevelWidth = finite(value, .45, .15, 1.2); }
+    public boolean isWorldLyricsContactShadow() { return worldLyricsContactShadow; }
+    public void setWorldLyricsContactShadow(boolean value) { worldLyricsContactShadow = value; }
+    public boolean isWorldLyricsWorldLight() { return worldLyricsWorldLight; }
+    public void setWorldLyricsWorldLight(boolean value) { worldLyricsWorldLight = value; }
     public boolean isWorldLyricsCinematic() { return worldLyricsCinematic; }
     public void setWorldLyricsCinematic(boolean value) { worldLyricsCinematic = value; }
     public boolean isWorldLyricsAutomatic() {
@@ -317,6 +352,10 @@ public final class ClientPreferences {
     public boolean isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset preset) {
         int sanitized = worldLyricsPresetMask & ((1 << WorldLyricsDirector.Preset.values().length) - 1);
         return sanitized == 0 || (sanitized & (1 << preset.ordinal())) != 0;
+    }
+    public int getWorldLyricsPresetMask() { return worldLyricsPresetMask; }
+    public void setWorldLyricsPresetMask(int value) {
+        worldLyricsPresetMask = value & ((1 << WorldLyricsDirector.Preset.values().length) - 1);
     }
     public void setWorldLyricsPresetEnabled(WorldLyricsDirector.Preset preset, boolean enabled) {
         if (enabled) worldLyricsPresetMask |= 1 << preset.ordinal();

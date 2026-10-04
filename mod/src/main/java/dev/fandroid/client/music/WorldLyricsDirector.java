@@ -18,8 +18,10 @@ public final class WorldLyricsDirector {
         CASCADE(Placement.DIAGONAL, Entrance.CASCADE, Motion.WAVE, .075, false),
         FLIGHT(Placement.FRONT, Entrance.DISSOLVE, Motion.BREATHE, .11, false),
         LANDSCAPE(Placement.FRONT, Entrance.DISSOLVE, Motion.BREATHE, .14, false),
-        GROUND(Placement.FRONT, Entrance.FALL, Motion.WORD_JUMP, .10, false),
-        INTRO(Placement.FRONT, Entrance.POP, Motion.DEPTH_PULSE, .20, false);
+        GROUND(Placement.FRONT, Entrance.RISE, Motion.WORD_JUMP, .10, false),
+        INTRO(Placement.FRONT, Entrance.LAND, Motion.DEPTH_PULSE, .20, false),
+        MURAL(Placement.FRONT, Entrance.WALL_SLIDE, Motion.BREATHE, .09, false),
+        ENGRAVED(Placement.FRONT, Entrance.BUILD, Motion.BREATHE, .018, false);
 
         public final Placement placement;
         public final Entrance entrance;
@@ -35,7 +37,15 @@ public final class WorldLyricsDirector {
     }
 
     public enum Placement { FRONT, ALTERNATE, ARC, DIAGONAL }
-    public enum Entrance { DISSOLVE, SLIDE, CASCADE, ROTATE, DEPTH, FALL, POP }
+    public enum Entrance { DISSOLVE, SLIDE, CASCADE, ROTATE, DEPTH, FALL, POP, RISE, LAND, WALL_SLIDE, BUILD }
+    public enum SurfacePreference { CONTEXT, SURFACES, HORIZON;
+        public SurfacePreference next() { return values()[(ordinal() + 1) % values().length]; }
+        public SurfacePreference previous() { return values()[(ordinal() + values().length - 1) % values().length]; }
+    }
+    public enum Material { AUTO, STONE, METAL, SOFT_LIGHT;
+        public Material next() { return values()[(ordinal() + 1) % values().length]; }
+        public Material previous() { return values()[(ordinal() + values().length - 1) % values().length]; }
+    }
     public enum Motion { WAVE, WORD_JUMP, BREATHE, TILT_SEQUENCE, DEPTH_PULSE }
     public enum Variation { LOW(4), MEDIUM(2), HIGH(1);
         public final int holdPhrases;
@@ -84,6 +94,13 @@ public final class WorldLyricsDirector {
                                      boolean backing, boolean wall, double speed, Settings settings,
                                      Preset previous) {
         List<Preset> choices = new ArrayList<>(settings.enabled());
+        // Surface styles are admitted only after a suitable surface has been found.
+        if (!wall) { choices.remove(Preset.MURAL); choices.remove(Preset.ENGRAVED); }
+        else {
+            choices.remove(Preset.GROUND); choices.remove(Preset.INTRO);
+            choices.remove(Preset.LANDSCAPE); choices.remove(Preset.FLIGHT);
+        }
+        if (choices.isEmpty()) choices.add(Preset.CINEMA);
         choices.sort(Enum::compareTo);
         long group = Math.floorDiv(phraseStart, 1_000L * settings.variation().holdPhrases);
         int seed = Objects.hash(group, backing);
@@ -114,6 +131,7 @@ public final class WorldLyricsDirector {
                 : wordCount <= 3 ? Motion.WORD_JUMP : preset.motion == Motion.DEPTH_PULSE ? Motion.BREATHE : preset.motion;
         double depth = Math.clamp(preset.depth * (settings.depth() / .10), 0, .30);
         if (preset == Preset.CLASSIC) depth = 0;
+        if (preset == Preset.ENGRAVED) depth = Math.min(depth, .025);
         boolean trails = settings.trails();
         return new Composition(preset, preset.placement, preset.entrance, motion, yaw, vertical,
                 depth, trails, settings.quality().depthLayers, trails ? settings.quality().trailCopies : 0);
@@ -123,6 +141,17 @@ public final class WorldLyricsDirector {
         double activity = Math.clamp(smoothedSpeed * settings.distanceSensitivity() + (flying ? .22 : 0), 0, 1);
         double eased = activity * activity * (3 - 2 * activity);
         return settings.minimumDistance() + (settings.maximumDistance() - settings.minimumDistance()) * eased;
+    }
+
+    public static boolean seekSurface(Preset preset, SurfacePreference preference,
+                                      double blocksPerSecond, boolean flying, boolean automatic) {
+        boolean manualSurface = !automatic && (preset == Preset.GROUND || preset == Preset.INTRO
+                || preset == Preset.MURAL || preset == Preset.ENGRAVED);
+        if (manualSurface) return true;
+        if (preset == Preset.LANDSCAPE || preset == Preset.FLIGHT) return false;
+        if (flying || blocksPerSecond >= 5.1 || preference == SurfacePreference.HORIZON) return false;
+        return preference == SurfacePreference.SURFACES || preset == Preset.GROUND || preset == Preset.INTRO
+                || preset.ordinal() % 3 != 0;
     }
 
     /** Arrival must occur after the phrase can be read, including fast gliding and vertical travel. */

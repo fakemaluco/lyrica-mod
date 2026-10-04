@@ -89,6 +89,12 @@ public final class WorldTextMesh {
 
     static boolean draw(Text text, Matrix4f matrix, VertexConsumerProvider target, float xOffset, float depth,
                         int faceColor, int sideColor, float alpha, Float fillBoundary, boolean rtl, boolean bevel) {
+        return draw(text, matrix, target, xOffset, depth, faceColor, sideColor, alpha, fillBoundary, rtl, bevel, .45f);
+    }
+
+    static boolean draw(Text text, Matrix4f matrix, VertexConsumerProvider target, float xOffset, float depth,
+                        int faceColor, int sideColor, float alpha, Float fillBoundary, boolean rtl,
+                        boolean bevel, float bevelWidth) {
         Entry entry = CACHE.get(text);
         if (entry == null) {
             if (QUEUE.size() < 128) { Text key = text.copy(); CACHE.put(key, new Entry()); QUEUE.add(key); }
@@ -135,14 +141,14 @@ public final class WorldTextMesh {
                             int corner = face.side() == WorldGlyphMesh.Side.LEFT ? winding : 3 - winding;
                             px = face.x0(); py = corner >= 2 ? face.y1() : face.y0();
                             boolean inner = corner == 1 || corner == 2;
-                            if (rim && inner) px += face.side() == WorldGlyphMesh.Side.LEFT ? .45f : -.45f;
+                            if (rim && inner) px += face.side() == WorldGlyphMesh.Side.LEFT ? bevelWidth : -bevelWidth;
                             z = rim ? depth + (inner ? Math.min(.65f, depth * .2f) : 0) : inner ? depth : 0;
                         }
                         default -> {
                             int corner = face.side() == WorldGlyphMesh.Side.BOTTOM ? winding : 3 - winding;
                             px = corner >= 2 ? face.x1() : face.x0(); py = face.y0();
                             boolean inner = corner == 1 || corner == 2;
-                            if (rim && inner) py += face.side() == WorldGlyphMesh.Side.TOP ? .45f : -.45f;
+                            if (rim && inner) py += face.side() == WorldGlyphMesh.Side.TOP ? bevelWidth : -bevelWidth;
                             z = rim ? depth + (inner ? Math.min(.65f, depth * .2f) : 0) : inner ? depth : 0;
                         }
                     }

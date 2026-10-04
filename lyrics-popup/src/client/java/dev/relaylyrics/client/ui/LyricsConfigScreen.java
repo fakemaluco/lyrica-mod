@@ -11,7 +11,10 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.gui.tooltip.Tooltip;
+import net.minecraft.client.resource.language.I18n;
 import net.minecraft.text.Text;
+import net.minecraft.text.TranslatableTextContent;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
@@ -256,6 +259,10 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
                         () -> preferences.setWorldLyricsPlayerReactions(true),
                         () -> preferences.setWorldLyricsPlayerReactions(false));
                 y = addWorldSection(y, "config.relaylyrics.world_section.position");
+                y = addRow(y, Text.translatable("config.relaylyrics.world_surface_preference"),
+                        () -> enumValue("config.relaylyrics.world_surface_preference.", preferences.getWorldLyricsSurfacePreference().name()),
+                        () -> preferences.setWorldLyricsSurfacePreference(preferences.getWorldLyricsSurfacePreference().next()),
+                        () -> preferences.setWorldLyricsSurfacePreference(preferences.getWorldLyricsSurfacePreference().previous()));
                 y = addRow(y, Text.translatable("config.relaylyrics.world_distance_min"),
                         () -> Text.literal(String.format(java.util.Locale.ROOT, "%.1f", preferences.getWorldLyricsMinimumDistance())),
                         () -> preferences.setWorldLyricsMinimumDistance(preferences.getWorldLyricsMinimumDistance() + .5),
@@ -277,6 +284,20 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
                         () -> preferences.setWorldLyricsCenterGap(preferences.getWorldLyricsCenterGap() + .08),
                         () -> preferences.setWorldLyricsCenterGap(preferences.getWorldLyricsCenterGap() - .08));
                 y = addWorldSection(y, "config.relaylyrics.world_section.volume");
+                y = addRow(y, Text.translatable("config.relaylyrics.world_material"),
+                        () -> enumValue("config.relaylyrics.world_material.", preferences.getWorldLyricsMaterial().name()),
+                        () -> preferences.setWorldLyricsMaterial(preferences.getWorldLyricsMaterial().next()),
+                        () -> preferences.setWorldLyricsMaterial(preferences.getWorldLyricsMaterial().previous()));
+                y = addToggle(y, "config.relaylyrics.world_bevel", preferences::isWorldLyricsBevel,
+                        () -> preferences.setWorldLyricsBevel(true), () -> preferences.setWorldLyricsBevel(false));
+                y = addRow(y, Text.translatable("config.relaylyrics.world_bevel_width"),
+                        () -> Text.literal(Math.round(preferences.getWorldLyricsBevelWidth() * 100) + "%"),
+                        () -> preferences.setWorldLyricsBevelWidth(preferences.getWorldLyricsBevelWidth() + .1),
+                        () -> preferences.setWorldLyricsBevelWidth(preferences.getWorldLyricsBevelWidth() - .1));
+                y = addToggle(y, "config.relaylyrics.world_contact_shadow", preferences::isWorldLyricsContactShadow,
+                        () -> preferences.setWorldLyricsContactShadow(true), () -> preferences.setWorldLyricsContactShadow(false));
+                y = addToggle(y, "config.relaylyrics.world_light", preferences::isWorldLyricsWorldLight,
+                        () -> preferences.setWorldLyricsWorldLight(true), () -> preferences.setWorldLyricsWorldLight(false));
                 y = addRow(y, Text.translatable("config.relaylyrics.world_depth"),
                         () -> Text.literal(Math.round(preferences.getWorldLyricsDepth() * 100) + "%"),
                         () -> preferences.setWorldLyricsDepth(preferences.getWorldLyricsDepth() + .025),
@@ -290,6 +311,12 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
                         () -> preferences.setWorldLyricsSideColor(nextSideColor(preferences.getWorldLyricsSideColor(), 1)),
                         () -> preferences.setWorldLyricsSideColor(nextSideColor(preferences.getWorldLyricsSideColor(), -1)));
                 y = addWorldSection(y, "config.relaylyrics.world_section.animations");
+                y = addRow(y, Text.translatable("config.relaylyrics.world_entrance"),
+                        () -> preferences.getWorldLyricsEntranceOverride() == null
+                                ? Text.translatable("config.relaylyrics.world_entrance.auto")
+                                : enumValue("config.relaylyrics.world_entrance.", preferences.getWorldLyricsEntranceOverride().name()),
+                        () -> preferences.setWorldLyricsEntranceOverride(nextEntrance(preferences.getWorldLyricsEntranceOverride(), 1)),
+                        () -> preferences.setWorldLyricsEntranceOverride(nextEntrance(preferences.getWorldLyricsEntranceOverride(), -1)));
                 y = addRow(y, Text.translatable("config.relaylyrics.world_animation_strength"),
                         () -> Text.literal(Math.round(preferences.getWorldLyricsAnimationIntensity() * 100) + "%"),
                         () -> preferences.setWorldLyricsAnimationIntensity(preferences.getWorldLyricsAnimationIntensity() + .1),
@@ -315,6 +342,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
                             preferences.setWorldLyricsDistanceSensitivity(1);
                             preferences.setWorldLyricsArcRadius(.65);
                             preferences.setWorldLyricsCenterGap(.32);
+                            preferences.setWorldLyricsSurfacePreference(WorldLyricsDirector.SurfacePreference.CONTEXT);
                         }, null);
                 y = addRow(y, Text.translatable("config.relaylyrics.world_reset_volume"),
                         () -> Text.translatable("config.relaylyrics.restore"), () -> {
@@ -322,12 +350,18 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
                             preferences.setWorldLyricsSideColor(0x56647A);
                             preferences.setWorldLyricsFaceColor(0xFFFFFF);
                             preferences.setWorldLyricsQuality(WorldLyricsDirector.Quality.MEDIUM);
+                            preferences.setWorldLyricsMaterial(WorldLyricsDirector.Material.AUTO);
+                            preferences.setWorldLyricsBevel(true);
+                            preferences.setWorldLyricsBevelWidth(.45);
+                            preferences.setWorldLyricsContactShadow(true);
+                            preferences.setWorldLyricsWorldLight(true);
                         }, null);
                 y = addRow(y, Text.translatable("config.relaylyrics.world_reset_animation"),
                         () -> Text.translatable("config.relaylyrics.restore"), () -> {
                             preferences.setWorldLyricsAnimationIntensity(1);
                             preferences.setWorldLyricsAnimationSpeed(1);
                             preferences.setWorldLyricsTrails(false);
+                            preferences.setWorldLyricsEntranceOverride(null);
                         }, null);
             }
             case EXPERIMENTAL -> {
@@ -501,6 +535,13 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
         return palette[Math.floorMod(current + direction, palette.length)];
     }
 
+    private static WorldLyricsDirector.Entrance nextEntrance(WorldLyricsDirector.Entrance current, int direction) {
+        var values = WorldLyricsDirector.Entrance.values();
+        int index = current == null ? 0 : current.ordinal() + 1;
+        int next = Math.floorMod(index + direction, values.length + 1);
+        return next == 0 ? null : values[next - 1];
+    }
+
     private int addRow(int y, Text label, Supplier<Text> value, Runnable increase, Runnable decrease) {
         return addRow(y, label, value, increase, decrease, false);
     }
@@ -516,6 +557,9 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
         ButtonWidget control = ButtonWidget.builder(initialValue, ignored -> {
             apply(increase);
         }).dimensions(controlLeft, y, width - contentLeft - controlLeft, 20).build();
+        if (label.getContent() instanceof TranslatableTextContent translatable
+                && I18n.hasTranslation(translatable.getKey() + ".desc"))
+            control.setTooltip(Tooltip.of(Text.translatable(translatable.getKey() + ".desc")));
         control.active = increase != null || decrease != null;
         int available = Math.max(20, controlLeft - contentLeft - 16);
         Text fittedLabel = Text.literal(textRenderer.trimToWidth(label.getString(), available));
