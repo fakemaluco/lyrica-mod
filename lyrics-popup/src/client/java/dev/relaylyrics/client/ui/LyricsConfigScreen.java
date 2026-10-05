@@ -656,7 +656,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
         preferences.setWorldLyricsAutoWalls(true);
         preferences.setWorldLyricsCinematic(true);
         preferences.setWorldLyricsAutomatic(true);
-        preferences.setWorldLyricsPreset(WorldLyricsDirector.Preset.CINEMA);
+        preferences.setWorldLyricsPreset(WorldLyricsDirector.Preset.SIGN);
         preferences.setWorldLyricsVariation(WorldLyricsDirector.Variation.MEDIUM);
         preferences.setWorldLyricsQuality(WorldLyricsDirector.Quality.MEDIUM);
         for (var preset : WorldLyricsDirector.Preset.values()) preferences.setWorldLyricsPresetEnabled(preset, true);

@@ -11,17 +11,12 @@ public final class WorldLyricsDirector {
     private WorldLyricsDirector() { }
 
     public enum Preset {
-        CLASSIC(Placement.FRONT, Entrance.DISSOLVE, Motion.WAVE, 0, false),
-        CINEMA(Placement.ALTERNATE, Entrance.SLIDE, Motion.BREATHE, .085, false),
-        SCULPTURE(Placement.FRONT, Entrance.DEPTH, Motion.DEPTH_PULSE, .16, false),
-        ARC(Placement.ARC, Entrance.ROTATE, Motion.TILT_SEQUENCE, .09, false),
-        CASCADE(Placement.DIAGONAL, Entrance.CASCADE, Motion.WAVE, .075, false),
-        FLIGHT(Placement.FRONT, Entrance.DISSOLVE, Motion.BREATHE, .11, false),
-        LANDSCAPE(Placement.FRONT, Entrance.DISSOLVE, Motion.BREATHE, .14, false),
-        GROUND(Placement.FRONT, Entrance.RISE, Motion.WORD_JUMP, .10, false),
-        INTRO(Placement.FRONT, Entrance.LAND, Motion.DEPTH_PULSE, .20, false),
+        SIGN(Placement.ALTERNATE, Entrance.RISE, Motion.WORD_JUMP, .10, false),
         MURAL(Placement.FRONT, Entrance.WALL_SLIDE, Motion.BREATHE, .09, false),
-        ENGRAVED(Placement.FRONT, Entrance.BUILD, Motion.BREATHE, .018, false);
+        ENGRAVED(Placement.FRONT, Entrance.BUILD, Motion.BREATHE, .018, false),
+        MONOLITH(Placement.DIAGONAL, Entrance.LAND, Motion.DEPTH_PULSE, .20, false),
+        LANDSCAPE(Placement.ARC, Entrance.SLIDE, Motion.WAVE, .11, false),
+        FLIGHT(Placement.FRONT, Entrance.DISSOLVE, Motion.BREATHE, .10, false);
 
         public final Placement placement;
         public final Entrance entrance;
@@ -66,7 +61,7 @@ public final class WorldLyricsDirector {
                            double depth, double animationIntensity, double animationSpeed,
                            boolean trails, Quality quality) {
         public Settings {
-            selected = selected == null ? Preset.CINEMA : selected;
+            selected = selected == null ? Preset.SIGN : selected;
             enabled = enabled == null || enabled.isEmpty() ? EnumSet.allOf(Preset.class) : EnumSet.copyOf(enabled);
             variation = variation == null ? Variation.MEDIUM : variation;
             quality = quality == null ? Quality.MEDIUM : quality;
@@ -94,30 +89,23 @@ public final class WorldLyricsDirector {
                                      boolean backing, boolean wall, double speed, Settings settings,
                                      Preset previous) {
         List<Preset> choices = new ArrayList<>(settings.enabled());
-        // Surface styles are admitted only after a suitable surface has been found.
-        if (!wall) { choices.remove(Preset.MURAL); choices.remove(Preset.ENGRAVED); }
-        else {
-            choices.remove(Preset.GROUND); choices.remove(Preset.INTRO);
-            choices.remove(Preset.LANDSCAPE); choices.remove(Preset.FLIGHT);
-        }
-        if (choices.isEmpty()) choices.add(Preset.CINEMA);
+        if (wall) choices.removeIf(p -> p != Preset.MURAL && p != Preset.ENGRAVED);
+        else if (speed > .72) choices.removeIf(p -> p != Preset.FLIGHT && p != Preset.LANDSCAPE);
+        if (choices.isEmpty()) choices.add(wall ? Preset.MURAL : Preset.LANDSCAPE);
         choices.sort(Enum::compareTo);
         long group = Math.floorDiv(phraseStart, 1_000L * settings.variation().holdPhrases);
         int seed = Objects.hash(group, backing);
         Preset preset = settings.automatic() ? choices.get(Math.floorMod(seed, choices.size())) : settings.selected();
         if (settings.automatic() && !wall && speed > .72 && choices.contains(Preset.FLIGHT)) {
             preset = Preset.FLIGHT;
-        } else if (settings.automatic() && !wall && speed < .28 && durationMillis >= 1_200
-                && Math.floorMod(seed, 3) == 0 && choices.contains(Preset.GROUND)) {
-            preset = Preset.GROUND;
-        } else if (settings.automatic() && durationMillis > 3_000 && wordCount <= 5
-                && choices.contains(Preset.SCULPTURE)) {
-            preset = Preset.SCULPTURE;
+        } else if (settings.automatic() && !wall && speed < .28 && durationMillis > 3_000
+                && wordCount <= 5 && choices.contains(Preset.MONOLITH)) {
+            preset = Preset.MONOLITH;
         }
         if (settings.automatic() && choices.size() > 1 && preset == previous) {
             preset = choices.get((choices.indexOf(preset) + 1) % choices.size());
         }
-        if (wall && (preset == Preset.ARC || preset == Preset.FLIGHT)) preset = Preset.SCULPTURE;
+        if (wall && preset != Preset.MURAL && preset != Preset.ENGRAVED) preset = Preset.MURAL;
 
         double sign = (seed & 1) == 0 ? -1 : 1;
         double yaw = switch (preset.placement) {
@@ -126,11 +114,10 @@ public final class WorldLyricsDirector {
             case ARC -> sign * (20 + settings.arcRadius() * 26);
             case DIAGONAL -> sign * (14 + settings.arcRadius() * 18);
         };
-        double vertical = preset.placement == Placement.DIAGONAL ? sign * .6 : preset == Preset.FLIGHT ? .75 : 0;
+        double vertical = preset == Preset.MONOLITH ? sign * .25 : preset == Preset.FLIGHT ? .75 : 0;
         Motion motion = durationMillis >= 1_800 ? preset.motion
                 : wordCount <= 3 ? Motion.WORD_JUMP : preset.motion == Motion.DEPTH_PULSE ? Motion.BREATHE : preset.motion;
         double depth = Math.clamp(preset.depth * (settings.depth() / .10), 0, .30);
-        if (preset == Preset.CLASSIC) depth = 0;
         if (preset == Preset.ENGRAVED) depth = Math.min(depth, .025);
         boolean trails = settings.trails();
         return new Composition(preset, preset.placement, preset.entrance, motion, yaw, vertical,
@@ -145,37 +132,25 @@ public final class WorldLyricsDirector {
 
     public static boolean seekSurface(Preset preset, SurfacePreference preference,
                                       double blocksPerSecond, boolean flying, boolean automatic) {
-        boolean manualSurface = !automatic && (preset == Preset.GROUND || preset == Preset.INTRO
+        boolean manualSurface = !automatic && (preset == Preset.SIGN || preset == Preset.MONOLITH
                 || preset == Preset.MURAL || preset == Preset.ENGRAVED);
         if (manualSurface) return true;
         if (preset == Preset.LANDSCAPE || preset == Preset.FLIGHT) return false;
         if (flying || blocksPerSecond >= 5.1 || preference == SurfacePreference.HORIZON) return false;
-        return preference == SurfacePreference.SURFACES || preset == Preset.GROUND || preset == Preset.INTRO
-                || preset.ordinal() % 3 != 0;
+        return preference == SurfacePreference.SURFACES || preset == Preset.SIGN || preset == Preset.MONOLITH
+                || preset == Preset.MURAL || preset == Preset.ENGRAVED;
     }
 
     /** Arrival must occur after the phrase can be read, including fast gliding and vertical travel. */
     public static double readingDistance(double blocksPerSecond, double remainingSeconds, boolean flying,
                                          boolean landscape, Settings settings) {
-        double speed = Double.isFinite(blocksPerSecond) ? Math.clamp(blocksPerSecond, 0, 160) : 0;
-        double placementSpeed = flying && speed >= 4 ? Math.max(speed, 14) : speed;
-        // A gliding player needs more runway before the line first appears. This avoids
-        // spending the opening seconds moving a phrase that could have started farther away.
-        double seconds = Math.clamp(remainingSeconds + (flying ? 2.0 : 1.25), 2.5, 7);
-        double base = landscape ? Math.max(48, settings.minimumDistance()) : settings.minimumDistance();
-        if (flying) base = Math.max(base, 32);
-        return Math.clamp(base + placementSpeed * seconds * settings.distanceSensitivity(),
-                settings.minimumDistance(), settings.maximumDistance());
+        return WorldLyricsPlacement.readingDistance(blocksPerSecond, remainingSeconds, flying, landscape, settings);
     }
 
     /** Move only as the reader approaches the anchor, leaving enough time for the move itself. */
     public static boolean shouldRelocate(double distanceToAnchor, double placedDistance, double closingSpeed,
                                          double remainingSeconds, double secondsSinceAnchor, boolean flying) {
-        if (remainingSeconds < 1.2 || closingSpeed < 4) return false;
-        // At extreme flight speeds a fixed 1.4-second cooldown can outlast the entire anchor.
-        double cooldown = flying ? Math.clamp(placedDistance / closingSpeed * .45, .45, 1.4) : 1.0;
-        if (secondsSinceAnchor < cooldown) return false;
-        double runway = Math.max(flying ? 16 : 5, closingSpeed * (flying ? 1.45 : 1.1));
-        return distanceToAnchor > 0 && distanceToAnchor <= runway;
+        return WorldLyricsPlacement.shouldRelocate(distanceToAnchor, placedDistance, closingSpeed,
+                remainingSeconds, secondsSinceAnchor, flying);
     }
 }

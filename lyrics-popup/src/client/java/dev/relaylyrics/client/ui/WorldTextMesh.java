@@ -11,7 +11,7 @@ import java.util.concurrent.*;
 
 /** Captures the actual shaped font quads on a tick; builds closed glyph geometry on one worker. */
 public final class WorldTextMesh {
-    private static final int MAX_FACES = 16_384, CACHE_FACES = 180_000;
+    private static final int MAX_FACES = 16_384, CACHE_BYTES = 16 * 1024 * 1024;
     private static final LinkedHashMap<Text, Entry> CACHE = new LinkedHashMap<>(32, .75f, true);
     private static final ArrayDeque<Text> QUEUE = new ArrayDeque<>();
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor(task -> {
@@ -64,15 +64,15 @@ public final class WorldTextMesh {
                 entry.mesh = CompletableFuture.completedFuture(null);
             }
         }
-        int count = 0;
+        int bytes = 0;
         for (Entry entry : CACHE.values()) {
             Mesh mesh = ready(entry);
-            if (mesh != null) count += mesh.faces;
+            if (mesh != null) bytes += mesh.bytes;
         }
         var iterator = CACHE.entrySet().iterator();
-        while ((count > CACHE_FACES || CACHE.size() > 256) && iterator.hasNext()) {
+        while ((bytes > CACHE_BYTES || CACHE.size() > 256) && iterator.hasNext()) {
             var old = iterator.next(); Mesh mesh = ready(old.getValue());
-            if (mesh != null) count -= mesh.faces;
+            if (mesh != null) bytes -= mesh.bytes;
             QUEUE.remove(old.getKey()); iterator.remove();
         }
     }
@@ -95,13 +95,20 @@ public final class WorldTextMesh {
     static boolean draw(Text text, Matrix4f matrix, VertexConsumerProvider target, float xOffset, float depth,
                         int faceColor, int sideColor, float alpha, Float fillBoundary, boolean rtl,
                         boolean bevel, float bevelWidth) {
+        return draw(text, matrix, target, xOffset, depth, faceColor, sideColor, alpha,
+                fillBoundary, rtl, bevel, bevelWidth, MAX_FACES);
+    }
+
+    static boolean draw(Text text, Matrix4f matrix, VertexConsumerProvider target, float xOffset, float depth,
+                        int faceColor, int sideColor, float alpha, Float fillBoundary, boolean rtl,
+                        boolean bevel, float bevelWidth, int faceLimit) {
         Entry entry = CACHE.get(text);
         if (entry == null) {
             if (QUEUE.size() < 128) { Text key = text.copy(); CACHE.put(key, new Entry()); QUEUE.add(key); }
             return false;
         }
         Mesh mesh = ready(entry);
-        if (mesh == null) return false;
+        if (mesh == null || mesh.faces > faceLimit) return false;
         Matrix4f inverse = fillBoundary == null ? null : new Matrix4f(matrix).invert();
         Vector3f point = new Vector3f();
         // Text layers can blend without writing depth. Draw the back and contour first so
@@ -172,9 +179,13 @@ public final class WorldTextMesh {
         for (Glyph glyph : glyphs) {
             List<WorldGlyphMesh.Face> faces = WorldGlyphMesh.build(glyph.mask);
             count += faces.size(); if (count > MAX_FACES) return null;
-            parts.add(new Part(glyph, faces));
+            // The mask is needed only on the worker. Retaining it doubles the cached footprint.
+            Glyph drawGlyph = new Glyph(glyph.layer, glyph.x0, glyph.y0, glyph.x1, glyph.y1,
+                    glyph.width, glyph.height, glyph.atlasX, glyph.atlasY,
+                    glyph.atlasWidth, glyph.atlasHeight, null);
+            parts.add(new Part(drawGlyph, faces));
         }
-        return new Mesh(List.copyOf(parts), count);
+        return new Mesh(List.copyOf(parts), count, count * 64 + parts.size() * 192);
     }
 
     private static List<Glyph> capture(Text text) {
@@ -242,6 +253,6 @@ public final class WorldTextMesh {
     private record Glyph(RenderLayer layer, float x0, float y0, float x1, float y1, int width, int height,
                          int atlasX, int atlasY, int atlasWidth, int atlasHeight, boolean[][] mask) { }
     private record Part(Glyph glyph, List<WorldGlyphMesh.Face> faces) { }
-    private record Mesh(List<Part> parts, int faces) { }
+    private record Mesh(List<Part> parts, int faces, int bytes) { }
     private static final class Entry { CompletableFuture<Mesh> mesh; }
 }

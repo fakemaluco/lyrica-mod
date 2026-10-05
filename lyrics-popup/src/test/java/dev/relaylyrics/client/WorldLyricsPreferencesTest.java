@@ -6,19 +6,21 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class WorldLyricsPreferencesTest {
-    @Test void existingSevenStyleSelectionReceivesTheNewPresets() throws Exception {
-        var restored = ClientPreferences.decode("{\"worldLyricsPositionVersion\":2,\"worldLyricsPresetMask\":127}"
+    @Test void oldPresetSelectionIsReplacedWithoutDisablingWorldLyrics() throws Exception {
+        var restored = ClientPreferences.decode("{\"worldLyrics\":true,\"lyricsVisible\":false,\"lyricsFont\":\"MINECRAFT\",\"worldLyricsPositionVersion\":4,\"worldLyricsPreset\":\"SCULPTURE\",\"worldLyricsPresetMask\":127,\"enabledWorldLyricsPresets\":[\"CLASSIC\",\"CINEMA\",\"SCULPTURE\"]}"
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        assertThat(restored.isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset.GROUND)).isTrue();
-        assertThat(restored.isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset.INTRO)).isTrue();
-        assertThat(restored.isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset.MURAL)).isFalse();
-        assertThat(restored.isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset.ENGRAVED)).isFalse();
+        assertThat(restored.isWorldLyrics()).isTrue();
+        assertThat(restored.isLyricsVisible()).isFalse();
+        assertThat(restored.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.SIGN);
+        assertThat(restored.isWorldLyricsAutomatic()).isTrue();
+        assertThat(restored.getEnabledWorldLyricsPresets()).containsExactlyInAnyOrder(WorldLyricsDirector.Preset.values());
+        assertThat(restored.getWorldLyricsPositionVersion()).isEqualTo(5);
     }
     @Test void previousShortDistanceLimitMigratesWithoutChangingTheSelectedStyle() throws Exception {
         var restored = ClientPreferences.decode("{\"worldLyrics\":true,\"worldLyricsMaximumDistance\":10,\"worldLyricsPreset\":\"SCULPTURE\"}"
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
         assertThat(restored.getWorldLyricsMaximumDistance()).isEqualTo(192);
-        assertThat(restored.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.SCULPTURE);
+        assertThat(restored.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.SIGN);
     }
     @Test void oldPreferencesReceiveNormalIntensityAndPlayerReactions() throws Exception {
         var preferences = ProtocolCodec.mapper().readValue("{\"worldLyrics\":true}", ClientPreferences.class);
@@ -28,23 +30,22 @@ class WorldLyricsPreferencesTest {
         assertThat(preferences.getWorldLyricsSize()).isEqualTo(1.2);
         assertThat(preferences.isWorldLyricsAutoWalls()).isTrue();
         assertThat(preferences.isWorldLyricsCinematic()).isTrue();
-        assertThat(preferences.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.CLASSIC);
-        assertThat(preferences.isWorldLyricsAutomatic()).isFalse();
+        assertThat(preferences.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.SIGN);
         assertThat(preferences.getWorldLyricsMinimumDistance()).isEqualTo(6);
         assertThat(preferences.getWorldLyricsMaximumDistance()).isEqualTo(192);
     }
-    @Test void firstActivationUsesTheCinemaPreset() {
+    @Test void firstActivationUsesTheContextualSignpostPreset() {
         var preferences = new ClientPreferences();
-        assertThat(preferences.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.CINEMA);
+        assertThat(preferences.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.SIGN);
         preferences.enableWorldLyricsWithModernDefaults();
-        assertThat(preferences.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.CINEMA);
+        assertThat(preferences.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.SIGN);
         assertThat(preferences.isWorldLyricsAutomatic()).isTrue();
     }
-    @Test void savingBeforeTheFirstActivationKeepsCinemaDefaults() throws Exception {
+    @Test void savingBeforeTheFirstActivationKeepsContextualDefaults() throws Exception {
         var restored = ProtocolCodec.mapper().readValue(
                 ProtocolCodec.mapper().writeValueAsBytes(new ClientPreferences()), ClientPreferences.class);
         restored.enableWorldLyricsWithModernDefaults();
-        assertThat(restored.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.CINEMA);
+        assertThat(restored.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.SIGN);
         assertThat(restored.isWorldLyricsAutomatic()).isTrue();
     }
     @Test void newControlsRoundTripWithoutTouchingTheUserConfig() throws Exception {
@@ -54,7 +55,7 @@ class WorldLyricsPreferencesTest {
         preferences.setWorldLyricsSize(1.7);
         preferences.setWorldLyricsAutoWalls(false);
         preferences.setWorldLyricsCinematic(false);
-        preferences.setWorldLyricsPreset(WorldLyricsDirector.Preset.ARC);
+        preferences.setWorldLyricsPreset(WorldLyricsDirector.Preset.ENGRAVED);
         preferences.setWorldLyricsDepth(.2);
         preferences.setWorldLyricsTrails(true);
         preferences.setWorldLyricsSurfacePreference(WorldLyricsDirector.SurfacePreference.SURFACES);
@@ -68,7 +69,7 @@ class WorldLyricsPreferencesTest {
         assertThat(restored.getWorldLyricsSize()).isEqualTo(1.7);
         assertThat(restored.isWorldLyricsAutoWalls()).isFalse();
         assertThat(restored.isWorldLyricsCinematic()).isFalse();
-        assertThat(restored.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.ARC);
+        assertThat(restored.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.ENGRAVED);
         assertThat(restored.getWorldLyricsDepth()).isEqualTo(.2);
         assertThat(restored.isWorldLyricsTrails()).isTrue();
         assertThat(restored.getWorldLyricsSurfacePreference()).isEqualTo(WorldLyricsDirector.SurfacePreference.SURFACES);

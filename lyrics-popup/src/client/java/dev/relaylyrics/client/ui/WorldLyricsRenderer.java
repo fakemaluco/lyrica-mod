@@ -10,7 +10,11 @@ import dev.relaylyrics.client.music.LyricsRenderText;
 import dev.relaylyrics.client.music.WorldLyricsPlan;
 import dev.relaylyrics.client.music.WorldLyricsLayout;
 import dev.relaylyrics.client.music.WorldLyricsDirector;
+import dev.relaylyrics.client.music.WorldLyricsPlacement;
+import dev.relaylyrics.client.music.WorldLyricsMotion;
 import dev.relaylyrics.protocol.lyrics.LyricLine;
+import dev.relaylyrics.protocol.lyrics.LyricAlignment;
+import dev.relaylyrics.protocol.lyrics.TimedWord;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.render.LightmapTextureManager;
@@ -43,11 +47,17 @@ public final class WorldLyricsRenderer {
     private static Object travelWorld;
     private static Vec3d previousPlayerPosition;
     private static Vec3d playerTravelPerTick = Vec3d.ZERO;
+    private static final LyricLine PREVIEW_LINE = new LyricLine(0, 15_000,
+            "Letras fazem parte do mundo",
+            List.of(new TimedWord(0, 3_000, "Letras"), new TimedWord(3_000, 6_000, "fazem"),
+                    new TimedWord(6_000, 9_000, "parte"), new TimedWord(9_000, 12_000, "do"),
+                    new TimedWord(12_000, 15_000, "mundo")), null, false, null, null);
+    private static long previewStartedNanos;
 
     private WorldLyricsRenderer() { }
 
-    /** Rebuilds only the local presentation so the configuration screen can preview the current phrase. */
-    public static void previewCurrentPhrase() { clear(); }
+    /** Shows a timed sample in the current world even when no music is playing. */
+    public static void previewCurrentPhrase() { clear(); previewStartedNanos = System.nanoTime(); }
 
     public static void tickPlayerMotion(MinecraftClient client) {
         if (client.player == null || client.world == null) {
@@ -78,12 +88,16 @@ public final class WorldLyricsRenderer {
             clear(); wallMode = preferences.isWorldLyricsAutoWalls();
         }
         var playback = overlay.worldPlayback();
-        long now = playback.positionMillis();
-        String track = playback.track() + "|seek=" + playback.revision();
-        boolean playing = playback.playing();
+        long elapsedPreview = (System.nanoTime() - previewStartedNanos) / 1_000_000;
+        boolean preview = previewStartedNanos != 0 && elapsedPreview >= 0 && elapsedPreview <= 15_450;
+        long now = preview ? elapsedPreview : playback.positionMillis();
+        String track = preview ? "world-preview" : playback.track() + "|seek=" + playback.revision();
+        boolean playing = preview || playback.playing();
+        List<LyricLine> sourceLines = preview ? List.of(PREVIEW_LINE)
+                : overlay.document() == null ? List.of() : overlay.document().lines();
         boolean reactive = preferences.isLyricsAnimations() && preferences.isWorldLyricsPlayerReactions();
         Vec3d velocity = travel(client);
-        if (STATE.update(client.world, overlay.document(), track, now, playing, System.nanoTime(),
+        if (STATE.update(client.world, preview ? PREVIEW_LINE : overlay.document(), track, now, playing, System.nanoTime(),
                 client.player.isOnGround(), client.player.getAbilities().flying || WorldLyricsRenderHook.gliding(client.player),
                 velocity.length(), reactive)) clear();
         WorldLyricsDirector.Settings director = directorSettings(preferences);
@@ -102,7 +116,9 @@ public final class WorldLyricsRenderer {
             WorldTextMesh.clear();
             layoutStyle = style; fontStorage = client.textRenderer;
         }
-        List<WorldLyricsPlan.WorldLine> visible = WorldLyricsPlan.visibleLines(overlay.document(), now);
+        List<WorldLyricsPlan.WorldLine> visible = preview
+                ? List.of(new WorldLyricsPlan.WorldLine(PREVIEW_LINE, LyricAlignment.NORMAL, false))
+                : WorldLyricsPlan.visibleLines(overlay.document(), now);
         Set<LineKey> keys = new HashSet<>();
         for (var line : visible) keys.add(key(line));
         LINES.keySet().removeIf(key -> !keys.contains(key));
@@ -124,14 +140,15 @@ public final class WorldLyricsRenderer {
                     }
                 }
                 if (base == null) {
-                    int bands = (int) Math.clamp(overlay.document().lines().stream().filter(other ->
+                    int bands = (int) Math.clamp(sourceLines.stream().filter(other ->
                             other.startMillis() < planned.line().endMillis()
                                     && planned.line().startMillis() < other.endMillis()).count(), 1, 3);
                     WorldLyricsDirector.Composition composition = composition(planned.line(), planned.backing(), false, director, lastPreset);
                     double dynamicDistance = readingDistance(planned.line(), now, composition, director);
-                    PhraseBounds bounds = measureGroup(overlay.document().lines(), planned.line(),
+                    PhraseBounds bounds = measureGroup(sourceLines, planned.line(),
                             preferences, dynamicDistance, bands);
                     base = createAnchor(client, cameraPos, bands, preferences, composition, dynamicDistance, bounds);
+                    if (base == null) continue;
                     selected = compatibleComposition(base, cameraPos,
                             base.wall ? composition(planned.line(), planned.backing(), true, director, lastPreset) : composition);
                 }
@@ -146,14 +163,15 @@ public final class WorldLyricsRenderer {
                     WorldLyricsDirector.Composition composition = composition(planned.line(), planned.backing(), false, director, lastPreset);
                     double dynamicDistance = readingDistance(planned.line(), now, composition, director);
                     base = createAnchor(client, cameraPos, 3, preferences, composition, dynamicDistance,
-                            measureGroup(overlay.document().lines(), planned.line(), preferences, dynamicDistance, 3));
+                            measureGroup(sourceLines, planned.line(), preferences, dynamicDistance, 3));
+                    if (base == null) continue;
                     selected = compatibleComposition(base, cameraPos,
                             base.wall ? composition(planned.line(), planned.backing(), true, director, lastPreset) : composition);
                     slot = 0;
                 }
                 lastPreset = selected.preset();
                 scene = new SceneLine(base, slot, selected, now,
-                        measureGroup(overlay.document().lines(), planned.line(), preferences, base.distance, base.bands),
+                        measureGroup(sourceLines, planned.line(), preferences, base.distance, base.bands),
                         Math.clamp(client.world.getLightLevel(BlockPos.ofFloored(base.x, base.y, base.z)), 0, 15));
                 if (shared != null && shared.base == base && shared.from != null
                         && now - shared.moveStartedAt < shared.moveDuration) {
@@ -164,23 +182,31 @@ public final class WorldLyricsRenderer {
                 }
                 LINES.put(key, scene);
             }
-            if (playing) keepReadingHorizon(client, cameraPos, scene, planned.line(), now, director,
-                    preferences.isLyricsAnimations());
-            if (scene.layout == null) scene.layout = layout(planned.line(), preferences, scene.base);
+            if (scene.layout == null) {
+                scene.layout = layout(planned.line(), preferences, scene.base);
+                scene.activePage = WorldLyricsPlacement.pageIndex(scene.layout.pages, now);
+                scene.pageAnchors.clear();
+                scene.pageAnchors.put(scene.activePage, scene.base);
+            }
+            if (playing && !scene.layout.pages.isEmpty()) {
+                advancePageAnchor(client, cameraPos, scene, planned.line(), now, director, preferences);
+                keepReadingHorizon(client, cameraPos, scene, planned.line(), now, director,
+                        preferences.isLyricsAnimations());
+            }
             renderLine(matrices, consumers, cameraPos, scene, planned, now, preferences, STATE.reaction(reactive));
         }
-        var gap = WorldLyricsPlan.interlude(overlay.document(), now);
+        var gap = preview ? null : WorldLyricsPlan.interlude(overlay.document(), now);
         if (visible.isEmpty() && gap != null && gap.visibility(now) > .01) {
             if (!gap.equals(currentInterlude) || interludeAnchor == null) {
                 currentInterlude = gap;
-                var calm = new WorldLyricsDirector.Composition(WorldLyricsDirector.Preset.CLASSIC,
+                var calm = new WorldLyricsDirector.Composition(WorldLyricsDirector.Preset.LANDSCAPE,
                         WorldLyricsDirector.Placement.FRONT, WorldLyricsDirector.Entrance.DISSOLVE,
                         WorldLyricsDirector.Motion.BREATHE, 0, 0, 0, false, 1, 0);
                 interludeAnchor = createAnchor(client, cameraPos, 1, preferences, calm,
                         WorldLyricsDirector.readingDistance(STATE.blocksPerSecond(), 2, STATE.flying(), false, director),
                         new PhraseBounds(1.5, 1));
             }
-            renderInterlude(matrices, consumers, cameraPos, gap, now, preferences);
+            if (interludeAnchor != null) renderInterlude(matrices, consumers, cameraPos, gap, now, preferences);
         } else { currentInterlude = null; interludeAnchor = null; }
     }
 
@@ -208,10 +234,53 @@ public final class WorldLyricsRenderer {
                 STATE.flying(), composition.preset() == WorldLyricsDirector.Preset.LANDSCAPE, settings);
     }
 
+    /** A long flying phrase receives its next fixed anchor at a timed page boundary. */
+    private static void advancePageAnchor(MinecraftClient client, Vec3d camera, SceneLine scene, LyricLine line,
+                                          long now, WorldLyricsDirector.Settings settings, ClientPreferences preferences) {
+        int next = WorldLyricsPlacement.pageIndex(scene.layout.pages, now);
+        if (next == scene.activePage) return;
+        if (next < scene.activePage) {
+            scene.activePage = next;
+            scene.base = scene.pageAnchors.getOrDefault(next, scene.base);
+            scene.from = null;
+            scene.anchoredAt = now;
+            return;
+        }
+        Anchor previous = scene.base;
+        scene.pageAnchors.put(scene.activePage, scene.display(now, preferences.isLyricsAnimations()));
+        if (!previous.wall && !previous.ground && (STATE.flying() || STATE.blocksPerSecond() > 5.1)) {
+            double speed = Math.max(STATE.blocksPerSecond(), travel(client).length() * 20);
+            double remaining = Math.max(0, scene.layout.pages.get(next).endMillis() - now) / 1000.0;
+            double target = WorldLyricsPlacement.readingDistance(speed, remaining, STATE.flying(),
+                    scene.composition.preset() == WorldLyricsDirector.Preset.LANDSCAPE, settings);
+            Anchor replacement = createAnchor(client, camera, previous.bands, preferences,
+                    scene.composition, target, scene.bounds);
+            double oldDistance = camera.distanceTo(new Vec3d(previous.x, previous.y, previous.z));
+            if (replacement != null && replacement.distance > oldDistance + Math.max(6, speed * .35)) {
+                Anchor displayed = scene.display(now, preferences.isLyricsAnimations());
+                double rise = preferences.isLyricsAnimations()
+                        ? relocationRise(client, displayed, replacement, scene.composition.depth()) : 0;
+                if (!preferences.isLyricsAnimations() || clearRelocationPath(client, displayed, replacement, rise)) {
+                    scene.from = preferences.isLyricsAnimations() ? displayed : null;
+                    scene.base = replacement;
+                    scene.moveStartedAt = now;
+                    scene.moveDuration = Math.round(Math.clamp(300 + oldDistance * 4, 350, 850));
+                    scene.moveRise = rise;
+                    scene.anchoredAt = now;
+                    scene.worldLight = Math.clamp(client.world.getLightLevel(
+                            BlockPos.ofFloored(replacement.x, replacement.y, replacement.z)), 0, 15);
+                }
+            }
+        }
+        scene.activePage = next;
+        scene.pageAnchors.put(next, scene.base);
+    }
+
     private static void keepReadingHorizon(MinecraftClient client, Vec3d camera, SceneLine scene,
                                            LyricLine line, long now, WorldLyricsDirector.Settings settings,
                                            boolean animate) {
-        double remaining = (line.endMillis() - now) / 1000.0;
+        long pageEnd = Math.min(line.endMillis(), scene.layout.pages.get(scene.activePage).endMillis());
+        double remaining = (pageEnd - now) / 1000.0;
         if (scene.base.wall || scene.base.ground) return;
         Anchor previous = scene.base;
         Vec3d toAnchor = new Vec3d(previous.x, previous.y, previous.z).subtract(camera);
@@ -219,10 +288,13 @@ public final class WorldLyricsRenderer {
         double closingSpeed = ahead > 0 ? travel(client).dotProduct(toAnchor.multiply(1 / ahead)) * 20 : 0;
         if (!WorldLyricsDirector.shouldRelocate(ahead, previous.distance, closingSpeed, remaining,
                 (now - scene.anchoredAt) / 1000.0, STATE.flying())) return;
-        double target = readingDistance(line, now, scene.composition, settings);
+        double speed = Math.max(STATE.blocksPerSecond(), travel(client).length() * 20);
+        double target = WorldLyricsPlacement.readingDistance(speed, remaining, STATE.flying(),
+                scene.composition.preset() == WorldLyricsDirector.Preset.LANDSCAPE, settings);
         // Move only when the current reading runway is nearly exhausted.
         Anchor replacement = createAnchor(client, camera, previous.bands, RelayLyricsClient.preferences(),
                 scene.composition, target, scene.bounds);
+        if (replacement == null) { scene.anchoredAt = now; return; }
         if (replacement.distance <= ahead + Math.max(8, closingSpeed * .45)) {
             scene.anchoredAt = now;
             return;
@@ -231,7 +303,7 @@ public final class WorldLyricsRenderer {
         double span = new Vec3d(displayed.x, displayed.y, displayed.z)
                 .distanceTo(new Vec3d(replacement.x, replacement.y, replacement.z));
         long duration = Math.round(Math.clamp(Math.min(Math.min(300 + span * (STATE.flying() ? 5 : 12),
-                (line.endMillis() - now) * .55), ahead / closingSpeed * 800),
+                (pageEnd - now) * .55), ahead / closingSpeed * 800),
                 300, STATE.flying() ? 850 : 1100));
         double rise = animate ? relocationRise(client, displayed, replacement, scene.composition.depth()) : 0;
         if (animate && !clearRelocationPath(client, displayed, replacement, rise)) {
@@ -295,7 +367,7 @@ public final class WorldLyricsRenderer {
         var preset = selected.preset();
         if (!anchor.wall && (preset == WorldLyricsDirector.Preset.MURAL
                 || preset == WorldLyricsDirector.Preset.ENGRAVED))
-            return new WorldLyricsDirector.Composition(WorldLyricsDirector.Preset.CINEMA,
+            return new WorldLyricsDirector.Composition(WorldLyricsDirector.Preset.LANDSCAPE,
                     WorldLyricsDirector.Placement.FRONT, WorldLyricsDirector.Entrance.SLIDE,
                     WorldLyricsDirector.Motion.BREATHE, 0, 0, selected.depth(), selected.trails(),
                     selected.depthLayers(), selected.trailCopies());
@@ -387,7 +459,7 @@ public final class WorldLyricsRenderer {
                                    ClientPreferences preferences, WorldLyricsPlan.PlayerReaction reaction) {
         TextRenderer renderer = MinecraftClient.getInstance().textRenderer;
         Layout layout = scene.layout;
-        Anchor anchor = scene.display(now, preferences.isLyricsAnimations());
+        Anchor activeAnchor = scene.display(now, preferences.isLyricsAnimations());
         WorldLyricsDirector.Composition composition = scene.composition;
         int sideColor = materialSideColor(preferences, composition, scene.worldLight);
         boolean animate = preferences.isLyricsAnimations();
@@ -399,50 +471,31 @@ public final class WorldLyricsRenderer {
             for (var entry : LINES.entrySet()) {
                 if (entry.getKey().line().startMillis() >= planned.line().endMillis()
                         && entry.getKey().line().startMillis() <= now
-                        && new Vec3d(anchor.x, anchor.y, anchor.z).squaredDistanceTo(
+                        && new Vec3d(activeAnchor.x, activeAnchor.y, activeAnchor.z).squaredDistanceTo(
                         new Vec3d(entry.getValue().base.x, entry.getValue().base.y, entry.getValue().base.z)) < 4) {
                     lineAlpha *= .3; break;
                 }
             }
         }
-        double bandHeight = anchor.height / anchor.bands;
-        double bandY = (anchor.bands - 1) * bandHeight / 2 - scene.slot * bandHeight;
-        double distance = cameraPos.distanceTo(new Vec3d(anchor.x, anchor.y + bandY, anchor.z));
         double lineHeight = renderer.fontHeight + 6;
         for (int pageIndex = 0; pageIndex < layout.pages.size(); pageIndex++) {
+            Anchor anchor = pageIndex == scene.activePage ? activeAnchor
+                    : scene.pageAnchors.getOrDefault(pageIndex, activeAnchor);
+            double bandHeight = anchor.height / anchor.bands;
+            double bandY = (anchor.bands - 1) * bandHeight / 2 - scene.slot * bandHeight;
+            double distance = cameraPos.distanceTo(new Vec3d(anchor.x, anchor.y + bandY, anchor.z));
             var page = layout.pages.get(pageIndex);
             double visibility = lineAlpha * WorldLyricsLayout.pageVisibility(layout.pages, pageIndex, now, animate);
             if (visibility <= .016) continue;
-            double zoom = 1;
-            double slide = 0;
-            double slideX = 0;
-            double rotation = 0;
-            double transitionDepth = 0;
-            if (cinematic && animate) {
-                double animationSpeed = preferences.getWorldLyricsAnimationSpeed();
-                double enter = LyricsAnimation.smoother((now - page.startMillis() + 180) / (360.0 / animationSpeed));
-                double exit = LyricsAnimation.smoother((now - page.endMillis()) / (450.0 / animationSpeed));
-                double hold = LyricsAnimation.activeGlowEnvelope(LyricsAnimation.timedProgress(now, page.startMillis(), page.endMillis()));
-                zoom = (.94 + .06 * enter) * (1 - .04 * exit) * (1 + .025 * hold);
-                double phase = (1 - enter - exit) * preferences.getWorldLyricsAnimationIntensity();
-                var entrance = preferences.getWorldLyricsEntranceOverride() == null
-                        ? composition.entrance() : preferences.getWorldLyricsEntranceOverride();
-                if (anchor.ground && preferences.getWorldLyricsEntranceOverride() == null
-                        && composition.preset() != WorldLyricsDirector.Preset.INTRO) entrance = WorldLyricsDirector.Entrance.RISE;
-                switch (entrance) {
-                    case SLIDE -> slideX = phase * .22;
-                    case CASCADE -> slide = phase * .26;
-                    case ROTATE -> rotation = phase * 7;
-                    case DEPTH -> transitionDepth = phase * -.12;
-                    case FALL -> slide = phase * .60;
-                    case POP -> { zoom *= 1 - .22 * phase; transitionDepth = phase * -.10; }
-                    case RISE -> { slide = -phase * .06; zoom *= 1 - .55 * Math.clamp(phase, 0, 1); }
-                    case LAND -> slide = phase * Math.min(.5, anchor.height * .2);
-                    case WALL_SLIDE -> slideX = phase * .40;
-                    case BUILD -> { transitionDepth = -phase * .14; zoom *= 1 - .10 * phase; }
-                    case DISSOLVE -> { }
-                }
-            }
+            var entrance = preferences.getWorldLyricsEntranceOverride() == null
+                    ? composition.entrance() : preferences.getWorldLyricsEntranceOverride();
+            if (anchor.ground && preferences.getWorldLyricsEntranceOverride() == null
+                    && composition.preset() != WorldLyricsDirector.Preset.MONOLITH) entrance = WorldLyricsDirector.Entrance.RISE;
+            var pose = WorldLyricsMotion.page(entrance, page.startMillis(), page.endMillis(), now,
+                    anchor.height, preferences.getWorldLyricsAnimationIntensity(),
+                    preferences.getWorldLyricsAnimationSpeed(), cinematic && animate);
+            double zoom = pose.zoom(), slide = pose.vertical(), slideX = pose.horizontal();
+            double rotation = pose.rotation(), transitionDepth = pose.depth();
             double pixelScale = WorldLyricsLayout.pixelScale(page.width(), page.rows().size(), anchor.width,
                     bandHeight, anchor.distance, preferences.getWorldLyricsSize(), planned.backing(), lineHeight) * zoom;
             var drawPage = layout.drawn.get(pageIndex);
@@ -456,7 +509,7 @@ public final class WorldLyricsRenderer {
                     matrices.push();
                     place(matrices, cameraPos, anchor, 0, rowY + renderer.fontHeight * pixelScale / 2, -.018);
                     matrices.scale((float) pixelScale, (float) -pixelScale, (float) pixelScale);
-                    int background = (int) Math.round(88 * visibility) << 24;
+                    int background = (int) Math.round(24 * visibility) << 24;
                     renderer.draw(row.backdrop, (float) (-row.backdropWidth / 2), 0, 0xFFFFFFFF, false,
                             matrices.peek().getPositionMatrix(), consumers, TextRenderer.TextLayerType.NORMAL,
                             background, LightmapTextureManager.MAX_LIGHT_COORDINATE);
@@ -522,12 +575,22 @@ public final class WorldLyricsRenderer {
                             layout.timed && progress < 1 ? (float) boundary : null, piece.rtl(),
                             preferences.isWorldLyricsBevel()
                                     && preferences.getWorldLyricsQuality() != WorldLyricsDirector.Quality.LOW
-                                    && (composition.preset() == WorldLyricsDirector.Preset.INTRO
-                                    || composition.preset() == WorldLyricsDirector.Preset.SCULPTURE
+                                    && (composition.preset() == WorldLyricsDirector.Preset.MONOLITH
                                     || preferences.getWorldLyricsMaterial() == WorldLyricsDirector.Material.METAL),
                             (float) Math.min(1.2, preferences.getWorldLyricsBevelWidth()
-                                    * (composition.preset() == WorldLyricsDirector.Preset.INTRO ? 1.4 : 1)));
-                    if (!meshDrawn) drawFace(renderer, piece, layout.timed, progress, boundary, visibility,
+                                    * (composition.preset() == WorldLyricsDirector.Preset.MONOLITH ? 1.4 : 1)),
+                            switch (preferences.getWorldLyricsQuality()) {
+                                case LOW -> 4_096; case MEDIUM -> 8_192; case HIGH -> 16_384;
+                            });
+                    if (meshDrawn) {
+                        // The actual font renderer owns shaping and antialiasing. Keep its crisp
+                        // face in front of the cached volume, including accents and RTL glyphs.
+                        matrices.push();
+                        matrices.translate(0, 0, extrude / scale + .025);
+                        drawFace(renderer, piece, layout.timed, progress, boundary, visibility,
+                                preferences.getWorldLyricsFaceColor(), false, matrices, consumers);
+                        matrices.pop();
+                    } else drawFace(renderer, piece, layout.timed, progress, boundary, visibility,
                             preferences.getWorldLyricsFaceColor(), preferences.isLyricsTextShadow(), matrices, consumers);
                     matrices.pop();
                 }
@@ -561,7 +624,7 @@ public final class WorldLyricsRenderer {
             case STONE -> 0x817D76;
             case METAL -> 0x8A9BAC;
             case SOFT_LIGHT -> 0x86B9D1;
-            case AUTO -> composition.preset() == WorldLyricsDirector.Preset.INTRO ? 0x817D76
+            case AUTO -> composition.preset() == WorldLyricsDirector.Preset.MONOLITH ? 0x817D76
                     : composition.preset() == WorldLyricsDirector.Preset.MURAL ? 0x8A9BAC
                     : preferences.getWorldLyricsSideColor();
         };
@@ -640,26 +703,27 @@ public final class WorldLyricsRenderer {
             if (wallFirst && preferences.isWorldLyricsAutoWalls()) surface = findSurface(client, camera, bands, bounds);
             if (surface == null && composition.preset() != WorldLyricsDirector.Preset.MURAL
                     && composition.preset() != WorldLyricsDirector.Preset.ENGRAVED)
-                surface = findGroundSurface(client, camera, bands, bounds, composition.preset());
+                surface = findGroundSurface(client, camera, bands, bounds, composition.preset(), requestedDistance);
             if (surface == null && !wallFirst && preferences.isWorldLyricsAutoWalls()
-                    && composition.preset() != WorldLyricsDirector.Preset.GROUND
-                    && composition.preset() != WorldLyricsDirector.Preset.INTRO)
+                    && composition.preset() != WorldLyricsDirector.Preset.SIGN
+                    && composition.preset() != WorldLyricsDirector.Preset.MONOLITH)
                 surface = findSurface(client, camera, bands, bounds);
             if (surface != null) return surface;
         }
-        if (preference == WorldLyricsDirector.SurfacePreference.HORIZON)
-            requestedDistance = Math.min(preferences.getWorldLyricsMaximumDistance(), Math.max(32, requestedDistance));
         // Close walls cannot provide the reading horizon needed during running or gliding.
         double offset = composition.yawOffsetDegrees();
         if (STATE.blocksPerSecond() > 5.1) offset *= .25;
         double yaw = Math.toRadians(client.gameRenderer.getCamera().getYaw() + offset);
         double pitch = Math.toRadians(client.gameRenderer.getCamera().getPitch());
-        boolean groundedStyle = composition.preset() == WorldLyricsDirector.Preset.GROUND && !STATE.flying();
+        boolean groundedStyle = composition.preset() == WorldLyricsDirector.Preset.SIGN && !STATE.flying();
         if (groundedStyle) pitch = 0;
         Vec3d direction = new Vec3d(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
         Vec3d travelDirection = travel(client).normalize();
-        if (STATE.blocksPerSecond() > 5.1 && direction.dotProduct(travelDirection) > .4)
-            direction = direction.multiply(.65).add(travelDirection.multiply(.35)).normalize();
+        if (STATE.blocksPerSecond() > 5.1 && direction.dotProduct(travelDirection) > .4) {
+            double trajectoryWeight = STATE.flying() ? .48 : .35;
+            direction = direction.multiply(1 - trajectoryWeight)
+                    .add(travelDirection.multiply(trajectoryWeight)).normalize();
+        }
         double distance = Math.max(.75, Math.min(groundedStyle ? Math.min(requestedDistance, 18) : requestedDistance,
                 Math.max(24, client.options.getViewDistance().getValue() * 14)));
         // Keep the fallback in front of obstacles too; never create a panel beyond the first block.
@@ -682,13 +746,17 @@ public final class WorldLyricsRenderer {
         Anchor candidate = new Anchor(center.x, center.y, center.z, normal.x, normal.y, normal.z,
                 right.x, right.z, (float) Math.atan2(normal.x, normal.z), false,
                 Math.max(1.5, distance * (Math.abs(offset) > 1 ? .55 : .95)), height, bands, distance);
-        if (Math.abs(composition.yawOffsetDegrees()) > .01 && !freePanel(client, camera, candidate)) {
-            var front = new WorldLyricsDirector.Composition(composition.preset(), WorldLyricsDirector.Placement.FRONT,
-                    composition.entrance(), composition.motion(), 0, 0, composition.depth(),
-                    composition.trails(), composition.depthLayers(), composition.trailCopies());
-            return createAnchor(client, camera, bands, preferences, front, requestedDistance, bounds);
+        if (!freePanel(client, camera, candidate)) {
+            if (Math.abs(composition.yawOffsetDegrees()) > .01) {
+                var front = new WorldLyricsDirector.Composition(composition.preset(), WorldLyricsDirector.Placement.FRONT,
+                        composition.entrance(), composition.motion(), 0, 0, composition.depth(),
+                        composition.trails(), composition.depthLayers(), composition.trailCopies());
+                return createAnchor(client, camera, bands, preferences, front, requestedDistance, bounds);
+            }
+            if (requestedDistance > 4) return createAnchor(client, camera, bands, preferences,
+                    composition, Math.max(3, requestedDistance * .7), bounds);
         }
-        return candidate;
+        return freePanel(client, camera, candidate) ? candidate : null;
     }
 
     /** Check the panel's center and both ends before fixing its position in the world. */
@@ -753,11 +821,13 @@ public final class WorldLyricsRenderer {
 
     /** A sign stands only where its whole lower edge has stable, nearly level support. */
     private static Anchor findGroundSurface(MinecraftClient client, Vec3d camera, int bands,
-                                            PhraseBounds bounds, WorldLyricsDirector.Preset preset) {
+                                            PhraseBounds bounds, WorldLyricsDirector.Preset preset, double desiredDistance) {
         double yaw = Math.toRadians(client.gameRenderer.getCamera().getYaw());
         double width = Math.clamp(bounds.width, 1.5, 7.5);
         double height = Math.clamp(bounds.height, 1.1 * bands, 3.2 * bands);
         int[] sides = (preset.ordinal() & 1) == 0 ? new int[]{-1, 1} : new int[]{1, -1};
+        Anchor best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
         for (int sideDirection : sides) {
             for (double distance : new double[]{5.5, 8, 11, 14, 18}) {
                 double halfAngle = Math.toDegrees(Math.atan2(width * .5, distance));
@@ -787,11 +857,14 @@ public final class WorldLyricsRenderer {
                         right.x, right.z, (float) Math.atan2(normal.x, normal.z), false,
                         width, height, bands, camera.distanceTo(panel), true);
                 if (!freePanel(client, camera, candidate)) continue;
-                // The ordered candidates preserve variety while keeping the usual flat-ground probe short.
-                return candidate;
+                double score = WorldLyricsPlacement.score(new WorldLyricsPlacement.Candidate(
+                        WorldLyricsPlacement.Surface.GROUND, candidate.distance,
+                        Math.min(desiredDistance, 18), offset, 1, high - low,
+                        true, true, true, true));
+                if (score > bestScore) { best = candidate; bestScore = score; }
             }
         }
-        return null;
+        return best;
     }
 
     private static Anchor findSurface(MinecraftClient client, Vec3d camera, int bands, PhraseBounds bounds) {
@@ -838,6 +911,8 @@ public final class WorldLyricsRenderer {
                     Vec3d point = hit.getPos().add(right.multiply((column - 5) * .75)).add(0, (row - 3) * .75, 0);
                     var probe = ray(client, point.add(normal.multiply(.2)), point.subtract(normal.multiply(.2)));
                     support[row][column] = probe.getType() == HitResult.Type.BLOCK && probe.getSide() == face
+                            && client.world.isChunkLoaded(probe.getBlockPos())
+                            && client.world.getFluidState(probe.getBlockPos()).isEmpty()
                             && probe.getPos().squaredDistanceTo(point) < .003 && solidFace(client, probe);
                 }
             }
@@ -852,10 +927,11 @@ public final class WorldLyricsRenderer {
             var sight = ray(client, camera, center);
             if (sight.getType() == HitResult.Type.BLOCK && sight.getPos().distanceTo(center) > .12) continue;
             double score = candidate.score + Math.min(12, width * height) * .2;
-            if (score > bestScore) {
+            Anchor panel = new Anchor(center.x, center.y, center.z, nx, 0, nz, nz, -nx,
+                    (float) Math.atan2(nx, nz), true, width, height, bands, camera.distanceTo(center));
+            if (score > bestScore && freePanel(client, camera, panel)) {
                 bestScore = score;
-                best = new Anchor(center.x, center.y, center.z, nx, 0, nz, nz, -nx,
-                        (float) Math.atan2(nx, nz), true, width, height, bands, camera.distanceTo(center));
+                best = panel;
             }
         }
         return best;
@@ -888,11 +964,14 @@ public final class WorldLyricsRenderer {
         long anchoredAt;
         long moveStartedAt, moveDuration;
         double moveRise;
+        int activePage;
+        final Map<Integer, Anchor> pageAnchors = new HashMap<>();
         SceneLine(Anchor base, int slot, WorldLyricsDirector.Composition composition, long now,
                   PhraseBounds bounds, int worldLight) {
             this.base = base; this.slot = slot; this.composition = composition;
             this.bounds = bounds; this.worldLight = worldLight;
             this.anchoredAt = now;
+            this.pageAnchors.put(0, base);
         }
         SceneLine(Anchor base, int slot, WorldLyricsDirector.Composition composition, long now) {
             this(base, slot, composition, now, new PhraseBounds(base.width, base.height), 15);
