@@ -317,7 +317,7 @@ public final class WorldLyricsRenderer {
         String displayed = tokens.stream().map(WorldLyricsPlan.Token::text).reduce("", (a, b) -> a + " " + b);
         boolean rtl = LyricsAnimation.isRightToLeft(displayed);
         double desiredScale = .067 * preferences.getWorldLyricsSize() * Math.clamp(anchor.distance / 6, .8, 43);
-        double wrapWidth = Math.clamp((anchor.width - .6 * Math.clamp(anchor.distance / 6, .8, 43)) / (desiredScale * 1.16), 24, 160);
+        double wrapWidth = Math.clamp((anchor.width - .6 * Math.clamp(anchor.distance / 6, .8, 43)) / (desiredScale * 1.16), 110, 160);
         var pages = WorldLyricsLayout.plan(tokens, timed, rtl, wrapWidth,
                 value -> renderer.getWidth(styled(value, preferences)));
         List<DrawPage> drawn = new ArrayList<>();
@@ -356,7 +356,7 @@ public final class WorldLyricsRenderer {
         var tokens = WorldLyricsPlan.tokens(line, romanized);
         String displayed = tokens.stream().map(WorldLyricsPlan.Token::text).reduce("", (a, b) -> a + " " + b);
         double scale = .067 * preferences.getWorldLyricsSize() * Math.clamp(distance / 6, .8, 43);
-        double available = Math.clamp(distance * .92 / (scale * 1.16), 24, 160);
+        double available = Math.clamp(distance * .92 / (scale * 1.16), 110, 160);
         var pages = WorldLyricsLayout.plan(tokens, WorldLyricsPlan.hasWordTiming(line, romanized),
                 LyricsAnimation.isRightToLeft(displayed), available,
                 value -> renderer.getWidth(styled(value, preferences)));

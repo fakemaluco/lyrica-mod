@@ -7,8 +7,8 @@ import java.util.regex.Pattern;
 
 /** Measured wrapping and timed pages; independent of Minecraft and of the render frame rate. */
 public final class WorldLyricsLayout {
-    private static final Pattern GRAPHEME = Pattern.compile("\\X");
     private static final Pattern WORD = Pattern.compile("\\S+");
+    private static final int MAX_WORDS_PER_ROW = 3;
     private WorldLyricsLayout() { }
 
     public record Span(String text, WorldLyricsPlan.Token token, double x, double width,
@@ -43,19 +43,22 @@ public final class WorldLyricsLayout {
             }
         }
         Builder builder = new Builder(limit, measure.applyAsDouble(" "), rtl);
-        for (List<Part> word : words) {
+        for (int index = 0; index < words.size(); index++) {
+            List<Part> word = words.get(index);
             double width = word.stream().mapToDouble(Part::width).sum();
-            if (!builder.spans.isEmpty() && builder.width + builder.space + width > limit) builder.finish();
+            int remaining = words.size() - index;
+            boolean keepLastWord = remaining == 1 && builder.wordCount == MAX_WORDS_PER_ROW - 1
+                    && builder.width + builder.space + width <= limit * 1.2;
+            if (!builder.spans.isEmpty() && (!keepLastWord && builder.width + builder.space + width > limit
+                    || builder.wordCount >= MAX_WORDS_PER_ROW
+                    || builder.wordCount == MAX_WORDS_PER_ROW - 1 && remaining == 2)) builder.finish();
             boolean first = true;
             for (Part part : word) {
-                // Connected RTL scripts stay intact; their row is fitted to the available surface.
-                for (Part chunk : split(part, limit, measure)) {
-                    builder.add(chunk, first);
-                    first = false;
-                }
+                // A sung word is an indivisible unit, including timed syllables and connected scripts.
+                builder.add(part, first);
+                first = false;
             }
-            String end = word.getLast().text();
-            if (builder.width > limit * .55 && end.matches(".*[.!?;:]$")) builder.finish();
+            builder.wordCount++;
         }
         builder.finish();
         List<Page> result = new ArrayList<>();
@@ -73,26 +76,6 @@ public final class WorldLyricsLayout {
         return List.copyOf(result);
     }
 
-    private static List<Part> split(Part part, double limit, ToDoubleFunction<String> measure) {
-        if (part.width() <= limit || LyricsAnimation.isRightToLeft(part.text())) return List.of(part);
-        List<Part> result = new ArrayList<>();
-        var matcher = GRAPHEME.matcher(part.text());
-        int start = 0, previousEnd = 0;
-        while (matcher.find()) {
-            double width = measure.applyAsDouble(part.text().substring(start, matcher.end()));
-            if (width > limit && previousEnd > start) {
-                result.add(chunk(part, start, previousEnd, measure)); start = previousEnd;
-            }
-            previousEnd = matcher.end();
-        }
-        if (start < part.text().length()) result.add(chunk(part, start, part.text().length(), measure));
-        return result;
-    }
-    private static Part chunk(Part part, int start, int end, ToDoubleFunction<String> measure) {
-        String text = part.text().substring(start, end);
-        return new Part(text, part.token(), part.offset() + measure.applyAsDouble(part.text().substring(0, start)),
-                measure.applyAsDouble(text), part.sourceWidth());
-    }
     private static Page page(List<Row> rows) {
         return new Page(List.copyOf(rows), rows.stream().mapToDouble(Row::width).max().orElse(0),
                 rows.stream().mapToLong(Row::startMillis).min().orElse(0),
@@ -104,10 +87,10 @@ public final class WorldLyricsLayout {
         final List<Row> rows = new ArrayList<>();
         final List<Span> spans = new ArrayList<>();
         double width;
+        int wordCount;
         Builder(double limit, double space, boolean rtl) { this.limit = limit; this.space = space; this.rtl = rtl; }
         void add(Part part, boolean wordStart) {
             double gap = wordStart && !spans.isEmpty() ? space : 0;
-            if (!spans.isEmpty() && width + gap + part.width() > limit) { finish(); gap = 0; }
             width += gap;
             spans.add(new Span(part.text(), part.token(), width, part.width(), part.offset(), part.sourceWidth(),
                     LyricsAnimation.isRightToLeft(part.text())));
@@ -121,7 +104,7 @@ public final class WorldLyricsLayout {
                     : List.copyOf(spans);
             rows.add(new Row(placed, width, spans.stream().mapToLong(Span::startMillis).min().orElse(0),
                     spans.stream().mapToLong(Span::endMillis).max().orElse(0)));
-            spans.clear(); width = 0;
+            spans.clear(); width = 0; wordCount = 0;
         }
     }
 

@@ -33,15 +33,15 @@ class WorldLyricsLayoutTest {
         assertThat(WorldLyricsLayout.pageVisibility(pages, 1, 2000, false)).isEqualTo(1);
     }
 
-    @Test void oversizedWordsBreakWithoutLosingTextOrRestartingTheirFill() {
+    @Test void oversizedWordsStayWholeAndKeepTheirOriginalTiming() {
         var source = token("abcdefghijkl", 1000, 2200, true);
         var pages = WorldLyricsLayout.plan(List.of(source), true, false, 24, WIDTH);
         var spans = rows(pages).stream().flatMap(row -> row.spans().stream()).toList();
-        assertThat(spans).extracting(WorldLyricsLayout.Span::text).containsExactly("abcd", "efgh", "ijkl");
-        assertThat(spans).extracting(WorldLyricsLayout.Span::sourceX).containsExactly(0.0, 24.0, 48.0);
-        assertThat(spans).extracting(WorldLyricsLayout.Span::startMillis).containsExactly(1000L, 1400L, 1800L);
+        assertThat(spans).extracting(WorldLyricsLayout.Span::text).containsExactly("abcdefghijkl");
+        assertThat(spans).extracting(WorldLyricsLayout.Span::sourceX).containsExactly(0.0);
+        assertThat(spans).extracting(WorldLyricsLayout.Span::startMillis).containsExactly(1000L);
         assertThat(spans).allMatch(span -> span.token() == source && span.sourceWidth() == 72);
-        assertThat(pages.getLast().startMillis()).isEqualTo(1800);
+        assertThat(rows(pages).getFirst().width()).isEqualTo(72);
     }
 
     @Test void syllablesStayTogetherWhenTheirWordFitsOnTheNextRow() {
@@ -52,11 +52,42 @@ class WorldLyricsLayoutTest {
         assertThat(rows.get(1).spans()).extracting(WorldLyricsLayout.Span::x).containsExactly(0.0, 18.0);
     }
 
-    @Test void graphemeClustersAreNeverSplitEvenIfOneClusterExceedsTheLimit() {
+    @Test void composedGraphemesStayInsideTheOriginalWord() {
         String family = "\ud83d\udc69\u200d\ud83d\udc69\u200d\ud83d\udc67\u200d\ud83d\udc66";
         var pages = WorldLyricsLayout.plan(List.of(token("A\u0301" + family + "B\u0301", 0, 4000, true)), true, false, 12, WIDTH);
         assertThat(rows(pages).stream().flatMap(row -> row.spans().stream()).map(WorldLyricsLayout.Span::text))
-                .containsExactly("A\u0301", family, "B\u0301");
+                .containsExactly("A\u0301" + family + "B\u0301");
+    }
+
+    @Test void wideRowsUseUpToThreeWholeWordsAndAvoidAnOrphan() {
+        var tokens = List.of(token("one", 0, 500, true), token("two", 500, 1000, true),
+                token("three", 1000, 1500, true), token("four", 1500, 2000, true));
+        var planned = rows(WorldLyricsLayout.plan(tokens, true, false, 200, WIDTH));
+        assertThat(planned).hasSize(2);
+        assertThat(planned.getFirst().spans()).extracting(WorldLyricsLayout.Span::text)
+                .containsExactly("one", "two");
+        assertThat(planned.getLast().spans()).extracting(WorldLyricsLayout.Span::text)
+                .containsExactly("three", "four");
+    }
+
+    @Test void timedSyllablesRemainOnOneRowEvenIfTheirWordExceedsTheLimit() {
+        var tokens = List.of(token("super", 0, 500, true), token("califragilistic", 500, 1800, false));
+        var planned = rows(WorldLyricsLayout.plan(tokens, true, false, 24, WIDTH));
+        assertThat(planned).hasSize(1);
+        assertThat(planned.getFirst().spans()).extracting(WorldLyricsLayout.Span::text)
+                .containsExactly("super", "califragilistic");
+    }
+
+    @Test void aSlightlyWideThirdWordStaysWithItsNeighbours() {
+        var tokens = List.of(token("O", 0, 300, true), token("brilho", 300, 600, true),
+                token("acompanha", 600, 900, true), token("a", 900, 1200, true),
+                token("canção", 1200, 1500, true));
+        var planned = rows(WorldLyricsLayout.plan(tokens, true, false, 100, WIDTH));
+        assertThat(planned).hasSize(2);
+        assertThat(planned.getFirst().spans()).extracting(WorldLyricsLayout.Span::text)
+                .containsExactly("O", "brilho");
+        assertThat(planned.getLast().spans()).extracting(WorldLyricsLayout.Span::text)
+                .containsExactly("acompanha", "a", "canção");
     }
 
     @Test void untimedTextWrapsButNeverReceivesInventedTimedPageTurns() {
