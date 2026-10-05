@@ -1,0 +1,72 @@
+package dev.relaylyrics.client.ui;
+
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
+
+/** Maps the 1.21.11 typed input records to FanDroid's stable input surface. */
+abstract class FanDroidScreenBase extends Screen {
+    protected FanDroidScreenBase(Component title) {
+        super(title);
+    }
+
+    /** 26.2 extracts the background and widgets in the screen render pass. */
+    protected final void renderVanillaScreen(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+        super.extractRenderState(context, mouseX, mouseY, delta);
+    }
+
+    protected boolean handleMouseClicked(double x, double y, int button) { return false; }
+    protected boolean handleMouseDragged(double x, double y, int button, double dx, double dy) { return false; }
+    protected boolean handleMouseReleased(double x, double y, int button) { return false; }
+    protected boolean handleMouseScrolled(double x, double y, double horizontal, double vertical) { return false; }
+    protected boolean handleCharTyped(char character, int modifiers) { return false; }
+    protected boolean handleKeyPressed(int key, int scanCode, int modifiers) { return false; }
+
+    @Override
+    public final boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
+        return handleMouseClicked(click.x(), click.y(), click.button())
+                || super.mouseClicked(click, doubled);
+    }
+
+    @Override
+    public final boolean mouseDragged(MouseButtonEvent click, double dx, double dy) {
+        return handleMouseDragged(click.x(), click.y(), click.button(), dx, dy)
+                || super.mouseDragged(click, dx, dy);
+    }
+
+    @Override
+    public final boolean mouseReleased(MouseButtonEvent click) {
+        return handleMouseReleased(click.x(), click.y(), click.button())
+                || super.mouseReleased(click);
+    }
+
+    @Override
+    public final boolean mouseScrolled(double x, double y, double horizontal, double vertical) {
+        return handleMouseScrolled(x, y, horizontal, vertical)
+                || super.mouseScrolled(x, y, horizontal, vertical);
+    }
+
+    @Override
+    public final boolean charTyped(CharacterEvent input) {
+        String value = input.codepointAsString();
+        if (value == null || value.isEmpty()) return false;
+        boolean handled = false;
+        for (int offset = 0; offset < value.length();) {
+            int codePoint = value.codePointAt(offset);
+            if (Character.isBmpCodePoint(codePoint)) {
+                handled |= handleCharTyped((char) codePoint, 0);
+            }
+            offset += Character.charCount(codePoint);
+        }
+        return handled || super.charTyped(input);
+    }
+
+    @Override
+    public final boolean keyPressed(KeyEvent input) {
+        return handleKeyPressed(input.key(), input.scancode(), input.modifiers())
+                || super.keyPressed(input);
+    }
+}

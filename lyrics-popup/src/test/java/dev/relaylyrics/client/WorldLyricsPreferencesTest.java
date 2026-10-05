@@ -11,6 +11,8 @@ class WorldLyricsPreferencesTest {
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
         assertThat(restored.isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset.GROUND)).isTrue();
         assertThat(restored.isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset.INTRO)).isTrue();
+        assertThat(restored.isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset.MURAL)).isFalse();
+        assertThat(restored.isWorldLyricsPresetEnabled(WorldLyricsDirector.Preset.ENGRAVED)).isFalse();
     }
     @Test void previousShortDistanceLimitMigratesWithoutChangingTheSelectedStyle() throws Exception {
         var restored = ClientPreferences.decode("{\"worldLyrics\":true,\"worldLyricsMaximumDistance\":10,\"worldLyricsPreset\":\"SCULPTURE\"}"
@@ -55,6 +57,11 @@ class WorldLyricsPreferencesTest {
         preferences.setWorldLyricsPreset(WorldLyricsDirector.Preset.ARC);
         preferences.setWorldLyricsDepth(.2);
         preferences.setWorldLyricsTrails(true);
+        preferences.setWorldLyricsSurfacePreference(WorldLyricsDirector.SurfacePreference.SURFACES);
+        preferences.setWorldLyricsMaterial(WorldLyricsDirector.Material.METAL);
+        preferences.setWorldLyricsEntranceOverride(WorldLyricsDirector.Entrance.WALL_SLIDE);
+        preferences.setWorldLyricsBevel(false);
+        preferences.setWorldLyricsBevelWidth(.7);
         var restored = ProtocolCodec.mapper().readValue(ProtocolCodec.mapper().writeValueAsBytes(preferences), ClientPreferences.class);
         assertThat(restored.getWorldLyricsIntensity()).isEqualTo(ClientPreferences.WorldIntensity.INTENSE);
         assertThat(restored.isWorldLyricsPlayerReactions()).isFalse();
@@ -64,5 +71,10 @@ class WorldLyricsPreferencesTest {
         assertThat(restored.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.ARC);
         assertThat(restored.getWorldLyricsDepth()).isEqualTo(.2);
         assertThat(restored.isWorldLyricsTrails()).isTrue();
+        assertThat(restored.getWorldLyricsSurfacePreference()).isEqualTo(WorldLyricsDirector.SurfacePreference.SURFACES);
+        assertThat(restored.getWorldLyricsMaterial()).isEqualTo(WorldLyricsDirector.Material.METAL);
+        assertThat(restored.getWorldLyricsEntranceOverride()).isEqualTo(WorldLyricsDirector.Entrance.WALL_SLIDE);
+        assertThat(restored.isWorldLyricsBevel()).isFalse();
+        assertThat(restored.getWorldLyricsBevelWidth()).isEqualTo(.7);
     }
 }

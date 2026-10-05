@@ -9,14 +9,15 @@ intensidade e reação são Normal e ligado; o recurso 3D continua opt-in.
 ## Direção visual e controles novos
 
 O diretor automático escolhe entre Clássico, Cinema, Escultura, Arco, Cascata, Voo,
-Paisagem, Terreno e Intro chanfrada
+Paisagem, Letreiro, Monólito, Mural e Gravado
 quando uma nova frase nasce. O preset da frase não muda até ela sair. Frases
 simultâneas compartilham a mesma composição. É possível desligar o diretor, escolher
 um preset fixo, selecionar quais participam da rotação e ajustar sua frequência.
 Configurações antigas continuam no estilo Clássico; uma primeira ativação usa Cinema.
-Terreno mantém uma composição menor junto ao solo para quem está a pé e entra com
-uma queda curta. Intro chanfrada acrescenta uma borda 3D inclinada ao contorno dos
-glifos e surge com expansão de escala e profundidade. Os novos estilos podem ser
+Letreiro mantém uma composição menor junto ao solo para quem está a pé e se ergue
+sem atravessar o bloco. Monólito usa profundidade e chanfro mais fortes para frases
+curtas; Mural desliza junto à parede; Gravado usa um relevo raso e só é escolhido
+quando a parede pode ser lida de frente. Os novos estilos podem ser
 fixados manualmente ou incluídos na rotação automática.
 
 O jogador parado coloca novas frases a 6 blocos. A distância utiliza a velocidade
@@ -29,15 +30,21 @@ para manter o tamanho angular do texto. As posições laterais, diagonais e em
 arco são relativas à mira no instante em que a frase aparece, mantendo-se fixas no
 mundo. A orientação considera a inclinação da câmera e a trajetória de voo. Quando
 uma posição lateral é bloqueada, usa-se a posição frontal segura. Paredes próximas
-não são escolhidas durante corrida, voo ou no preset Paisagem. Se uma aceleração
+não são escolhidas durante corrida ou voo na direção automática. Se uma aceleração
 fizer o jogador alcançar a frase antes do fim, o grupo desliza suavemente até uma
 nova âncora fixa mais adiante. A trajetória considera o terreno entre os pontos;
 não acompanha a câmera a cada quadro. Pausar a música congela esse deslocamento.
 Ao criar uma âncora livre, o terreno sob o centro e as extremidades é medido e a
 composição sobe quando seu limite inferior encostaria no chão.
-O painel oferece controles de tamanho, distância, sensibilidade, raio, região livre
-da mira, profundidade, cores frontal e lateral, força e velocidade das animações,
-rastros e qualidade. Há restauração por grupo e um botão para recriar a frase atual.
+O painel oferece preferência por contexto, superfícies ou horizonte. Com a primeira,
+frases caminhando variam entre chão, parede e ar; corrida e voo priorizam o horizonte.
+A frase é medida, incluindo vozes simultâneas, antes das sondagens. Chão irregular,
+líquidos, blocos parciais, chunks ausentes e posições ocultas são rejeitados.
+Há controles de tamanho, distância, sensibilidade, raio, região livre da mira,
+profundidade, cores frontal e lateral, material de borda (automático, pedra, metal
+ou luz suave), chanfro e sua largura, sombra de contato, iluminação do mundo,
+entrada automática ou fixa, força e velocidade das animações, rastros e qualidade.
+Há restauração por grupo e um botão para recriar a frase atual.
 
 A profundidade usa uma malha fechada a partir da máscara dos glifos realmente
 renderizados pelo Minecraft. Há frente, verso e faces laterais apenas no contorno
@@ -70,9 +77,9 @@ aba Mundo 3D. Use a roda do mouse ou Page Up/Down se as opções excederem a alt
   limitado a 0,015 bloco e inclinação de até 2 graus.
 - Frases curtas recebem letras maiores. A escala considera distância inicial,
   preferência e largura/altura disponíveis, reservando espaço para animações.
-- Frases longas quebram por palavra; palavras largas demais podem quebrar entre
-  grafemas inteiros, sem perder texto nem reiniciar o preenchimento. Sílabas são
-  mantidas juntas quando a palavra cabe; escrita RTL conectada permanece inteira.
+- Frases longas quebram apenas nos espaços, em grupos de até três palavras por
+  linha. Uma palavra comprida permanece inteira e a escala se ajusta ao espaço;
+  sílabas sincronizadas e escrita RTL conectada também ficam juntas.
 - Frases sincronizadas são divididas em blocos de duas linhas, trocados nos tempos
   originais com dissolução de até 160 ms. Fragmentos sobrepostos ficam juntos.
   Letras sem tempos individuais mostram todas as linhas, sem inventar paginação.
@@ -111,7 +118,7 @@ Cobertura: movimentos curtos e sustentados, sílabas, limites combinados, parede
 pausa/retomada, seeks, limpeza de reações, suavização a 30 e 144 Hz, prioridade de
 vozes, intervalos, romanização, RTL, UVs de preenchimento em planos rotacionados
 e compatibilidade das preferências antigas. A expansão cinematográfica acrescenta
-cobertura de quebra de palavras/grafemas, preservação de sílabas, paginação rápida,
+cobertura de quebra entre palavras, preservação de sílabas, paginação rápida,
 espaço de animação, texto RTL e seleção de retângulos sem buracos.
 
 O layout (segmentação, textos estilizados e medidas) fica em cache por frase.
@@ -131,8 +138,8 @@ com 1.000 quadros de aquecimento e 2.000 amostras. Medição local:
 
 | Versão | Mediana | p95 |
 | --- | --- | --- |
-| 1.21.1 | 0,013 ms | 0,020 ms |
-| 1.21.11 | 0,016 ms | 0,030 ms |
+| 1.21.1 | 0,013 ms | 0,018 ms |
+| 1.21.11 | 0,018 ms | 0,029 ms |
 
 Esses números excluem TextRenderer, layout, raycasts, envio à GPU e renderização
 do mundo. Não representam FPS nem uma medição completa de renderização.

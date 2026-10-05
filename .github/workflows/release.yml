@@ -15,6 +15,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
       - uses: dtolnay/rust-toolchain@stable
       - uses: gradle/actions/setup-gradle@v4
       - run: cargo build --release --locked
@@ -23,9 +27,9 @@ jobs:
         shell: pwsh
         run: |
           $releaseVersion = "${{ github.ref_name }}".TrimStart('v')
-          .\gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build "-Pversion=$releaseVersion" --no-daemon
+          .\gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build :lyrics-popup-26.2:build "-Pversion=$releaseVersion" --no-daemon
           New-Item -ItemType Directory -Path release-assets | Out-Null
-          Get-ChildItem lyrics-popup/build/libs,lyrics-popup-1.21.11/build/libs -Filter "lyrica-*.jar" |
+          Get-ChildItem lyrics-popup/build/libs,lyrics-popup-1.21.11/build/libs,lyrics-popup-26.2/build/libs -Filter "lyrica-*.jar" |
             Where-Object { $_.Name -notmatch "sources|dev" } |
             Copy-Item -Destination release-assets
       - name: Publish standalone jars
