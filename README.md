@@ -21,6 +21,16 @@ The mod adapts to the way you play. Customize when and how lyrics appear, keepin
 4. Inicie o jogo.
 5. Prontinho! O Lyrica já estará disponível.
 
+Os JARs standalone são identificados pela versão do jogo: `lyrica-1.21.1`,
+`lyrica-1.21.11` e `lyrica-26.2`. Para Minecraft 26.2, use Java 25 e uma
+versão atual do Fabric Loader e Fabric API. As letras no mundo são opcionais e
+podem ser ativadas em **Experimental**, com os ajustes na aba **Mundo 3D**.
+
+Para compilar os três JARs, instale JDK 21 e JDK 25 e execute
+`.\gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build :lyrics-popup-26.2:build`.
+No 26.2, o brilho avançado da interface usa o acabamento padrão enquanto a
+nova API de efeitos de tela não oferece o caminho anterior de pós-processamento.
+
 ## Spicy Lyrics
 
 O Lyrica usa somente a API oficial do Spicy Lyrics para buscas automáticas e

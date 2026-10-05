@@ -7,4 +7,4 @@ pluginManagement {
 }
 
 rootProject.name = "lyrica"
-include("shared-protocol", "lyrics-popup", "lyrics-popup-1.21.11")
+include("shared-protocol", "lyrics-popup", "lyrics-popup-1.21.11", "lyrics-popup-26.2")
