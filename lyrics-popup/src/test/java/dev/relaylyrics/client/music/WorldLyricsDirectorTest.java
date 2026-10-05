@@ -42,6 +42,23 @@ class WorldLyricsDirectorTest {
                 .isGreaterThan(WorldLyricsDirector.readingDistance(12, 1, false, false, distantSettings()));
     }
 
+    @Test void aGlidingPhraseStartsFartherAwayAndDoesNotChaseThePlayer() {
+        var settings = distantSettings();
+        assertThat(WorldLyricsDirector.readingDistance(30, 3, true, false, settings))
+                .isGreaterThan(WorldLyricsDirector.readingDistance(30, 3, false, false, settings));
+        assertThat(WorldLyricsDirector.readingDistance(5, 3, true, false, settings)).isGreaterThan(100);
+        assertThat(WorldLyricsDirector.readingDistance(0, 3, true, false, settings)).isEqualTo(32);
+        // At 60 blocks/s a phrase 192 blocks away remains fixed through most of its first two seconds.
+        assertThat(WorldLyricsDirector.shouldRelocate(102, 192, 60, 1.5, 1.5, true)).isFalse();
+        assertThat(WorldLyricsDirector.shouldRelocate(78, 192, 60, 1.1, 1.9, true)).isFalse();
+        assertThat(WorldLyricsDirector.shouldRelocate(78, 192, 60, 2.1, 1.9, true)).isTrue();
+        // Once moved, a fresh anchor has another full reading runway instead of moving again at once.
+        assertThat(WorldLyricsDirector.shouldRelocate(150, 192, 60, 1.4, .7, true)).isFalse();
+        assertThat(WorldLyricsDirector.shouldRelocate(60, 192, -10, 2, 2, true)).isFalse();
+        // Extremely fast flight must reconsider before the player passes the original anchor.
+        assertThat(WorldLyricsDirector.shouldRelocate(90, 168, 160, 3, .5, true)).isTrue();
+    }
+
     @Test void worldTextMaintainsAngularSizeAtLandscapeDistances() {
         double near = WorldLyricsLayout.pixelScale(80, 1, 9, 3, 6, 1.2, false, 15);
         double far = WorldLyricsLayout.pixelScale(80, 1, 90, 30, 60, 1.2, false, 15);

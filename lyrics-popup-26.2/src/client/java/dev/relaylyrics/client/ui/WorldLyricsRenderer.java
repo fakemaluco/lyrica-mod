@@ -210,26 +210,27 @@ public final class WorldLyricsRenderer {
                                            LyricLine line, long now, WorldLyricsDirector.Settings settings,
                                            boolean animate) {
         double remaining = (line.endMillis() - now) / 1000.0;
-        if (remaining < .75 || now - scene.anchoredAt < 800) return;
+        if (scene.base.wall || scene.base.ground) return;
         Anchor previous = scene.base;
-        Vec3 normal = new Vec3(previous.normalX, previous.normalY, previous.normalZ);
-        double closingSpeed = -travel(client).dot(normal) * 20;
-        if (closingSpeed < 4) return;
-        double ahead = camera.subtract(new Vec3(previous.x, previous.y, previous.z)).dot(normal);
-        if (ahead > closingSpeed * (remaining + .5)) return;
+        Vec3 toAnchor = new Vec3(previous.x, previous.y, previous.z).subtract(camera);
+        double ahead = toAnchor.length();
+        double closingSpeed = ahead > 0 ? travel(client).dot(toAnchor.scale(1 / ahead)) * 20 : 0;
+        if (!WorldLyricsDirector.shouldRelocate(ahead, previous.distance, closingSpeed, remaining,
+                (now - scene.anchoredAt) / 1000.0, STATE.flying())) return;
         double target = readingDistance(line, now, scene.composition, settings);
-        // A new fixed anchor only when acceleration would make the player overtake the phrase.
+        // Move only when the current reading runway is nearly exhausted.
         Anchor replacement = createAnchor(client, camera, previous.bands, RelayLyricsClient.preferences(),
                 scene.composition, target, scene.bounds);
-        if (replacement.distance <= Math.max(2, ahead) * 1.2) {
+        if (replacement.distance <= ahead + Math.max(8, closingSpeed * .45)) {
             scene.anchoredAt = now;
             return;
         }
         Anchor displayed = scene.display(now, animate);
         double span = new Vec3(displayed.x, displayed.y, displayed.z)
                 .distanceTo(new Vec3(replacement.x, replacement.y, replacement.z));
-        long duration = Math.round(Math.clamp(Math.min(300 + span * 12,
-                (line.endMillis() - now) * .75), 300, 1100));
+        long duration = Math.round(Math.clamp(Math.min(Math.min(300 + span * (STATE.flying() ? 5 : 12),
+                (line.endMillis() - now) * .55), ahead / closingSpeed * 800),
+                300, STATE.flying() ? 850 : 1100));
         double rise = animate ? relocationRise(client, displayed, replacement, scene.composition.depth()) : 0;
         if (animate && !clearRelocationPath(client, displayed, replacement, rise)) {
             for (SceneLine sibling : LINES.values()) if (sibling.base == previous) sibling.anchoredAt = now;
