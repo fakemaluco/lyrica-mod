@@ -80,6 +80,8 @@ public final class ClientPreferences {
     private int worldLyricsSideColor = 0x56647A;
     private int worldLyricsFaceColor = 0xFFFFFF;
     private boolean lyricsAnimations = true;
+    private int lyricsAnimationFrameRate;
+    private boolean lyricsLoadingSkeleton;
     private boolean lyricsBorder = true;
     private boolean inventoryPopup = true;
     private boolean inventoryNowPlaying = true;
@@ -429,6 +431,10 @@ public final class ClientPreferences {
     public void setLyricsBlurStrength(int value) { lyricsBlurStrength = Math.clamp(value, 0, 3); }
     public boolean isLyricsAnimations() { return lyricsAnimations; }
     public void setLyricsAnimations(boolean value) { lyricsAnimations = value; }
+    public int getLyricsAnimationFrameRate() { return lyricsAnimationFrameRate == 30 || lyricsAnimationFrameRate == 60 ? lyricsAnimationFrameRate : 0; }
+    public void setLyricsAnimationFrameRate(int value) { lyricsAnimationFrameRate = value == 30 || value == 60 ? value : 0; }
+    public boolean isLyricsLoadingSkeleton() { return lyricsLoadingSkeleton; }
+    public void setLyricsLoadingSkeleton(boolean value) { lyricsLoadingSkeleton = value; }
     public boolean isLyricsBorder() { return lyricsBorder; }
     public void setLyricsBorder(boolean value) { lyricsBorder = value; }
     public boolean isInventoryPopup() { return inventoryPopup; }

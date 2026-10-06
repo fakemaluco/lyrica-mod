@@ -14,6 +14,7 @@ import org.lwjgl.glfw.GLFW;
 import java.util.Collections;
 import java.util.List;
 import java.util.OptionalLong;
+import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.WeakHashMap;
 import net.minecraft.ChatFormatting;
@@ -44,6 +45,10 @@ public final class InventoryLyricsController {
     private static boolean selected;
     private static boolean dragging;
     private static boolean scrubbing;
+    private static boolean volumeScrubbing;
+    private static double volumeDragValue;
+    private static double lastVolumeCommandValue = Double.NaN;
+    private static long lastVolumeCommandNanos;
     private static long scrubPosition;
     private static long scrubDuration;
     private static Bounds progressBarBounds;
@@ -58,6 +63,8 @@ public final class InventoryLyricsController {
     private static double heartHoverFade;
     private static double nextHoverFade;
     private static double coverControlsFade;
+    private static double progressHoverFade;
+    private static long progressFadeNanos;
     private static long cachedPositionSecond = Long.MIN_VALUE;
     private static long cachedDurationSecond = Long.MIN_VALUE;
     private static String cachedPositionLabel = "0:00";
@@ -84,12 +91,16 @@ public final class InventoryLyricsController {
         selected = false;
         dragging = false;
         scrubbing = false;
+        volumeScrubbing = false;
         if (RelayLyricsClient.overlay() != null) {
             RelayLyricsClient.overlay().cancelPopupProgressScrub();
+            RelayLyricsClient.overlay().setPopupVolumeScrubbing(false);
         }
         clearNowPlayingInteractions();
         coverAnimationStartedNanos = System.nanoTime();
         controlFadeNanos = coverAnimationStartedNanos;
+        progressFadeNanos = coverAnimationStartedNanos;
+        progressHoverFade = 0;
         previousHoverFade = 0;
         playPauseHoverFade = 0;
         heartHoverFade = 0;
@@ -129,26 +140,6 @@ public final class InventoryLyricsController {
             } else {
                 outline(context, popup.x(), popup.y(), popup.width(), popup.height(), 0xFFE4F5F7);
             }
-            Bounds gear = gearBounds(popup);
-            boolean hovered = gear.contains(mouseX, mouseY);
-            int gearRadius = overlay.morphRadius(RelayLyricsClient.preferences().isModernMode() ? 5 : 0);
-            if (gearRadius > 0) {
-                RoundedGui.smoothFill(context, gear.x, gear.y, gear.width, gear.height, gearRadius,
-                        hovered ? 0xFFE0E0E0 : 0xFFC0C0C0);
-            } else {
-                RoundedGui.fill(context, gear.x, gear.y, gear.width, gear.height, gearRadius,
-                        hovered ? 0xFFE0E0E0 : 0xFFC0C0C0);
-            }
-            if (gearRadius > 0) {
-                RoundedGui.smoothOutline(context, gear.x, gear.y, gear.width, gear.height,
-                        gearRadius, 0xFF000000);
-            } else {
-                outline(context, gear.x, gear.y, gear.width, gear.height, 0xFF000000);
-            }
-            String icon = "\u2699";
-            int textX = gear.x + (gear.width - Minecraft.getInstance().font.width(icon)) / 2;
-            context.text(Minecraft.getInstance().font, Component.literal(icon),
-                    textX, gear.y + 6, 0xFF202020, false);
         }
         updateCursor(context, mouseX, mouseY, popupVisible);
     }
@@ -162,10 +153,18 @@ public final class InventoryLyricsController {
                     && overlay.isPopupCoverInteractionActiveAt(mouseX, mouseY);
         }
         if (popupVisible) {
-            PopupBounds popup = popupBounds();
-            if (selected && gearBounds(popup).contains(mouseX, mouseY)) {
+            if (overlay != null && overlay.popupControlAt(mouseX, mouseY)
+                    == LyricsOverlay.PopupControl.SETTINGS) {
                 RelayLyricsClient.preferences().save();
                 Minecraft.getInstance().gui.setScreen(new LyricsConfigScreen(screen));
+                return true;
+            }
+            OptionalDouble volume = overlay == null ? OptionalDouble.empty()
+                    : overlay.popupVolumeTargetAt(mouseX, mouseY);
+            if (volume.isPresent() && RelayLyricsClient.music() != null) {
+                volumeScrubbing = true;
+                overlay.setPopupVolumeScrubbing(true);
+                updateVolumeDrag(volume.getAsDouble(), true);
                 return true;
             }
             if (runPopupControl(overlay, mouseX, mouseY)) return true;
@@ -203,6 +202,14 @@ public final class InventoryLyricsController {
         if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             return popupVisible && overlay != null
                     && overlay.isPopupCoverInteractionActiveAt(mouseX, mouseY);
+        }
+        if (volumeScrubbing) {
+            if (overlay != null) {
+                overlay.popupVolumeTargetAtY(mouseY).ifPresent(value -> updateVolumeDrag(value, true));
+                overlay.setPopupVolumeScrubbing(false);
+            }
+            volumeScrubbing = false;
+            return true;
         }
         if (popupVisible && overlay != null && overlay.isPopupProgressScrubbing()) {
             overlay.updatePopupProgressScrub(mouseX);
@@ -244,7 +251,7 @@ public final class InventoryLyricsController {
         if (screen != activeScreen || button != GLFW.GLFW_MOUSE_BUTTON_LEFT) return false;
         LyricsOverlay overlay = RelayLyricsClient.overlay();
         boolean popupVisible = inventoryPopupAvailable();
-        if (scrubbing || popupVisible && (dragging
+        if (scrubbing || volumeScrubbing || popupVisible && (dragging
                 || overlay != null && overlay.isPopupProgressScrubbing())) return true;
         if (popupVisible) {
             PopupBounds popup = popupBounds();
@@ -267,6 +274,10 @@ public final class InventoryLyricsController {
             activeScreen = null;
             dragging = false;
             scrubbing = false;
+            volumeScrubbing = false;
+            if (RelayLyricsClient.overlay() != null) {
+                RelayLyricsClient.overlay().setPopupVolumeScrubbing(false);
+            }
             if (RelayLyricsClient.overlay() != null) {
                 RelayLyricsClient.overlay().cancelPopupProgressScrub();
             }
@@ -279,7 +290,8 @@ public final class InventoryLyricsController {
             overlay.mouseReleased();
         }
         boolean popupScrubbing = popupVisible && overlay != null && overlay.isPopupProgressScrubbing();
-        if ((!dragging && !scrubbing && !popupScrubbing) || client.gui.screen() != activeScreen
+        if ((!dragging && !scrubbing && !volumeScrubbing && !popupScrubbing)
+                || client.gui.screen() != activeScreen
                 || overlay == null) return;
         long window = client.getWindow().handle();
         if (GLFW.glfwGetMouseButton(window, GLFW.GLFW_MOUSE_BUTTON_LEFT) != GLFW.GLFW_PRESS) {
@@ -291,6 +303,9 @@ public final class InventoryLyricsController {
                 }
             }
             if (scrubbing) finishScrub();
+            if (volumeScrubbing) updateVolumeDrag(volumeDragValue, true);
+            volumeScrubbing = false;
+            overlay.setPopupVolumeScrubbing(false);
             if (dragging) {
                 dragging = false;
                 overlay.mouseReleased();
@@ -301,6 +316,11 @@ public final class InventoryLyricsController {
         double mouseY = client.mouseHandler.ypos() * client.getWindow().getGuiScaledHeight() / client.getWindow().getScreenHeight();
         if (popupScrubbing) {
             overlay.updatePopupProgressScrub(mouseX);
+            return;
+        }
+        if (volumeScrubbing) {
+            OptionalDouble volume = overlay.popupVolumeTargetAtY(mouseY);
+            volume.ifPresent(value -> updateVolumeDrag(value, false));
             return;
         }
         if (scrubbing) {
@@ -389,8 +409,7 @@ public final class InventoryLyricsController {
                 || contains(heartButtonBounds, mouseX, mouseY)
                 || contains(nextButtonBounds, mouseX, mouseY);
         if (popupVisible) {
-            interactive = interactive || selected && gearBounds(popup).contains(mouseX, mouseY)
-                    || overlay != null && (overlay.isPopupCoverInteractionActiveAt(mouseX, mouseY)
+            interactive = interactive || overlay != null && (overlay.isPopupCoverInteractionActiveAt(mouseX, mouseY)
                     || overlay.seekTargetAtHud(mouseX, mouseY).isPresent());
         }
         boolean insidePopup = popupVisible
@@ -401,16 +420,6 @@ public final class InventoryLyricsController {
 
     private static boolean contains(Bounds bounds, double mouseX, double mouseY) {
         return bounds != null && bounds.contains(mouseX, mouseY);
-    }
-
-    private static Bounds gearBounds(PopupBounds popup) {
-        int width = 28;
-        int height = 22;
-        int x = popup.x() + (popup.width() - width) / 2;
-        int preferredY = popup.y() + popup.height() + 5;
-        int y = preferredY + height <= Minecraft.getInstance().getWindow().getGuiScaledHeight()
-                ? preferredY : Math.max(2, popup.y() - height - 5);
-        return new Bounds(x, y, width, height);
     }
 
     private static void renderNowPlaying(Screen screen, GuiGraphicsExtractor context, int mouseX, int mouseY) {
@@ -519,14 +528,20 @@ public final class InventoryLyricsController {
             progressBarBounds = metadataFade > .35
                     ? new Bounds(barLeft, barY - 3, barRight - barLeft, 10) : null;
             boolean hovered = progressBarBounds != null && progressBarBounds.contains(mouseX, mouseY);
+            long progressNow = System.nanoTime();
+            double progressDelta = Math.clamp((progressNow - progressFadeNanos) / 1_000_000_000.0, 0, .05);
+            progressFadeNanos = progressNow;
+            progressHoverFade = fade(progressHoverFade, hovered || scrubbing, progressDelta, 12);
+            int drawnHeight = 4 + (int) Math.round(progressHoverFade * 3);
+            int drawnY = barY - (drawnHeight - 4) / 2;
             int barRadius = RelayLyricsClient.overlay().morphRadius(
                     RelayLyricsClient.preferences().isModernMode() ? 2 : 0);
-            int railColor = fadeColor(hovered || scrubbing ? 0xD05B656B : 0xB0444C52, metadataFade);
+            int railColor = fadeColor(0xB0444C52, metadataFade);
             if (barRadius > 0) {
-                RoundedGui.smoothFill(context, barLeft, barY, barRight - barLeft, 4,
+                RoundedGui.smoothFill(context, barLeft, drawnY, barRight - barLeft, drawnHeight,
                         barRadius, railColor);
             } else {
-                RoundedGui.fill(context, barLeft, barY, barRight - barLeft, 4,
+                RoundedGui.fill(context, barLeft, drawnY, barRight - barLeft, drawnHeight,
                         barRadius, railColor);
             }
             double progress = duration <= 0 ? 0 : scrubbing
@@ -536,11 +551,11 @@ public final class InventoryLyricsController {
             if (fillRight > barLeft) {
                 int fillColor = fadeColor(0xFFF2F5F5, metadataFade);
                 if (barRadius > 0) {
-                    RoundedGui.smoothFill(context, barLeft, barY,
-                            fillRight - barLeft, 4, barRadius, fillColor);
+                    RoundedGui.smoothFill(context, barLeft, drawnY,
+                            fillRight - barLeft, drawnHeight, barRadius, fillColor);
                 } else {
-                    RoundedGui.fill(context, barLeft, barY,
-                            fillRight - barLeft, 4, barRadius, fillColor);
+                    RoundedGui.fill(context, barLeft, drawnY,
+                            fillRight - barLeft, drawnHeight, barRadius, fillColor);
                 }
             }
         } else {
@@ -707,15 +722,30 @@ public final class InventoryLyricsController {
     private static boolean runPopupControl(LyricsOverlay overlay, double mouseX, double mouseY) {
         if (overlay == null || RelayLyricsClient.music() == null) return false;
         MusicAction action = switch (overlay.popupControlAt(mouseX, mouseY)) {
+            case TOGGLE_SHUFFLE -> MusicAction.TOGGLE_SHUFFLE;
             case PREVIOUS -> MusicAction.PREVIOUS;
             case PLAY_PAUSE -> MusicAction.PLAY_PAUSE;
             case TOGGLE_HEART -> MusicAction.TOGGLE_HEART;
             case NEXT -> MusicAction.NEXT;
-            case NONE -> null;
+            case CYCLE_REPEAT -> MusicAction.CYCLE_REPEAT;
+            case NONE, SETTINGS -> null;
         };
         if (action == null) return false;
         RelayLyricsClient.music().command(action);
         return true;
+    }
+
+    private static void updateVolumeDrag(double value, boolean finalOrInitial) {
+        volumeDragValue = Math.clamp(value, 0, 1);
+        LyricsOverlay overlay = RelayLyricsClient.overlay();
+        if (overlay != null) overlay.previewPopupVolume(volumeDragValue);
+        if (RelayLyricsClient.music() == null) return;
+        long now = System.nanoTime();
+        if (!finalOrInitial && now - lastVolumeCommandNanos < 90_000_000L) return;
+        if (!finalOrInitial && Math.abs(volumeDragValue - lastVolumeCommandValue) < .01) return;
+        lastVolumeCommandNanos = now;
+        lastVolumeCommandValue = volumeDragValue;
+        RelayLyricsClient.music().command(MusicAction.SET_VOLUME, volumeDragValue);
     }
 
     private static boolean runNowPlayingControl(double mouseX, double mouseY) {

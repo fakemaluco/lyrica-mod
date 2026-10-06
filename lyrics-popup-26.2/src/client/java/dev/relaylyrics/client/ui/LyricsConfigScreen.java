@@ -93,6 +93,15 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
                         () -> preferences.setInventoryNowPlaying(false));
                 y = addToggle(y, "config.relaylyrics.animations", preferences::isLyricsAnimations,
                         () -> preferences.setLyricsAnimations(true), () -> preferences.setLyricsAnimations(false));
+                y = addRow(y, Component.translatable("config.relaylyrics.animation_fps"),
+                        () -> Component.translatable("config.relaylyrics.animation_fps." + preferences.getLyricsAnimationFrameRate()),
+                        () -> preferences.setLyricsAnimationFrameRate(preferences.getLyricsAnimationFrameRate() == 0 ? 30
+                                : preferences.getLyricsAnimationFrameRate() == 30 ? 60 : 0),
+                        () -> preferences.setLyricsAnimationFrameRate(preferences.getLyricsAnimationFrameRate() == 0 ? 60
+                                : preferences.getLyricsAnimationFrameRate() == 60 ? 30 : 0));
+                y = addToggle(y, "config.relaylyrics.loading_skeleton", preferences::isLyricsLoadingSkeleton,
+                        () -> preferences.setLyricsLoadingSkeleton(true),
+                        () -> preferences.setLyricsLoadingSkeleton(false));
                 y = addRow(y, Component.translatable("config.relaylyrics.inventory_editor"),
                         () -> Component.translatable(preferences.isInventoryPopup()
                                 ? "config.relaylyrics.inventory_editor.value" : "options.off"), null, null);

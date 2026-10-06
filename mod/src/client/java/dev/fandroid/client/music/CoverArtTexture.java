@@ -25,6 +25,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.EnumMap;
 import java.util.HexFormat;
@@ -37,6 +38,9 @@ public final class CoverArtTexture implements AutoCloseable {
     private static final int MAX_IMAGE_BYTES = 8 * 1024 * 1024;
     private static final int MAX_DIMENSION = 4_096;
     private static final long COVER_TRANSITION_NANOS = 1_500_000_000L;
+    private static final long MAX_ROUNDED_CACHE_BYTES = 32L * 1024 * 1024;
+    private static final int MAX_ROUNDED_CACHE_ENTRIES = 40;
+    private static final long ROUNDED_DRAW_GRACE_NANOS = 100_000_000L;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8))
             .followRedirects(HttpClient.Redirect.NORMAL).build();
     private final Path cache = FabricLoader.getInstance().getConfigDir().resolve("fandroid/music/artwork");
@@ -52,8 +56,8 @@ public final class CoverArtTexture implements AutoCloseable {
     private volatile boolean closed;
     private volatile long enhancedBackdropRetryNanos;
     private volatile long lastAttemptNanos;
-    private RoundedCover roundedCurrent;
-    private RoundedCover roundedPrevious;
+    private final ArrayList<CachedRoundedCover> roundedCovers = new ArrayList<>();
+    private long roundedCacheBytes;
 
     public CoverArtTexture() {
         loadFallback(Fallback.CONNECT_ACCOUNT, "please_connect.png");
@@ -319,35 +323,55 @@ public final class CoverArtTexture implements AutoCloseable {
     }
 
     private RoundedCover roundedCover(TextureState state, int width, int height, int radius) {
-        boolean current = state == texture;
-        RoundedCover cached = current ? roundedCurrent : roundedPrevious;
         double guiScale = PlatformTextures.guiScale();
-        if (cached != null && cached.matches(state, width, height, radius, guiScale)) {
-            return cached;
+        long now = System.nanoTime();
+        for (int index = 0; index < roundedCovers.size(); index++) {
+            CachedRoundedCover cached = roundedCovers.get(index);
+            if (cached.cover.matches(state, width, height, radius, guiScale)) {
+                cached.lastUsedNanos = now;
+                roundedCovers.remove(index);
+                roundedCovers.add(cached);
+                return cached.cover;
+            }
         }
         RoundedCover built = RoundedCover.build(state, width, height, radius, guiScale);
-        if (built == null) return cached;
-        if (current) {
-            if (roundedCurrent != null) roundedCurrent.close();
-            roundedCurrent = built;
-        } else {
-            if (roundedPrevious != null) roundedPrevious.close();
-            roundedPrevious = built;
+        if (built == null) return null;
+        long bytes = 4L * built.textureWidth() * built.textureHeight();
+        roundedCovers.add(new CachedRoundedCover(built, bytes, now));
+        roundedCacheBytes += bytes;
+        while (roundedCovers.size() > 2 && (roundedCovers.size() > MAX_ROUNDED_CACHE_ENTRIES
+                || roundedCacheBytes > MAX_ROUNDED_CACHE_BYTES)) {
+            CachedRoundedCover oldest = roundedCovers.getFirst();
+            // GUI draws are submitted before the texture batch is flushed. Retain recently
+            // used sizes so the inventory and popup can draw the same cover in one frame.
+            if (now - oldest.lastUsedNanos < ROUNDED_DRAW_GRACE_NANOS) break;
+            roundedCovers.removeFirst();
+            roundedCacheBytes -= oldest.bytes;
+            oldest.cover.close();
         }
         return built;
     }
 
     private void discardRoundedCover(boolean current) {
-        if (current) {
-            if (roundedCurrent != null) {
-                roundedCurrent.close();
-                roundedCurrent = null;
+        for (int index = roundedCovers.size() - 1; index >= 0; index--) {
+            CachedRoundedCover cached = roundedCovers.get(index);
+            if ((cached.cover.state() == texture) == current) {
+                roundedCovers.remove(index);
+                roundedCacheBytes -= cached.bytes;
+                cached.cover.close();
             }
-        } else {
-            if (roundedPrevious != null) {
-                roundedPrevious.close();
-                roundedPrevious = null;
-            }
+        }
+    }
+
+    private static final class CachedRoundedCover {
+        private final RoundedCover cover;
+        private final long bytes;
+        private long lastUsedNanos;
+
+        private CachedRoundedCover(RoundedCover cover, long bytes, long now) {
+            this.cover = cover;
+            this.bytes = bytes;
+            this.lastUsedNanos = now;
         }
     }
 
