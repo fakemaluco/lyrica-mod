@@ -53,7 +53,14 @@ public final class InventoryLyricsController {
     private static double previousHoverFade;
     private static double playPauseHoverFade;
     private static double heartHoverFade;
-    private static final SpringValue HEART_SCALE = new SpringValue(1, 5.5, .52);
+    private static final SpringValue HEART_SCALE = new SpringValue(1, 4.5, .72);
+    private static long previousClickNanos;
+    private static long playPauseClickNanos;
+    private static long heartClickNanos;
+    private static long nextClickNanos;
+    private static long heartFillPreviewUntil;
+    private static boolean heartPreviewLiked;
+    private static double heartFillFade;
     private static double nextHoverFade;
     private static double coverControlsFade;
     private static double progressHoverFade;
@@ -605,11 +612,15 @@ public final class InventoryLyricsController {
         boolean heartHovered = coverHovered && heartBounds.contains(mouseX, mouseY);
         heartHoverFade = fade(heartHoverFade, heartHovered, delta, 13.0);
         if (RelayLyricsClient.preferences().isLyricsAnimations()) {
-            HEART_SCALE.setGoal(heartHovered ? .84 : 1);
+            HEART_SCALE.setGoal(heartHovered ? .88 : 1);
             HEART_SCALE.step(delta);
         } else {
             HEART_SCALE.snap(1);
         }
+        boolean likedTarget = now < heartFillPreviewUntil
+                ? heartPreviewLiked : RelayLyricsClient.music().snapshot().liked();
+        heartFillFade = RelayLyricsClient.preferences().isLyricsAnimations()
+                ? fade(heartFillFade, likedTarget, delta, 9) : (likedTarget ? 1 : 0);
         nextHoverFade = fade(nextHoverFade,
                 coverHovered && nextBounds.contains(mouseX, mouseY), delta, 13.0);
 
@@ -629,12 +640,12 @@ public final class InventoryLyricsController {
         }
 
         drawTransportControl(context, previousBounds, TransportIcon.PREVIOUS,
-                controlColor(previousHoverFade, coverControlsFade));
+                controlColor(previousHoverFade, coverControlsFade), clickScale(previousClickNanos));
         drawTransportControl(context, playPauseBounds,
                 RelayLyricsClient.music().snapshot().playing() ? TransportIcon.PAUSE : TransportIcon.PLAY,
-                controlColor(playPauseHoverFade, coverControlsFade));
+                controlColor(playPauseHoverFade, coverControlsFade), clickScale(playPauseClickNanos));
         drawTransportControl(context, nextBounds, TransportIcon.NEXT,
-                controlColor(nextHoverFade, coverControlsFade));
+                controlColor(nextHoverFade, coverControlsFade), clickScale(nextClickNanos));
         boolean liked = RelayLyricsClient.music().snapshot().liked();
         drawHeart(context, heartBounds, liked,
                 controlColor(heartHoverFade, coverControlsFade));
@@ -643,6 +654,14 @@ public final class InventoryLyricsController {
     private static double fade(double current, boolean hovered, double delta, double speed) {
         double target = hovered ? 1 : 0;
         return current + (target - current) * (1 - Math.exp(-delta * speed));
+    }
+
+    private static double clickScale(long startedNanos) {
+        if (!RelayLyricsClient.preferences().isLyricsAnimations()) return 1;
+        long elapsed = System.nanoTime() - startedNanos;
+        if (elapsed < 0 || elapsed >= 420_000_000L) return 1;
+        double phase = elapsed / 420_000_000.0;
+        return 1 + .27 * Math.sin(phase * Math.PI * 2) * Math.exp(-1.2 * phase);
     }
 
     private static int controlColor(double hover, double visibility) {
@@ -657,7 +676,7 @@ public final class InventoryLyricsController {
     }
 
     private static void drawTransportControl(DrawContext context, Bounds bounds,
-                                             TransportIcon icon, int color) {
+                                             TransportIcon icon, int color, double clickScale) {
         var image = switch (icon) {
             case PREVIOUS -> PopupIcons.PREVIOUS;
             case PLAY -> PopupIcons.PLAY;
@@ -665,7 +684,8 @@ public final class InventoryLyricsController {
             case NEXT -> PopupIcons.NEXT;
         };
         PopupIcons.drawCentered(context, image, bounds.x + bounds.width / 2,
-                bounds.y + bounds.height / 2, Math.max(9, bounds.height - 1), color);
+                bounds.y + bounds.height / 2,
+                Math.max(1, (int) Math.round(Math.max(8, bounds.height - 4) * clickScale)), color);
     }
 
     private static void drawHeart(DrawContext context, Bounds bounds,
@@ -673,14 +693,17 @@ public final class InventoryLyricsController {
         int centerX = bounds.x + bounds.width / 2;
         int centerY = bounds.y + bounds.height / 2;
         int size = Math.max(1, (int) Math.round(bounds.width
-                * Math.clamp(HEART_SCALE.position(), .70, 1.35)));
-        if (!filled && heartHoverFade > .001) {
+                * Math.clamp(HEART_SCALE.position() * clickScale(heartClickNanos), .68, 1.32)));
+        if (heartHoverFade > .001) {
             int alpha = Math.clamp((int) Math.round(107 * heartHoverFade * coverControlsFade), 0, 255);
             PopupIcons.drawCentered(context, PopupIcons.HEART, centerX, centerY, size,
                     alpha << 24 | 0x9BA3A8);
         }
-        PopupIcons.drawCentered(context, filled ? PopupIcons.HEART : PopupIcons.HEART_OUTLINE,
-                centerX, centerY, size, color);
+        if (heartFillFade > .001) {
+            PopupIcons.drawCentered(context, PopupIcons.HEART, centerX, centerY, size,
+                    fadeColor(0xFFFFFFFF, coverControlsFade * heartFillFade));
+        }
+        PopupIcons.drawCentered(context, PopupIcons.HEART_OUTLINE, centerX, centerY, size, color);
     }
 
     private static boolean runPopupControl(LyricsOverlay overlay, double mouseX, double mouseY) {
@@ -696,8 +719,8 @@ public final class InventoryLyricsController {
             }
             return true;
         }
-        if (control == LyricsOverlay.PopupControl.TOGGLE_HEART
-                && !RelayLyricsClient.music().snapshot().liked()) overlay.animatePopupHeartLike();
+        if (control == LyricsOverlay.PopupControl.TOGGLE_HEART) overlay.animatePopupHeartLike();
+        else overlay.animatePopupControl(control);
         MusicAction action = switch (control) {
             case TOGGLE_SHUFFLE -> MusicAction.TOGGLE_SHUFFLE;
             case PREVIOUS -> MusicAction.PREVIOUS;
@@ -740,8 +763,15 @@ public final class InventoryLyricsController {
             action = MusicAction.NEXT;
         }
         if (action == null) return false;
-        if (action == MusicAction.TOGGLE_HEART && !RelayLyricsClient.music().snapshot().liked()
-                && RelayLyricsClient.preferences().isLyricsAnimations()) HEART_SCALE.snap(1.27);
+        long clickedAt = System.nanoTime();
+        if (action == MusicAction.PREVIOUS) previousClickNanos = clickedAt;
+        else if (action == MusicAction.PLAY_PAUSE) playPauseClickNanos = clickedAt;
+        else if (action == MusicAction.NEXT) nextClickNanos = clickedAt;
+        else if (action == MusicAction.TOGGLE_HEART) {
+            heartClickNanos = clickedAt;
+            heartPreviewLiked = !RelayLyricsClient.music().snapshot().liked();
+            heartFillPreviewUntil = clickedAt + 1_000_000_000L;
+        }
         RelayLyricsClient.music().command(action);
         return true;
     }
