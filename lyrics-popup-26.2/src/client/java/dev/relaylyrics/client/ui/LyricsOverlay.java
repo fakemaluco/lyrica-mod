@@ -180,6 +180,7 @@ public final class LyricsOverlay implements AutoCloseable {
     private double popupPreviousHover;
     private double popupPlayPauseHover;
     private double popupHeartHover;
+    private final SpringValue popupHeartScale = new SpringValue(1, 5.5, .52);
     private double popupNextHover;
     private double popupShuffleHover;
     private double popupRepeatHover;
@@ -533,6 +534,10 @@ public final class LyricsOverlay implements AutoCloseable {
         return Math.clamp(Double.isFinite(volume) ? volume : 0, 0, 1);
     }
 
+    public void animatePopupHeartLike() {
+        if (preferences.isLyricsAnimations()) popupHeartScale.snap(1.27);
+    }
+
     public void previewPopupVolume(double value) {
         popupVolumePreview = Math.clamp(value, 0, 1);
         popupVolumePreviewNanos = System.nanoTime();
@@ -783,9 +788,9 @@ public final class LyricsOverlay implements AutoCloseable {
                                           double focus, double delta) {
         double visibility = renderingOverScreen ? smooth((focus - .06) / .82) : 0;
         int minimum = Math.min(cover.width(), cover.height());
-        if (minimum < 54) visibility = 0;
+        if (minimum < 84) visibility = 0;
 
-        int controlSize = Math.clamp(minimum / 12, 12, 23);
+        int controlSize = Math.clamp(minimum / 10, 14, 27);
         int controlGap = Math.clamp(minimum / 32, 3, 8);
         int controlsWidth = controlSize * 5 + controlGap * 4;
         int controlsX = cover.x() + (cover.width() - controlsWidth) / 2;
@@ -805,20 +810,20 @@ public final class LyricsOverlay implements AutoCloseable {
         ControlBounds settings = new ControlBounds(cover.x() + (cover.width() - utilitySize) / 2,
                 cover.y() + edge,
                 utilitySize, utilitySize);
-        int volumeHeight = Math.clamp(minimum * 2 / 5, 40, 84);
-        int volumeWidth = Math.clamp(minimum / 9, 16, 25);
+        int volumeHeight = Math.clamp(minimum * 6 / 25, 28, 50);
+        int volumeWidth = Math.clamp(minimum / 15, 10, 15);
         int volumeY = Math.max(cover.y() + edge,
                 Math.min(cover.y() + (cover.height() - volumeHeight) / 2,
                         controlsY - volumeHeight - 3));
         ControlBounds volume = new ControlBounds(cover.right() - edge - volumeWidth,
                 volumeY, volumeWidth, volumeHeight);
 
-        int heartSize = Math.clamp(minimum / 3, 30, 75);
-        int heartCenterY = cover.y() + Math.max(heartSize / 2 + 5,
-                (controlsY - cover.y()) / 2);
+        int heartSize = Math.clamp(minimum * 2 / 5, 34, 90);
+        int heartCenterY = Math.min(cover.y() + cover.height() / 2,
+                controlsY - heartSize / 2 - 4);
         ControlBounds heart = new ControlBounds(cover.x() + (cover.width() - heartSize) / 2,
                 heartCenterY - heartSize / 2, heartSize, heartSize);
-        int muteHeight = 20;
+        int muteHeight = Math.clamp(volumeHeight / 3, 11, 14);
         ControlBounds mute = new ControlBounds(volume.x(),
                 volume.y() + volume.height() - muteHeight, volume.width(), muteHeight);
         boolean volumeFits = minimum >= 84;
@@ -828,8 +833,14 @@ public final class LyricsOverlay implements AutoCloseable {
                 interactive && previous.contains(pointerX, pointerY), delta, 13);
         popupPlayPauseHover = fadeControl(popupPlayPauseHover,
                 interactive && playPause.contains(pointerX, pointerY), delta, 13);
-        popupHeartHover = fadeControl(popupHeartHover,
-                interactive && heart.contains(pointerX, pointerY), delta, 13);
+        boolean heartHovered = interactive && heart.contains(pointerX, pointerY);
+        popupHeartHover = fadeControl(popupHeartHover, heartHovered, delta, 13);
+        if (preferences.isLyricsAnimations()) {
+            popupHeartScale.setGoal(heartHovered ? .84 : 1);
+            popupHeartScale.step(delta);
+        } else {
+            popupHeartScale.snap(1);
+        }
         popupNextHover = fadeControl(popupNextHover,
                 interactive && next.contains(pointerX, pointerY), delta, 13);
         popupShuffleHover = fadeControl(popupShuffleHover,
@@ -881,7 +892,7 @@ public final class LyricsOverlay implements AutoCloseable {
         drawPopupRepeat(context, repeat,
                 popupControlColor(popupRepeatHover, visibility, !"off".equals(playback.repeatMode())));
         drawPopupHeart(context, heart, playback.liked(),
-                popupControlColor(popupHeartHover, visibility, true));
+                popupControlColor(popupHeartHover, visibility, true), visibility);
         drawPopupSettings(context, settings,
                 popupControlColor(popupSettingsHover, visibility, true),
                 morphRadius(preferences.isModernMode() ? utilitySize / 2 : 0));
@@ -984,19 +995,19 @@ public final class LyricsOverlay implements AutoCloseable {
             case NEXT -> PopupIcons.NEXT;
         };
         PopupIcons.drawCentered(context, image, bounds.x() + bounds.width() / 2,
-                bounds.y() + bounds.height() / 2, Math.clamp(bounds.height() - 7, 8, 18), color);
+                bounds.y() + bounds.height() / 2, Math.clamp(bounds.height() - 2, 10, 25), color);
     }
 
     private static void drawPopupShuffle(GuiGraphicsExtractor context, ControlBounds bounds, int color) {
         PopupIcons.drawCentered(context, PopupIcons.SHUFFLE,
                 bounds.x() + bounds.width() / 2, bounds.y() + bounds.height() / 2,
-                Math.clamp(bounds.height() - 9, 8, 16), color);
+                Math.clamp(bounds.height() - 3, 10, 24), color);
     }
 
     private static void drawPopupRepeat(GuiGraphicsExtractor context, ControlBounds bounds, int color) {
         PopupIcons.drawCentered(context, PopupIcons.REPEAT,
                 bounds.x() + bounds.width() / 2, bounds.y() + bounds.height() / 2,
-                Math.clamp(bounds.height() - 9, 8, 16), color);
+                Math.clamp(bounds.height() - 3, 10, 24), color);
     }
 
     private void drawPopupSettings(GuiGraphicsExtractor context, ControlBounds bounds, int color, int radius) {
@@ -1010,7 +1021,7 @@ public final class LyricsOverlay implements AutoCloseable {
         }
         PopupIcons.drawCentered(context, PopupIcons.SETTINGS,
                 bounds.x() + bounds.width() / 2, bounds.y() + bounds.height() / 2,
-                Math.clamp(bounds.width() - 6, 12, 23), color);
+                Math.clamp((int) Math.round((bounds.width() - 6) * .60), 8, 15), color);
     }
 
     private void renderPopupVolume(GuiGraphicsExtractor context, ControlBounds bounds,
@@ -1018,7 +1029,7 @@ public final class LyricsOverlay implements AutoCloseable {
         int expanded = Math.min(5, (int) Math.round(popupVolumeHover * 5));
         int width = bounds.width() + expanded;
         int x = bounds.x() - expanded;
-        int iconHeight = 20;
+        int iconHeight = Math.clamp(bounds.height() / 3, 11, 14);
         int iconTop = bounds.y() + bounds.height() - iconHeight;
         int trackY = bounds.y();
         int trackHeight = iconTop - trackY;
@@ -1028,7 +1039,7 @@ public final class LyricsOverlay implements AutoCloseable {
                 ? new ControlBounds(x, iconTop, width, iconHeight) : null;
 
         int outerRadius = morphRadius(preferences.isModernMode() ? width / 2 : 0);
-        int outerColor = multiplyAlpha(0xDFF3F5F5, visibility);
+        int outerColor = multiplyAlpha(0xD0FFFFFF, visibility);
         if (preferences.isModernMode()) {
             RoundedGui.smoothFill(context, x, bounds.y(), width, bounds.height(), outerRadius, outerColor);
         } else {
@@ -1036,7 +1047,7 @@ public final class LyricsOverlay implements AutoCloseable {
         }
 
         int trackRadius = outerRadius;
-        int railColor = multiplyAlpha(0x94616A70, visibility);
+        int railColor = multiplyAlpha(0x66FFFFFF, visibility);
         if (preferences.isModernMode()) {
             RoundedGui.smoothFill(context, x, trackY, width, trackHeight,
                     trackRadius, railColor);
@@ -1057,7 +1068,7 @@ public final class LyricsOverlay implements AutoCloseable {
         }
         PopupIcons.drawCentered(context, PopupIcons.volume(popupVolumeLevel()),
                 x + width / 2, iconTop + iconHeight / 2,
-                Math.min(17, width - 4),
+                Math.min(10, width - 2),
                 multiplyAlpha(0xFF4F585B, visibility * (.80 + .20 * popupMuteHover)));
     }
 
@@ -1080,11 +1091,18 @@ public final class LyricsOverlay implements AutoCloseable {
         }
     }
 
-    private static void drawPopupHeart(GuiGraphicsExtractor context, ControlBounds bounds,
-                                       boolean filled, int color) {
+    private void drawPopupHeart(GuiGraphicsExtractor context, ControlBounds bounds,
+                                boolean filled, int color, double visibility) {
+        int centerX = bounds.x() + bounds.width() / 2;
+        int centerY = bounds.y() + bounds.height() / 2;
+        int size = Math.max(1, (int) Math.round(bounds.width()
+                * Math.clamp(popupHeartScale.position(), .70, 1.35)));
+        if (!filled && popupHeartHover > .001) {
+            PopupIcons.drawCentered(context, PopupIcons.HEART, centerX, centerY, size,
+                    multiplyAlpha(0xFF9BA3A8, visibility * popupHeartHover * .42));
+        }
         PopupIcons.drawCentered(context, filled ? PopupIcons.HEART : PopupIcons.HEART_OUTLINE,
-                bounds.x() + bounds.width() / 2, bounds.y() + bounds.height() / 2,
-                bounds.width(), color);
+                centerX, centerY, size, color);
     }
 
     private static String formatTime(long millis) {
@@ -1135,6 +1153,7 @@ public final class LyricsOverlay implements AutoCloseable {
         popupSettingsButtonBounds = null;
         popupVolumeBounds = null;
         popupMuteButtonBounds = null;
+        popupHeartScale.snap(1);
         popupProgressBounds = null;
     }
 
@@ -2077,12 +2096,10 @@ public final class LyricsOverlay implements AutoCloseable {
         }
         double progress = interludeProgress(elapsed, gap);
         double visibility = interlude.visibility();
-        LyricsTextAlignment selectedAlignment = preferences.getLyricsAlignment();
-        boolean opposite = oppositeAligned(selectedAlignment, alignment);
         double dotScale = simpleLyricsDotScale();
-        int dotStep = Math.max(14, (int) Math.ceil(textWidth("•") * dotScale) + 7);
-        int dotsStartX = selectedAlignment == LyricsTextAlignment.CENTER
-                ? x + (width - dotStep * 2) / 2 : opposite ? x + width - dotStep * 3 - 8 : x + 24;
+        int dotStep = Math.max(11, (int) Math.ceil(textWidth("•") * dotScale) + 3);
+        int dotsStartX = alignment == LyricAlignment.OPPOSITE
+                ? x + width - dotStep * 3 - 12 : x + 12;
         int dotsY = (int) Math.clamp(dotsPosition, y + 14, y + height - 14);
         boolean simple = preferences.isSimpleLyricsMode();
         for (int index = 0; index < 3; index++) {
@@ -2100,7 +2117,7 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     private double simpleLyricsDotScale() {
-        return preferences.isSimpleLyricsMode() ? 1.55 : 1.9;
+        return preferences.isSimpleLyricsMode() ? 1.65 : 2.05;
     }
 
     /** A duet keeps its vocal side unless the user explicitly centers every lyric line. */

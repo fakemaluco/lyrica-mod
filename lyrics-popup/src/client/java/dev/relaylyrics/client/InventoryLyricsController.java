@@ -4,6 +4,7 @@ import dev.relaylyrics.client.ui.LyricsConfigScreen;
 import dev.relaylyrics.client.ui.GuiTransform;
 import dev.relaylyrics.client.ui.LyricsOverlay;
 import dev.relaylyrics.client.ui.PopupIcons;
+import dev.relaylyrics.client.music.SpringValue;
 import dev.relaylyrics.client.ui.LyricsOverlay.PopupBounds;
 import dev.relaylyrics.client.ui.PlatformCursor;
 import dev.relaylyrics.client.ui.RoundedGui;
@@ -52,6 +53,7 @@ public final class InventoryLyricsController {
     private static double previousHoverFade;
     private static double playPauseHoverFade;
     private static double heartHoverFade;
+    private static final SpringValue HEART_SCALE = new SpringValue(1, 5.5, .52);
     private static double nextHoverFade;
     private static double coverControlsFade;
     private static double progressHoverFade;
@@ -95,6 +97,7 @@ public final class InventoryLyricsController {
         previousHoverFade = 0;
         playPauseHoverFade = 0;
         heartHoverFade = 0;
+        HEART_SCALE.snap(1);
         nextHoverFade = 0;
         coverControlsFade = 0;
         if (inventoryPopupEnabled() && screen instanceof HandledScreen<?>) {
@@ -587,7 +590,7 @@ public final class InventoryLyricsController {
         Bounds nextBounds = new Bounds(controlsX + (controlSize + gap) * 2,
                 controlsY, controlSize, controlSize);
 
-        int heartSize = cover >= 68 ? 30 : cover >= 46 ? 21 : 12;
+        int heartSize = cover >= 68 ? 34 : cover >= 46 ? 25 : 14;
         Bounds heartBounds = new Bounds(x + (cover - heartSize) / 2,
                 y + (cover - heartSize) / 2 - Math.max(1, cover / 18), heartSize, heartSize);
 
@@ -599,8 +602,14 @@ public final class InventoryLyricsController {
                 coverHovered && previousBounds.contains(mouseX, mouseY), delta, 13.0);
         playPauseHoverFade = fade(playPauseHoverFade,
                 coverHovered && playPauseBounds.contains(mouseX, mouseY), delta, 13.0);
-        heartHoverFade = fade(heartHoverFade,
-                coverHovered && heartBounds.contains(mouseX, mouseY), delta, 13.0);
+        boolean heartHovered = coverHovered && heartBounds.contains(mouseX, mouseY);
+        heartHoverFade = fade(heartHoverFade, heartHovered, delta, 13.0);
+        if (RelayLyricsClient.preferences().isLyricsAnimations()) {
+            HEART_SCALE.setGoal(heartHovered ? .84 : 1);
+            HEART_SCALE.step(delta);
+        } else {
+            HEART_SCALE.snap(1);
+        }
         nextHoverFade = fade(nextHoverFade,
                 coverHovered && nextBounds.contains(mouseX, mouseY), delta, 13.0);
 
@@ -656,14 +665,22 @@ public final class InventoryLyricsController {
             case NEXT -> PopupIcons.NEXT;
         };
         PopupIcons.drawCentered(context, image, bounds.x + bounds.width / 2,
-                bounds.y + bounds.height / 2, Math.max(8, bounds.height - 4), color);
+                bounds.y + bounds.height / 2, Math.max(9, bounds.height - 1), color);
     }
 
     private static void drawHeart(DrawContext context, Bounds bounds,
                                   boolean filled, int color) {
+        int centerX = bounds.x + bounds.width / 2;
+        int centerY = bounds.y + bounds.height / 2;
+        int size = Math.max(1, (int) Math.round(bounds.width
+                * Math.clamp(HEART_SCALE.position(), .70, 1.35)));
+        if (!filled && heartHoverFade > .001) {
+            int alpha = Math.clamp((int) Math.round(107 * heartHoverFade * coverControlsFade), 0, 255);
+            PopupIcons.drawCentered(context, PopupIcons.HEART, centerX, centerY, size,
+                    alpha << 24 | 0x9BA3A8);
+        }
         PopupIcons.drawCentered(context, filled ? PopupIcons.HEART : PopupIcons.HEART_OUTLINE,
-                bounds.x + bounds.width / 2, bounds.y + bounds.height / 2,
-                bounds.width, color);
+                centerX, centerY, size, color);
     }
 
     private static boolean runPopupControl(LyricsOverlay overlay, double mouseX, double mouseY) {
@@ -679,6 +696,8 @@ public final class InventoryLyricsController {
             }
             return true;
         }
+        if (control == LyricsOverlay.PopupControl.TOGGLE_HEART
+                && !RelayLyricsClient.music().snapshot().liked()) overlay.animatePopupHeartLike();
         MusicAction action = switch (control) {
             case TOGGLE_SHUFFLE -> MusicAction.TOGGLE_SHUFFLE;
             case PREVIOUS -> MusicAction.PREVIOUS;
@@ -721,6 +740,8 @@ public final class InventoryLyricsController {
             action = MusicAction.NEXT;
         }
         if (action == null) return false;
+        if (action == MusicAction.TOGGLE_HEART && !RelayLyricsClient.music().snapshot().liked()
+                && RelayLyricsClient.preferences().isLyricsAnimations()) HEART_SCALE.snap(1.27);
         RelayLyricsClient.music().command(action);
         return true;
     }
