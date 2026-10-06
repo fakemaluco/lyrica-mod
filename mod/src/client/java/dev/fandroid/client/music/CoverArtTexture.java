@@ -38,6 +38,7 @@ public final class CoverArtTexture implements AutoCloseable {
     private static final int MAX_IMAGE_BYTES = 8 * 1024 * 1024;
     private static final int MAX_DIMENSION = 4_096;
     private static final long COVER_TRANSITION_NANOS = 1_500_000_000L;
+    private static final AtomicLong TEXTURE_INSTANCE_GENERATION = new AtomicLong();
     private static final long MAX_ROUNDED_CACHE_BYTES = 32L * 1024 * 1024;
     private static final int MAX_ROUNDED_CACHE_ENTRIES = 40;
     private static final long ROUNDED_DRAW_GRACE_NANOS = 100_000_000L;
@@ -45,6 +46,7 @@ public final class CoverArtTexture implements AutoCloseable {
             .followRedirects(HttpClient.Redirect.NORMAL).build();
     private final Path cache = FabricLoader.getInstance().getConfigDir().resolve("fandroid/music/artwork");
     private final AtomicLong generation = new AtomicLong();
+    private final long textureInstanceId = TEXTURE_INSTANCE_GENERATION.incrementAndGet();
     private final FluidBackdrop fluidBackdrop = new FluidBackdrop();
     private final EnumMap<Fallback, TextureState> fallbackTextures = new EnumMap<>(Fallback.class);
     private volatile String requestedUrl;
@@ -313,7 +315,8 @@ public final class CoverArtTexture implements AutoCloseable {
         }
         RoundedCover rounded = roundedCover(state, width, height, cornerRadius);
         if (rounded == null) {
-            drawCover(context, state, x, y, width, height, opacity, brightness);
+            RoundedGui.clipped(context, x, y, width, height, cornerRadius,
+                    () -> drawCover(context, state, x, y, width, height, opacity, brightness));
             return true;
         }
         PlatformTextures.draw(context, rounded.id(), x, y, width, height,
@@ -417,7 +420,8 @@ public final class CoverArtTexture implements AutoCloseable {
             PaletteData palette = extractPalette(image);
             NativeImageBackedTexture nativeTexture = PlatformTextures.fromImage(
                     "Lyrica " + type.name().toLowerCase(Locale.ROOT) + " cover", image);
-            Identifier id = PlatformTextures.register("lyrica_cover_" + type.name().toLowerCase(Locale.ROOT),
+            Identifier id = PlatformTextures.register("lyrica_cover_" + textureInstanceId + "_"
+                            + type.name().toLowerCase(Locale.ROOT),
                     nativeTexture);
             TextureState previous = fallbackTextures.put(type, new TextureState(id, image,
                     image.getWidth(), image.getHeight(), palette.accent(), palette.colors()));
@@ -548,7 +552,8 @@ public final class CoverArtTexture implements AutoCloseable {
         int width = image.getWidth();
         int height = image.getHeight();
         NativeImageBackedTexture nativeTexture = PlatformTextures.fromImage("FanDroid cover", image);
-        Identifier id = PlatformTextures.register("fandroid_cover_" + expectedGeneration, nativeTexture);
+        Identifier id = PlatformTextures.register("fandroid_cover_" + textureInstanceId + "_"
+                + expectedGeneration, nativeTexture);
         TextureState discarded = previousTexture;
         TextureState outgoing = texture;
         previousTexture = outgoing;
@@ -965,6 +970,7 @@ public final class CoverArtTexture implements AutoCloseable {
         private static final int SIZE = 96;
         private static final int MAX_COMPOSITE = 1024;
         private static final long FRAME_NANOS = 33_333_333L;
+        private static final AtomicLong COMPOSITE_GENERATION = new AtomicLong();
         private static final double MAX_HUE_SHIFT = 80.0;
         private static final double AUTO_HUE_RATE = 150.0;
         private NativeImage fieldImage;
@@ -1033,7 +1039,8 @@ public final class CoverArtTexture implements AutoCloseable {
             }
             composite = PlatformTextures.empty("FanDroid fluid composite",
                     compositeWidth, compositeHeight);
-            compositeId = PlatformTextures.register("fandroid_fluid_composite", composite);
+            compositeId = PlatformTextures.register("fandroid_fluid_composite_"
+                    + COMPOSITE_GENERATION.incrementAndGet(), composite);
             this.compositeWidth = compositeWidth;
             this.compositeHeight = compositeHeight;
             this.compositeRadius = -1;
