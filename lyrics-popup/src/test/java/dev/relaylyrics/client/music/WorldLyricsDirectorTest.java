@@ -7,20 +7,20 @@ import java.util.EnumSet;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class WorldLyricsDirectorTest {
-    @Test void terrainAndIntroStylesHaveDistinctSpatialEntrances() {
-        var ground = WorldLyricsDirector.Preset.GROUND;
-        var intro = WorldLyricsDirector.Preset.INTRO;
+    @Test void signpostAndMonolithHaveDistinctSpatialEntrances() {
+        var ground = WorldLyricsDirector.Preset.SIGN;
+        var monolith = WorldLyricsDirector.Preset.MONOLITH;
         assertThat(ground.entrance).isEqualTo(WorldLyricsDirector.Entrance.RISE);
-        assertThat(intro.entrance).isEqualTo(WorldLyricsDirector.Entrance.LAND);
-        assertThat(intro.depth).isGreaterThan(ground.depth);
-        var settings = new WorldLyricsDirector.Settings(false, intro,
+        assertThat(monolith.entrance).isEqualTo(WorldLyricsDirector.Entrance.LAND);
+        assertThat(monolith.depth).isGreaterThan(ground.depth);
+        var settings = new WorldLyricsDirector.Settings(false, monolith,
                 EnumSet.allOf(WorldLyricsDirector.Preset.class), WorldLyricsDirector.Variation.MEDIUM,
                 6, 192, 1, .65, .32, .10, 1, 1, false, WorldLyricsDirector.Quality.MEDIUM);
         assertThat(WorldLyricsDirector.choose(0, "opening", 1, 1200, false, false, 0, settings).preset())
-                .isEqualTo(intro);
+                .isEqualTo(monolith);
     }
     private static WorldLyricsDirector.Settings distantSettings() {
-        return new WorldLyricsDirector.Settings(true, WorldLyricsDirector.Preset.CINEMA,
+        return new WorldLyricsDirector.Settings(true, WorldLyricsDirector.Preset.SIGN,
                 EnumSet.allOf(WorldLyricsDirector.Preset.class), WorldLyricsDirector.Variation.MEDIUM,
                 6, 192, 1, .65, .32, .10, 1, 1, false, WorldLyricsDirector.Quality.MEDIUM);
     }
@@ -65,7 +65,7 @@ class WorldLyricsDirectorTest {
         assertThat(far / near).isBetween(9.5, 10.5);
     }
     private static WorldLyricsDirector.Settings settings(boolean automatic) {
-        return new WorldLyricsDirector.Settings(automatic, WorldLyricsDirector.Preset.CINEMA,
+        return new WorldLyricsDirector.Settings(automatic, WorldLyricsDirector.Preset.SIGN,
                 EnumSet.allOf(WorldLyricsDirector.Preset.class), WorldLyricsDirector.Variation.MEDIUM,
                 3, 10, 1, .65, .32, .10, 1, 1, false, WorldLyricsDirector.Quality.MEDIUM);
     }
@@ -75,7 +75,7 @@ class WorldLyricsDirectorTest {
         var second = WorldLyricsDirector.choose(4_000, "same phrase", 2, 2_000, false, false, .3, settings(true));
         assertThat(second.preset()).isEqualTo(first.preset());
         assertThat(WorldLyricsDirector.choose(4_000, "same phrase", 2, 2_000, false, false, .3,
-                settings(false)).preset()).isEqualTo(WorldLyricsDirector.Preset.CINEMA);
+                settings(false)).preset()).isEqualTo(WorldLyricsDirector.Preset.SIGN);
     }
 
     @Test void speedMovesNewPhrasesFartherWithinConfiguredLimits() {
@@ -86,17 +86,17 @@ class WorldLyricsDirectorTest {
         assertThat(WorldLyricsDirector.distance(1, true, settings)).isEqualTo(10);
     }
 
-    @Test void wallsUseSculptureInsteadOfCurvedPlacements() {
-        var onlyArc = new WorldLyricsDirector.Settings(true, WorldLyricsDirector.Preset.ARC,
-                EnumSet.of(WorldLyricsDirector.Preset.ARC), WorldLyricsDirector.Variation.HIGH,
+    @Test void unsupportedWallSelectionFallsBackToMural() {
+        var onlyFlight = new WorldLyricsDirector.Settings(true, WorldLyricsDirector.Preset.FLIGHT,
+                EnumSet.of(WorldLyricsDirector.Preset.FLIGHT), WorldLyricsDirector.Variation.HIGH,
                 3, 10, 1, .7, .3, .1, 1, 1, false, WorldLyricsDirector.Quality.HIGH);
-        var result = WorldLyricsDirector.choose(0, "wall", 1, 3_000, false, true, 0, onlyArc);
-        assertThat(result.preset()).isEqualTo(WorldLyricsDirector.Preset.SCULPTURE);
+        var result = WorldLyricsDirector.choose(0, "wall", 1, 3_000, false, true, 0, onlyFlight);
+        assertThat(result.preset()).isEqualTo(WorldLyricsDirector.Preset.MURAL);
         assertThat(result.depthLayers()).isEqualTo(14);
     }
 
     @Test void shortPhrasesAvoidSlowDepthPulse() {
-        var sculpture = new WorldLyricsDirector.Settings(false, WorldLyricsDirector.Preset.SCULPTURE,
+        var sculpture = new WorldLyricsDirector.Settings(false, WorldLyricsDirector.Preset.MONOLITH,
                 EnumSet.allOf(WorldLyricsDirector.Preset.class), WorldLyricsDirector.Variation.MEDIUM,
                 3, 10, 1, .6, .3, .1, 1, 1, false, WorldLyricsDirector.Quality.MEDIUM);
         assertThat(WorldLyricsDirector.choose(0, "quick words", 4, 600, false, false, 0, sculpture).motion())
@@ -113,7 +113,7 @@ class WorldLyricsDirectorTest {
 
     @Test void presetDepthsRemainDistinctAtTheDefaultDepthControl() {
         var cinema = WorldLyricsDirector.choose(0, "text", 1, 2_000, false, false, 0, settings(false));
-        var sculptureSettings = new WorldLyricsDirector.Settings(false, WorldLyricsDirector.Preset.SCULPTURE,
+        var sculptureSettings = new WorldLyricsDirector.Settings(false, WorldLyricsDirector.Preset.MONOLITH,
                 EnumSet.allOf(WorldLyricsDirector.Preset.class), WorldLyricsDirector.Variation.MEDIUM,
                 3, 10, 1, .65, .32, .10, 1, 1, false, WorldLyricsDirector.Quality.MEDIUM);
         var sculpture = WorldLyricsDirector.choose(0, "text", 1, 2_000, false, false, 0, sculptureSettings);
@@ -126,26 +126,26 @@ class WorldLyricsDirectorTest {
         assertThat(result.preset()).isEqualTo(WorldLyricsDirector.Preset.FLIGHT);
     }
 
-    @Test void wallStylesOnlyEnterAutomaticRotationOnWalls() {
+    @Test void wallStylesCanBeProposedBeforeProbingAndThenConfirmedOnWalls() {
         var settings = new WorldLyricsDirector.Settings(true, WorldLyricsDirector.Preset.MURAL,
                 EnumSet.of(WorldLyricsDirector.Preset.MURAL, WorldLyricsDirector.Preset.ENGRAVED),
                 WorldLyricsDirector.Variation.HIGH, 3, 10, 1, .6, .3, .1, 1, 1,
                 false, WorldLyricsDirector.Quality.MEDIUM);
         assertThat(WorldLyricsDirector.choose(0, "test", 1, 1000, false, false, 0, settings).preset())
-                .isEqualTo(WorldLyricsDirector.Preset.CINEMA);
+                .isIn(WorldLyricsDirector.Preset.MURAL, WorldLyricsDirector.Preset.ENGRAVED);
         assertThat(WorldLyricsDirector.choose(0, "test", 1, 1000, false, true, 0, settings).preset())
                 .isIn(WorldLyricsDirector.Preset.MURAL, WorldLyricsDirector.Preset.ENGRAVED);
     }
 
     @Test void walkingSeeksSurfacesWhileSprintAndFlightUseTheHorizon() {
-        var preset = WorldLyricsDirector.Preset.CINEMA;
+        var preset = WorldLyricsDirector.Preset.SIGN;
         assertThat(WorldLyricsDirector.seekSurface(preset, WorldLyricsDirector.SurfacePreference.SURFACES,
                 4.3, false, true)).isTrue();
         assertThat(WorldLyricsDirector.seekSurface(preset, WorldLyricsDirector.SurfacePreference.SURFACES,
                 5.6, false, true)).isFalse();
         assertThat(WorldLyricsDirector.seekSurface(preset, WorldLyricsDirector.SurfacePreference.SURFACES,
                 30, true, true)).isFalse();
-        assertThat(WorldLyricsDirector.seekSurface(WorldLyricsDirector.Preset.GROUND,
+        assertThat(WorldLyricsDirector.seekSurface(WorldLyricsDirector.Preset.SIGN,
                 WorldLyricsDirector.SurfacePreference.HORIZON, 5.6, false, false)).isTrue();
         assertThat(WorldLyricsDirector.seekSurface(WorldLyricsDirector.Preset.LANDSCAPE,
                 WorldLyricsDirector.SurfacePreference.SURFACES, 0, false, true)).isFalse();

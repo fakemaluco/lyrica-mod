@@ -8,12 +8,12 @@ intensidade e reação são Normal e ligado; o recurso 3D continua opt-in.
 
 ## Direção visual e controles novos
 
-O diretor automático escolhe entre Clássico, Cinema, Escultura, Arco, Cascata, Voo,
-Paisagem, Letreiro, Monólito, Mural e Gravado
-quando uma nova frase nasce. O preset da frase não muda até ela sair. Frases
+O diretor automático escolhe entre Letreiro, Mural, Gravado, Monólito, Paisagem e Voo
+quando uma nova frase nasce. A apresentação permanece durante a página cantada. Frases
 simultâneas compartilham a mesma composição. É possível desligar o diretor, escolher
 um preset fixo, selecionar quais participam da rotação e ajustar sua frequência.
-Configurações antigas continuam no estilo Clássico; uma primeira ativação usa Cinema.
+Configurações antigas mantêm a ativação, a fonte e os ajustes gerais, mas recebem os
+seis novos estilos e o diretor contextual. Não há um segundo motor legado.
 Letreiro mantém uma composição menor junto ao solo para quem está a pé e se ergue
 sem atravessar o bloco. Monólito usa profundidade e chanfro mais fortes para frases
 curtas; Mural desliza junto à parede; Gravado usa um relevo raso e só é escolhido
@@ -30,9 +30,11 @@ para manter o tamanho angular do texto. As posições laterais, diagonais e em
 arco são relativas à mira no instante em que a frase aparece, mantendo-se fixas no
 mundo. A orientação considera a inclinação da câmera e a trajetória de voo. Quando
 uma posição lateral é bloqueada, usa-se a posição frontal segura. Paredes próximas
-não são escolhidas durante corrida ou voo na direção automática. Se uma aceleração
-fizer o jogador alcançar a frase antes do fim, o grupo desliza suavemente até uma
-nova âncora fixa mais adiante. A trajetória considera o terreno entre os pontos;
+não são escolhidas durante corrida ou voo na direção automática. Uma frase longa
+sincronizada pode colocar sua próxima página mais adiante na virada, enquanto a
+página anterior permanece fixa durante o cruzamento. Se uma aceleração fizer o
+jogador alcançar a página atual, ela desliza até uma nova âncora. A trajetória
+considera o terreno entre os pontos;
 não acompanha a câmera a cada quadro. Pausar a música congela esse deslocamento.
 Ao criar uma âncora livre, o terreno sob o centro e as extremidades é medido e a
 composição sobe quando seu limite inferior encostaria no chão.
@@ -44,7 +46,8 @@ Há controles de tamanho, distância, sensibilidade, raio, região livre da mira
 profundidade, cores frontal e lateral, material de borda (automático, pedra, metal
 ou luz suave), chanfro e sua largura, sombra de contato, iluminação do mundo,
 entrada automática ou fixa, força e velocidade das animações, rastros e qualidade.
-Há restauração por grupo e um botão para recriar a frase atual.
+Há restauração por grupo e um botão que mostra uma frase de demonstração temporária
+no mundo, mesmo sem música com letra sincronizada.
 
 A profundidade usa uma malha fechada a partir da máscara dos glifos realmente
 renderizados pelo Minecraft. Há frente, verso e faces laterais apenas no contorno
@@ -52,14 +55,16 @@ exposto, incluindo os contornos internos de letras como O e B. Retângulos vizin
 são unidos; não existem paredes internas entre pixels adjacentes. Fontes bitmap
 preservam o contorno pixelado, enquanto fontes com sobreamostragem usam a resolução
 do atlas. A frente branca tem orientação voltada ao jogador após a escala vertical
-do texto, e é desenhada depois do verso e das laterais. O preenchimento sincronizado
+do texto. A face final usa a própria fonte modelada pelo Minecraft, desenhada à
+frente do volume para preservar acentos e legibilidade. O preenchimento sincronizado
 também corta a geometria lateral.
 
 A leitura do atlas ocorre somente na preparação pendente de novos textos, até duas
 capturas por tick; a construção da malha usa um worker. O desenho consulta o cache,
-limitado a 256 textos e 180 mil faces. Recarregar recursos ou trocar fontes invalida
+limitado a 256 textos e aproximadamente 16 MiB. As máscaras de captura não ficam no
+cache depois da construção. Recarregar recursos ou trocar fontes invalida
 as malhas. Enquanto uma malha não estiver pronta, usa-se texto plano. Os testes
-de integração abriram clientes separados 1.21.1 e 1.21.11, com fontes carregadas e
+de integração abriram clientes separados 1.21.1, 1.21.11 e 26.2, com fontes carregadas e
 contexto OpenGL real, e validaram captura de glifos latinos, acentos e árabe.
 
 Os controles **Tamanho no mundo** (75–200%, padrão 120%), **Colar em paredes
@@ -71,8 +76,8 @@ aba Mundo 3D. Use a roda do mouse ou Page Up/Down se as opções excederem a alt
 - Busca automática de paredes: um leque de 15 raios na direção da câmera, até
   12 blocos, seguido por no máximo duas grades de 11×7 amostras. Só faces sólidas,
   planas, visíveis e com área suficiente são escolhidas. Buracos e bordas reduzem
-  o retângulo útil. Se nada servir, a frase aparece à frente, próxima da altura
-  dos olhos e antes de obstáculos detectados.
+  o retângulo útil. Se nada servir, a busca tenta uma âncora aérea à frente e
+  antes de obstáculos detectados. Se nem ela couber, a frase não atravessa blocos.
 - Texto na parede fica a 0,065 bloco da face, com movimento de profundidade
   limitado a 0,015 bloco e inclinação de até 2 graus.
 - Frases curtas recebem letras maiores. A escala considera distância inicial,
@@ -111,7 +116,7 @@ aba Mundo 3D. Use a roda do mouse ou Page Up/Down se as opções excederem a alt
 ## Verificação automatizada
 
 ```powershell
-./gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build --console=plain
+./gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build :lyrics-popup-26.2:build --console=plain
 ```
 
 Cobertura: movimentos curtos e sustentados, sílabas, limites combinados, paredes,
@@ -136,21 +141,22 @@ Remove-Item Env:LYRICA_WORLD_BENCHMARK
 A sonda executa 240 cálculos de movimento e três recortes de quad por quadro,
 com 1.000 quadros de aquecimento e 2.000 amostras. Medição local:
 
-| Versão | Mediana | p95 |
-| --- | --- | --- |
-| 1.21.1 | 0,013 ms | 0,018 ms |
-| 1.21.11 | 0,018 ms | 0,029 ms |
+| Versão | Mediana anterior | p95 anterior | Mediana atual | p95 atual |
+| --- | --- | --- | --- | --- |
+| 1.21.1 | 0,013 ms | 0,018 ms | 0,013 ms | 0,019 ms |
+| 1.21.11 | 0,018 ms | 0,029 ms | 0,013 ms | 0,020 ms |
 
 Esses números excluem TextRenderer, layout, raycasts, envio à GPU e renderização
 do mundo. Não representam FPS nem uma medição completa de renderização.
 
-## Validação visual pendente no jogo
+## Validação visual e medição de quadros pendentes
 
-Executar em ambas as versões, com letra sincronizada e uma faixa sem tempos por
-palavra. Os clientes de desenvolvimento validam automaticamente os atlas OpenGL,
-as faces extrudadas, o preenchimento e a visibilidade condicional da aba. A leitura
-em um mundo durante corrida/elytra e a medição completa de frametime ainda precisam
-de validação visual; as sondas não medem o custo total de renderização.
+O cliente 1.21.1 foi aberto em um mundo plano com letra sincronizada: a frase apareceu
+no cenário e a face da fonte ficou à frente do volume. As sondas opcionais com contexto
+OpenGL validaram atlas, faces extrudadas, preenchimento e aba condicional nas três
+versões. A inspeção das seis apresentações em 1.21.11 e 26.2, corrida/elytra e a
+medição completa de frametime ainda precisam ser executadas; a sonda de CPU não
+mede o custo total de renderização.
 
 1. Observar palavras rápidas, sílabas e notas longas nas três intensidades:
    leitura contínua, sem saltos de espaçamento ou flashes ao desaparecer.

@@ -62,7 +62,7 @@ public final class ClientPreferences {
     private int worldLyricsPresetMask = (1 << WorldLyricsDirector.Preset.values().length) - 1;
     private double worldLyricsMinimumDistance = 6;
     private double worldLyricsMaximumDistance = 192;
-    private int worldLyricsPositionVersion = 4;
+    private int worldLyricsPositionVersion = 5;
     private WorldLyricsDirector.SurfacePreference worldLyricsSurfacePreference = WorldLyricsDirector.SurfacePreference.CONTEXT;
     private WorldLyricsDirector.Material worldLyricsMaterial = WorldLyricsDirector.Material.AUTO;
     private WorldLyricsDirector.Entrance worldLyricsEntranceOverride;
@@ -80,6 +80,8 @@ public final class ClientPreferences {
     private int worldLyricsSideColor = 0x56647A;
     private int worldLyricsFaceColor = 0xFFFFFF;
     private boolean lyricsAnimations = true;
+    private int lyricsAnimationFrameRate;
+    private boolean lyricsLoadingSkeleton;
     private boolean lyricsBorder = true;
     private boolean inventoryPopup = true;
     private boolean inventoryNowPlaying = true;
@@ -260,7 +262,7 @@ public final class ClientPreferences {
     public void setWorldLyrics(boolean value) { worldLyrics = value; }
     public void enableWorldLyricsWithModernDefaults() {
         if (worldLyricsPreset == null) {
-            worldLyricsPreset = WorldLyricsDirector.Preset.CINEMA;
+            worldLyricsPreset = WorldLyricsDirector.Preset.SIGN;
             worldLyricsAutomatic = true;
         }
         worldLyrics = true;
@@ -268,23 +270,25 @@ public final class ClientPreferences {
 
     static ClientPreferences decode(byte[] bytes) throws java.io.IOException {
         var json = ProtocolCodec.mapper().readTree(bytes);
+        boolean oldWorldStyle = json.path("worldLyricsPositionVersion").asInt(0) < 5;
+        if (oldWorldStyle) {
+            // Old enum names must be removed before Jackson reads the new six-style enum.
+            ((com.fasterxml.jackson.databind.node.ObjectNode) json).remove("worldLyricsPreset");
+            ((com.fasterxml.jackson.databind.node.ObjectNode) json).remove("worldLyricsPresetMask");
+            ((com.fasterxml.jackson.databind.node.ObjectNode) json).remove("enabledWorldLyricsPresets");
+        }
         ClientPreferences result = ProtocolCodec.mapper().treeToValue(json, ClientPreferences.class);
-        if (!json.has("worldLyricsPresetMask") && result.worldLyrics)
-            result.worldLyricsPresetMask = (1 << WorldLyricsDirector.Preset.MURAL.ordinal()) - 1;
-        if (!json.has("worldLyricsPositionVersion") && result.worldLyricsMaximumDistance <= 16) {
-            result.worldLyricsMinimumDistance = 6;
-            result.worldLyricsMaximumDistance = 192;
-        }
-        if (!json.has("worldLyricsPositionVersion") && result.worldLyricsPresetMask == 63)
-            result.worldLyricsPresetMask |= 1 << WorldLyricsDirector.Preset.LANDSCAPE.ordinal();
-        if (result.worldLyricsPositionVersion < 3 && result.worldLyricsPresetMask == 127)
-            result.worldLyricsPresetMask |= 1 << WorldLyricsDirector.Preset.GROUND.ordinal()
-                    | 1 << WorldLyricsDirector.Preset.INTRO.ordinal();
-        if (result.worldLyricsPositionVersion < 4) {
-            // Existing masks retain their explicit choices; new styles are opt-in for those users.
+        if (oldWorldStyle) {
+            result.worldLyricsPreset = WorldLyricsDirector.Preset.SIGN;
+            result.worldLyricsAutomatic = true;
+            result.worldLyricsPresetMask = (1 << WorldLyricsDirector.Preset.values().length) - 1;
             result.worldLyricsSurfacePreference = WorldLyricsDirector.SurfacePreference.CONTEXT;
+            if (result.worldLyricsMaximumDistance <= 16) {
+                result.worldLyricsMinimumDistance = 6;
+                result.worldLyricsMaximumDistance = 192;
+            }
         }
-        result.worldLyricsPositionVersion = 4;
+        result.worldLyricsPositionVersion = 5;
         return result;
     }
     public int getWorldLyricsPositionVersion() { return worldLyricsPositionVersion; }
@@ -325,17 +329,16 @@ public final class ClientPreferences {
     public boolean isWorldLyricsCinematic() { return worldLyricsCinematic; }
     public void setWorldLyricsCinematic(boolean value) { worldLyricsCinematic = value; }
     public boolean isWorldLyricsAutomatic() {
-        return worldLyricsAutomatic == null ? worldLyricsPreset != null || !worldLyrics : worldLyricsAutomatic;
+        return worldLyricsAutomatic == null || worldLyricsAutomatic;
     }
     public void setWorldLyricsAutomatic(boolean value) { worldLyricsAutomatic = value; }
     public WorldLyricsDirector.Preset getWorldLyricsPreset() {
         return worldLyricsPreset == null
-                ? (worldLyrics ? WorldLyricsDirector.Preset.CLASSIC : WorldLyricsDirector.Preset.CINEMA)
+                ? WorldLyricsDirector.Preset.SIGN
                 : worldLyricsPreset;
     }
-    public boolean isLegacyWorldLyricsConfiguration() { return worldLyrics && worldLyricsPreset == null; }
     public void setWorldLyricsPreset(WorldLyricsDirector.Preset value) {
-        worldLyricsPreset = value == null ? WorldLyricsDirector.Preset.CINEMA : value;
+        worldLyricsPreset = value == null ? WorldLyricsDirector.Preset.SIGN : value;
     }
     public WorldLyricsDirector.Variation getWorldLyricsVariation() {
         return worldLyricsVariation == null ? WorldLyricsDirector.Variation.MEDIUM : worldLyricsVariation;
@@ -428,6 +431,10 @@ public final class ClientPreferences {
     public void setLyricsBlurStrength(int value) { lyricsBlurStrength = Math.clamp(value, 0, 3); }
     public boolean isLyricsAnimations() { return lyricsAnimations; }
     public void setLyricsAnimations(boolean value) { lyricsAnimations = value; }
+    public int getLyricsAnimationFrameRate() { return lyricsAnimationFrameRate == 30 || lyricsAnimationFrameRate == 60 ? lyricsAnimationFrameRate : 0; }
+    public void setLyricsAnimationFrameRate(int value) { lyricsAnimationFrameRate = value == 30 || value == 60 ? value : 0; }
+    public boolean isLyricsLoadingSkeleton() { return lyricsLoadingSkeleton; }
+    public void setLyricsLoadingSkeleton(boolean value) { lyricsLoadingSkeleton = value; }
     public boolean isLyricsBorder() { return lyricsBorder; }
     public void setLyricsBorder(boolean value) { lyricsBorder = value; }
     public boolean isInventoryPopup() { return inventoryPopup; }

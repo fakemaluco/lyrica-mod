@@ -93,6 +93,15 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
                         () -> preferences.setInventoryNowPlaying(false));
                 y = addToggle(y, "config.relaylyrics.animations", preferences::isLyricsAnimations,
                         () -> preferences.setLyricsAnimations(true), () -> preferences.setLyricsAnimations(false));
+                y = addRow(y, Text.translatable("config.relaylyrics.animation_fps"),
+                        () -> Text.translatable("config.relaylyrics.animation_fps." + preferences.getLyricsAnimationFrameRate()),
+                        () -> preferences.setLyricsAnimationFrameRate(preferences.getLyricsAnimationFrameRate() == 0 ? 30
+                                : preferences.getLyricsAnimationFrameRate() == 30 ? 60 : 0),
+                        () -> preferences.setLyricsAnimationFrameRate(preferences.getLyricsAnimationFrameRate() == 0 ? 60
+                                : preferences.getLyricsAnimationFrameRate() == 60 ? 30 : 0));
+                y = addToggle(y, "config.relaylyrics.loading_skeleton", preferences::isLyricsLoadingSkeleton,
+                        () -> preferences.setLyricsLoadingSkeleton(true),
+                        () -> preferences.setLyricsLoadingSkeleton(false));
                 y = addRow(y, Text.translatable("config.relaylyrics.inventory_editor"),
                         () -> Text.translatable(preferences.isInventoryPopup()
                                 ? "config.relaylyrics.inventory_editor.value" : "options.off"), null, null);
@@ -656,7 +665,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase {
         preferences.setWorldLyricsAutoWalls(true);
         preferences.setWorldLyricsCinematic(true);
         preferences.setWorldLyricsAutomatic(true);
-        preferences.setWorldLyricsPreset(WorldLyricsDirector.Preset.CINEMA);
+        preferences.setWorldLyricsPreset(WorldLyricsDirector.Preset.SIGN);
         preferences.setWorldLyricsVariation(WorldLyricsDirector.Variation.MEDIUM);
         preferences.setWorldLyricsQuality(WorldLyricsDirector.Quality.MEDIUM);
         for (var preset : WorldLyricsDirector.Preset.values()) preferences.setWorldLyricsPresetEnabled(preset, true);

@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
+import java.util.OptionalDouble;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -129,6 +130,7 @@ public final class LyricsOverlay implements AutoCloseable {
     private volatile PlaybackSnapshot playback = PlaybackSnapshot.unavailable();
     private volatile String emptyMessage = ui("lyrics.relaylyrics.no_synced");
     private volatile String syncLabel = ui("lyrics.relaylyrics.synced");
+    private volatile boolean lyricsLoading;
     private volatile int artworkAccent;
     private volatile CoverArtTexture artworkTexture;
     private boolean hudEnhancedFailed;
@@ -168,11 +170,18 @@ public final class LyricsOverlay implements AutoCloseable {
     private boolean phoneCameraReady;
     private boolean hudCameraReady;
     private ControlBounds popupPreviousButtonBounds;
+    private ControlBounds popupShuffleButtonBounds;
     private ControlBounds popupPlayPauseButtonBounds;
     private ControlBounds popupHeartButtonBounds;
     private ControlBounds popupNextButtonBounds;
+    private ControlBounds popupRepeatButtonBounds;
+    private ControlBounds popupSettingsButtonBounds;
+    private ControlBounds popupVolumeBounds;
     private ControlBounds popupProgressBounds;
     private boolean popupProgressScrubbing;
+    private boolean popupVolumeScrubbing;
+    private double popupVolumePreview = Double.NaN;
+    private long popupVolumePreviewNanos;
     private boolean popupCoverModeActive;
     private boolean popupCoverHoverLatched;
     private CoverBounds popupCoverInteractionBounds;
@@ -182,6 +191,11 @@ public final class LyricsOverlay implements AutoCloseable {
     private double popupPlayPauseHover;
     private double popupHeartHover;
     private double popupNextHover;
+    private double popupShuffleHover;
+    private double popupRepeatHover;
+    private double popupSettingsHover;
+    private double popupVolumeHover;
+    private double popupProgressHover;
     private double sceneTextScale = Double.NaN;
     private int sceneBuilds;
     private volatile RenderStats renderStats = RenderStats.EMPTY;
@@ -196,6 +210,7 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     public void beginLookup() {
+        lyricsLoading = true;
         document = new LyricsDocument(List.of());
         emptyMessage = ui("lyrics.relaylyrics.finding");
         syncLabel = ui("lyrics.relaylyrics.searching");
@@ -203,6 +218,7 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     public void clearLyrics() {
+        lyricsLoading = false;
         document = new LyricsDocument(List.of());
         emptyMessage = ui("lyrics.relaylyrics.no_synced");
         syncLabel = ui("lyrics.relaylyrics.synced");
@@ -214,6 +230,7 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     public void markUnavailable(String message) {
+        lyricsLoading = false;
         if (document.lines().isEmpty()) emptyMessage = localizeEmptyMessage(message);
         syncLabel = ui("lyrics.relaylyrics.not_found");
     }
@@ -223,6 +240,7 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     public void setLyrics(LyricsDocument lyrics, String label) {
+        lyricsLoading = false;
         document = lyrics == null ? new LyricsDocument(List.of()) : lyrics;
         updateCreditAvatars(document.metadata());
         emptyMessage = document.lines().isEmpty() ? ui("lyrics.relaylyrics.no_synced") : "";
@@ -489,11 +507,35 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     public PopupControl popupControlAt(double x, double y) {
+        if (contains(popupSettingsButtonBounds, x, y)) return PopupControl.SETTINGS;
+        if (contains(popupShuffleButtonBounds, x, y)) return PopupControl.TOGGLE_SHUFFLE;
         if (contains(popupPreviousButtonBounds, x, y)) return PopupControl.PREVIOUS;
         if (contains(popupPlayPauseButtonBounds, x, y)) return PopupControl.PLAY_PAUSE;
         if (contains(popupHeartButtonBounds, x, y)) return PopupControl.TOGGLE_HEART;
         if (contains(popupNextButtonBounds, x, y)) return PopupControl.NEXT;
+        if (contains(popupRepeatButtonBounds, x, y)) return PopupControl.CYCLE_REPEAT;
         return PopupControl.NONE;
+    }
+
+    public OptionalDouble popupVolumeTargetAt(double x, double y) {
+        if (!contains(popupVolumeBounds, x, y)) return OptionalDouble.empty();
+        double fraction = Math.clamp((popupVolumeBounds.y() + popupVolumeBounds.height() - y)
+                / popupVolumeBounds.height(), 0, 1);
+        return OptionalDouble.of(fraction);
+    }
+
+    public OptionalDouble popupVolumeTargetAtY(double y) {
+        if (popupVolumeBounds == null) return OptionalDouble.empty();
+        double fraction = Math.clamp((popupVolumeBounds.y() + popupVolumeBounds.height() - y)
+                / popupVolumeBounds.height(), 0, 1);
+        return OptionalDouble.of(fraction);
+    }
+
+    public void setPopupVolumeScrubbing(boolean value) { popupVolumeScrubbing = value; }
+
+    public void previewPopupVolume(double value) {
+        popupVolumePreview = Math.clamp(value, 0, 1);
+        popupVolumePreviewNanos = System.nanoTime();
     }
 
     public boolean beginPopupProgressScrub(double x, double y) {
@@ -557,7 +599,8 @@ public final class LyricsOverlay implements AutoCloseable {
     private void renderCompact(GuiGraphicsExtractor context, int x, int y, int width, int height) {
         Font renderer = renderer();
         if (renderer == null) return;
-        double frameDelta = bandedTransitionDrawing ? 0 : frameClock.nextDelta();
+        double frameDelta = bandedTransitionDrawing ? 0
+                : frameClock.nextDelta(preferences.getLyricsAnimationFrameRate());
         double delta = frameDelta * preferences.getLyricsTransitionSpeed().deltaMultiplier();
         stepCornerMorph(delta);
         PopupMotion.State animation = popupMotion.step(delta,
@@ -635,7 +678,7 @@ public final class LyricsOverlay implements AutoCloseable {
             popupCoverHoverLatched = false;
         }
         boolean coverHovered = renderingOverScreen && popupCoverHoverLatched;
-        boolean coverFocusWanted = coverHovered || popupProgressScrubbing;
+        boolean coverFocusWanted = coverHovered || popupProgressScrubbing || popupVolumeScrubbing;
         double coverFocus = Math.clamp(popupCoverMotion.step(frameDelta,
                 coverFocusWanted, preferences.isLyricsAnimations()), 0, 1);
         popupCoverModeActive = coverFocusWanted || coverFocus > .025;
@@ -684,6 +727,10 @@ public final class LyricsOverlay implements AutoCloseable {
                         textY + titleHeight + gap + artistHeight + gap,
                         multiplyAlpha(0xFF939AA4, textOpacity * .92), .82);
             }
+            if (lyricsLoading && preferences.isLyricsLoadingSkeleton() && contentOpacity > .1) {
+                renderLoadingSkeleton(context, x + 20, Math.min(y + height - 46,
+                        (int) Math.round(textY + blockHeight + 12)), width - 40, contentOpacity);
+            }
         } else {
             if (contentOpacity > .004) {
                 int metadataX = Math.min(restingBounds.x() + restingBounds.width() + metadataGap,
@@ -726,28 +773,43 @@ public final class LyricsOverlay implements AutoCloseable {
                         drawnCover.height(), coverRadius, coverTop, coverBottom);
             }
         }
-        renderPopupCoverControls(context, drawnCover, coverTransition, delta);
+        renderPopupCoverControls(context, drawnCover, coverTransition, frameDelta);
         if (preferences.isLyricsBorder()) drawPopupBorder(context, x, y, width, height, accent, surfaceRadius);
         drawResizeGrip(context, x + width - 15, y + height - 15, 0xB8D7DADE);
         GuiTransform.pop(context);
     }
 
     private void renderPopupCoverControls(GuiGraphicsExtractor context, CoverBounds cover,
-                                          double focus, double delta) {        double visibility = renderingOverScreen ? smooth((focus - .06) / .82) : 0;
+                                          double focus, double delta) {
+        double visibility = renderingOverScreen ? smooth((focus - .06) / .82) : 0;
         int minimum = Math.min(cover.width(), cover.height());
         if (minimum < 54) visibility = 0;
 
-        int controlSize = Math.clamp(minimum / 9, 14, 28);
-        int controlGap = Math.clamp(minimum / 28, 3, 10);
-        int controlsWidth = controlSize * 3 + controlGap * 2;
+        int controlSize = Math.clamp(minimum / 12, 12, 23);
+        int controlGap = Math.clamp(minimum / 32, 3, 8);
+        int controlsWidth = controlSize * 5 + controlGap * 4;
         int controlsX = cover.x() + (cover.width() - controlsWidth) / 2;
         int barY = cover.bottom() - Math.clamp(minimum / 15, 10, 17);
         int controlsY = barY - controlSize - Math.clamp(minimum / 22, 7, 12);
-        ControlBounds previous = new ControlBounds(controlsX, controlsY, controlSize, controlSize);
-        ControlBounds playPause = new ControlBounds(controlsX + controlSize + controlGap,
+        ControlBounds shuffle = new ControlBounds(controlsX, controlsY, controlSize, controlSize);
+        ControlBounds previous = new ControlBounds(controlsX + controlSize + controlGap,
                 controlsY, controlSize, controlSize);
-        ControlBounds next = new ControlBounds(controlsX + (controlSize + controlGap) * 2,
+        ControlBounds playPause = new ControlBounds(controlsX + (controlSize + controlGap) * 2,
                 controlsY, controlSize, controlSize);
+        ControlBounds next = new ControlBounds(controlsX + (controlSize + controlGap) * 3,
+                controlsY, controlSize, controlSize);
+        ControlBounds repeat = new ControlBounds(controlsX + (controlSize + controlGap) * 4,
+                controlsY, controlSize, controlSize);
+        int edge = Math.clamp(minimum / 24, 5, 10);
+        int utilitySize = Math.clamp(minimum / 7, 18, 30);
+        ControlBounds settings = new ControlBounds(cover.x() + (cover.width() - utilitySize) / 2,
+                cover.y() + edge,
+                utilitySize, utilitySize);
+        int volumeHeight = Math.clamp(minimum / 3, 32, 72);
+        int volumeWidth = Math.clamp(minimum / 38, 4, 7);
+        ControlBounds volume = new ControlBounds(cover.right() - edge - volumeWidth,
+                cover.y() + (cover.height() - volumeHeight) / 2,
+                volumeWidth, volumeHeight);
 
         int heartPixel = Math.clamp(minimum / 36, 3, 7);
         int heartWidth = HEART_MASK[0].length() * heartPixel;
@@ -766,11 +828,24 @@ public final class LyricsOverlay implements AutoCloseable {
                 interactive && heart.contains(pointerX, pointerY), delta, 13);
         popupNextHover = fadeControl(popupNextHover,
                 interactive && next.contains(pointerX, pointerY), delta, 13);
+        popupShuffleHover = fadeControl(popupShuffleHover,
+                interactive && shuffle.contains(pointerX, pointerY), delta, 13);
+        popupRepeatHover = fadeControl(popupRepeatHover,
+                interactive && repeat.contains(pointerX, pointerY), delta, 13);
+        popupSettingsHover = fadeControl(popupSettingsHover,
+                interactive && settings.contains(pointerX, pointerY), delta, 13);
+        popupVolumeHover = fadeControl(popupVolumeHover,
+                interactive && (popupVolumeScrubbing || volume.contains(pointerX, pointerY)
+                        || contains(popupVolumeBounds, pointerX, pointerY)), delta, 13);
 
         popupPreviousButtonBounds = interactive ? previous : null;
         popupPlayPauseButtonBounds = interactive ? playPause : null;
         popupHeartButtonBounds = interactive ? heart : null;
         popupNextButtonBounds = interactive ? next : null;
+        popupShuffleButtonBounds = interactive ? shuffle : null;
+        popupRepeatButtonBounds = interactive ? repeat : null;
+        popupSettingsButtonBounds = interactive ? settings : null;
+        popupVolumeBounds = interactive ? volume : null;
         if (visibility <= .004) {
             clearPopupControlBounds();
             return;
@@ -793,8 +868,16 @@ public final class LyricsOverlay implements AutoCloseable {
                 popupControlColor(popupPlayPauseHover, visibility, true));
         drawPopupTransport(context, next, TransportIcon.NEXT,
                 popupControlColor(popupNextHover, visibility, true));
+        drawPopupShuffle(context, shuffle,
+                popupControlColor(popupShuffleHover, visibility, playback.shuffled()));
+        drawPopupRepeat(context, repeat,
+                popupControlColor(popupRepeatHover, visibility, !"off".equals(playback.repeatMode())));
         drawPopupHeart(context, heart.x(), heart.y(), heartPixel, playback.liked(),
                 popupControlColor(popupHeartHover, visibility, true));
+        drawPopupSettings(context, settings,
+                popupControlColor(popupSettingsHover, visibility, true),
+                morphRadius(preferences.isModernMode() ? utilitySize / 2 : 0));
+        renderPopupVolume(context, volume, visibility);
 
         long duration = Math.max(0, playback.durationMillis());
         long position = popupProgressScrubbing ? popupScrubPosition : Math.max(0, positionMillis());
@@ -822,14 +905,17 @@ public final class LyricsOverlay implements AutoCloseable {
         popupProgressBounds = interactive && canSeek
                 ? new ControlBounds(barLeft, barY - 4, barRight - barLeft, barHeight + 8) : null;
         boolean progressHovered = contains(popupProgressBounds, pointerX, pointerY);
+        popupProgressHover = fadeControl(popupProgressHover,
+                progressHovered || popupProgressScrubbing, delta, 12);
+        int drawnBarHeight = barHeight + (int) Math.round(popupProgressHover * 3);
+        int drawnBarY = barY - (drawnBarHeight - barHeight) / 2;
         int barRadius = morphRadius(preferences.isModernMode() ? Math.max(1, barHeight / 2) : 0);
-        int railColor = multiplyAlpha(progressHovered || popupProgressScrubbing
-                ? 0xA0BFC7CA : 0x805E686D, visibility);
+        int railColor = multiplyAlpha(0x805E686D, visibility);
         if (preferences.isModernMode()) {
-            RoundedGui.smoothFill(context, barLeft, barY, barRight - barLeft, barHeight,
+            RoundedGui.smoothFill(context, barLeft, drawnBarY, barRight - barLeft, drawnBarHeight,
                     barRadius, railColor);
         } else {
-            RoundedGui.fill(context, barLeft, barY, barRight - barLeft, barHeight,
+            RoundedGui.fill(context, barLeft, drawnBarY, barRight - barLeft, drawnBarHeight,
                     barRadius, railColor);
         }
         double progress = duration <= 0 ? 0 : popupProgressScrubbing
@@ -839,10 +925,10 @@ public final class LyricsOverlay implements AutoCloseable {
         if (fillRight > barLeft) {
             int fillColor = multiplyAlpha(0xFFF5F7F7, visibility);
             if (preferences.isModernMode()) {
-                RoundedGui.smoothFill(context, barLeft, barY, fillRight - barLeft, barHeight,
+                RoundedGui.smoothFill(context, barLeft, drawnBarY, fillRight - barLeft, drawnBarHeight,
                         barRadius, fillColor);
             } else {
-                RoundedGui.fill(context, barLeft, barY, fillRight - barLeft, barHeight,
+                RoundedGui.fill(context, barLeft, drawnBarY, fillRight - barLeft, drawnBarHeight,
                         barRadius, fillColor);
             }
         }
@@ -911,6 +997,99 @@ public final class LyricsOverlay implements AutoCloseable {
                 int barX = centerX + triangleWidth / 2 + 1;
                 context.fill(barX, centerY - height / 2, barX + 2,
                         centerY + (height + 1) / 2, color);
+            }
+        }
+    }
+
+    private static void drawPopupShuffle(GuiGraphicsExtractor context, ControlBounds bounds, int color) {
+        int cx = bounds.x() + bounds.width() / 2;
+        int cy = bounds.y() + bounds.height() / 2;
+        for (int i = -4; i <= 4; i++) {
+            context.fill(cx + i, cy + i / 2 - 2, cx + i + 1, cy + i / 2 - 1, color);
+            context.fill(cx + i, cy - i / 2 + 2, cx + i + 1, cy - i / 2 + 3, color);
+        }
+        context.fill(cx + 3, cy - 5, cx + 6, cy - 3, color);
+        context.fill(cx + 3, cy + 3, cx + 6, cy + 5, color);
+    }
+
+    private static void drawPopupRepeat(GuiGraphicsExtractor context, ControlBounds bounds, int color) {
+        int cx = bounds.x() + bounds.width() / 2;
+        int cy = bounds.y() + bounds.height() / 2;
+        context.fill(cx - 4, cy - 4, cx + 4, cy - 3, color);
+        context.fill(cx + 3, cy - 3, cx + 4, cy + 3, color);
+        context.fill(cx - 4, cy + 3, cx + 4, cy + 4, color);
+        context.fill(cx - 4, cy - 3, cx - 3, cy + 3, color);
+        context.fill(cx + 2, cy - 5, cx + 5, cy - 2, color);
+        context.fill(cx - 5, cy + 2, cx - 2, cy + 5, color);
+    }
+
+    private void drawPopupSettings(GuiGraphicsExtractor context, ControlBounds bounds, int color, int radius) {
+        int background = (Math.clamp((color >>> 24) / 3, 0, 90) << 24) | 0xFFFFFF;
+        if (preferences.isModernMode()) {
+            RoundedGui.smoothFill(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+                    radius, background);
+        } else {
+            RoundedGui.fill(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+                    0, background);
+        }
+        int cx = bounds.x() + bounds.width() / 2;
+        int cy = bounds.y() + bounds.height() / 2;
+        for (int i = 0; i < 8; i++) {
+            double angle = i * Math.PI / 4;
+            int px = cx + (int) Math.round(Math.cos(angle) * 5);
+            int py = cy + (int) Math.round(Math.sin(angle) * 5);
+            context.fill(px - 1, py - 1, px + 2, py + 2, color);
+        }
+        RetroDraw.circle(context, cx, cy, 4, color);
+        RetroDraw.circle(context, cx, cy, 2, background);
+    }
+
+    private void renderPopupVolume(GuiGraphicsExtractor context, ControlBounds bounds,
+                                   double visibility) {
+        int expanded = Math.min(5, (int) Math.round(popupVolumeHover * 5));
+        int width = bounds.width() + expanded;
+        int x = bounds.x() - expanded;
+        popupVolumeBounds = visibility > .32
+                ? new ControlBounds(x - 5, bounds.y() - 3, width + 10, bounds.height() + 6) : null;
+        int radius = morphRadius(preferences.isModernMode() ? width / 2 : 0);
+        int rail = multiplyAlpha(0x94616A70, visibility);
+        if (preferences.isModernMode()) {
+            RoundedGui.smoothFill(context, x, bounds.y(), width, bounds.height(), radius, rail);
+        } else {
+            RoundedGui.fill(context, x, bounds.y(), width, bounds.height(), radius, rail);
+        }
+        long previewAge = System.nanoTime() - popupVolumePreviewNanos;
+        double volume = popupVolumePreviewNanos != 0 && previewAge >= 0
+                && previewAge < 1_000_000_000L && Double.isFinite(popupVolumePreview)
+                ? popupVolumePreview : playback.volume();
+        int filled = Math.clamp((int) Math.round(bounds.height() * volume), 0, bounds.height());
+        if (filled > 0) {
+            int color = multiplyAlpha(0xFFF5F7F7, visibility);
+            if (preferences.isModernMode()) {
+                RoundedGui.smoothFill(context, x, bounds.y() + bounds.height() - filled,
+                        width, filled, radius, color);
+            } else {
+                RoundedGui.fill(context, x, bounds.y() + bounds.height() - filled,
+                        width, filled, radius, color);
+            }
+        }
+    }
+
+    private void renderLoadingSkeleton(GuiGraphicsExtractor context, int x, int y, int width, double opacity) {
+        if (width < 30) return;
+        double phase = preferences.isLyricsAnimations()
+                ? (Math.sin(System.nanoTime() / 380_000_000.0) + 1) * .5 : .5;
+        int color = multiplyAlpha(0xFFB5BEC5, opacity * (.16 + phase * .13));
+        drawScaled(context, renderer(), ui("lyrics.relaylyrics.loading"), x, y - 13,
+                multiplyAlpha(0xFFD6DDE1, opacity), .72);
+        for (int index = 0; index < 3; index++) {
+            int lineWidth = (int) Math.round(width * (index == 1 ? .72 : index == 2 ? .48 : .91));
+            int lineY = y + index * 9;
+            int radius = morphRadius(preferences.isModernMode() ? 2 : 0);
+            if (preferences.isModernMode()) {
+                RoundedGui.smoothFill(context, x, lineY, lineWidth, 4, radius, color);
+            } else {
+                RoundedGui.fill(context, x, lineY, lineWidth, 4, radius, color);
             }
         }
     }
@@ -985,10 +1164,14 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     private void clearPopupControlBounds() {
+        popupShuffleButtonBounds = null;
         popupPreviousButtonBounds = null;
         popupPlayPauseButtonBounds = null;
         popupHeartButtonBounds = null;
         popupNextButtonBounds = null;
+        popupRepeatButtonBounds = null;
+        popupSettingsButtonBounds = null;
+        popupVolumeBounds = null;
         popupProgressBounds = null;
     }
 
@@ -1047,12 +1230,18 @@ public final class LyricsOverlay implements AutoCloseable {
         if (renderer == null) return;
         phoneHitRegions.clear();
         if (document.groups().isEmpty()) {
-            drawScaled(context, renderer, emptyMessage, x + 28, y + height / 2.0 - 8,
-                    0xFFD1D5DA, 1.35);
+            if (lyricsLoading && preferences.isLyricsLoadingSkeleton()) {
+                renderLoadingSkeleton(context, x + 28, y + height / 2 - 10,
+                        Math.max(30, width - 56), 1);
+            } else {
+                drawScaled(context, renderer, emptyMessage, x + 28, y + height / 2.0 - 8,
+                        0xFFD1D5DA, 1.35);
+            }
             return;
         }
         renderLyricsBody(context, x + 6, y + 6, width - 12, height - 12, true,
-                frameClock.nextDelta() * preferences.getLyricsTransitionSpeed().deltaMultiplier());
+                frameClock.nextDelta(preferences.getLyricsAnimationFrameRate())
+                        * preferences.getLyricsTransitionSpeed().deltaMultiplier());
     }
 
     private void renderLyricsBody(GuiGraphicsExtractor context, int x, int y, int width, int height,
@@ -1927,8 +2116,10 @@ public final class LyricsOverlay implements AutoCloseable {
         double visibility = interlude.visibility();
         LyricsTextAlignment selectedAlignment = preferences.getLyricsAlignment();
         boolean opposite = oppositeAligned(selectedAlignment, alignment);
+        double dotScale = simpleLyricsDotScale();
+        int dotStep = Math.max(14, (int) Math.ceil(textWidth("•") * dotScale) + 7);
         int dotsStartX = selectedAlignment == LyricsTextAlignment.CENTER
-                ? x + width / 2 - 21 : opposite ? x + width - 66 : x + 24;
+                ? x + (width - dotStep * 2) / 2 : opposite ? x + width - dotStep * 3 - 8 : x + 24;
         int dotsY = (int) Math.clamp(dotsPosition, y + 14, y + height - 14);
         boolean simple = preferences.isSimpleLyricsMode();
         for (int index = 0; index < 3; index++) {
@@ -1936,20 +2127,17 @@ public final class LyricsOverlay implements AutoCloseable {
             double lift = simple ? 0 : interludeDotLift(progress, index);
             if (updateMotion) interludeDots[index].update(fill, lift, visibility, delta);
             DotMotion dot = interludeDots[index];
-            int size = simple ? 7 : Math.max(7, (int) Math.round(9 * dot.scale()));
-            int radius = Math.max(3, size / 2);
             int dotY = (int) Math.round(dotsY - lift * 5.0);
-            int dotX = dotsStartX + index * 21;
-            drawDotOutline(context, dotX, dotY, radius,
-                    multiplyAlpha(blend(0xFF747C87, ACTIVE_TEXT, .20 + fill * .24),
-                            (.62 + lift * .24) * dot.opacity() * lyricsSurfaceOpacity));
-            if (fill > .01) {
-                int fillRadius = Math.max(1, (int) Math.round((radius - 1) * smooth(fill)));
-                RetroDraw.circle(context, dotX, dotY, fillRadius,
-                        multiplyAlpha(blend(ACTIVE_TEXT, accent, .16),
-                                dot.opacity() * fill * lyricsSurfaceOpacity));
-            }
+            int dotX = dotsStartX + index * dotStep;
+            drawScaled(context, renderer(), "•", dotX, dotY - renderer().lineHeight * dotScale / 2,
+                    multiplyAlpha(blend(0xFF747C87, ACTIVE_TEXT, .20 + fill * .55),
+                            (.62 + lift * .24) * dot.opacity()),
+                    dotScale * (simple ? 1 : dot.scale()));
         }
+    }
+
+    private double simpleLyricsDotScale() {
+        return preferences.isSimpleLyricsMode() ? 1.55 : 1.9;
     }
 
     /** A duet keeps its vocal side unless the user explicitly centers every lyric line. */
@@ -2632,7 +2820,7 @@ public final class LyricsOverlay implements AutoCloseable {
             return px >= x && px < x + width && py >= y && py < y + height;
         }
     }
-    public enum PopupControl { NONE, PREVIOUS, PLAY_PAUSE, TOGGLE_HEART, NEXT }
+    public enum PopupControl { NONE, SETTINGS, TOGGLE_SHUFFLE, PREVIOUS, PLAY_PAUSE, TOGGLE_HEART, NEXT, CYCLE_REPEAT }
     private enum TransportIcon { PREVIOUS, PLAY, PAUSE, NEXT }
     private record PreparedCredits(List<String> writerRows, String provider, List<String> communityRows,
                                    CreditProfile maker, CreditProfile uploader, double top,
@@ -2785,13 +2973,15 @@ public final class LyricsOverlay implements AutoCloseable {
     private static final class FrameClock {
         private long lastNanos;
         private double cachedDelta = 1.0 / 60.0;
-        private double nextDelta() {
+        private double nextDelta() { return nextDelta(0); }
+        private double nextDelta(int frameRateLimit) {
             long now = System.nanoTime();
             if (lastNanos == 0) {
                 lastNanos = now;
                 return cachedDelta;
             }
             long elapsed = now - lastNanos;
+            if (frameRateLimit > 0 && elapsed < 1_000_000_000L / frameRateLimit) return 0;
             if (elapsed < 2_000_000L) return cachedDelta;
             cachedDelta = Math.clamp(elapsed / 1_000_000_000.0, 1.0 / 240.0, .05);
             lastNanos = now;
