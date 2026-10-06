@@ -806,21 +806,23 @@ public final class LyricsOverlay implements AutoCloseable {
         ControlBounds settings = new ControlBounds(cover.x() + (cover.width() - utilitySize) / 2,
                 cover.y() + edge,
                 utilitySize, utilitySize);
-        int volumeHeight = Math.clamp(minimum / 3, 32, 72);
-        int volumeWidth = Math.clamp(minimum / 38, 4, 7);
+        int volumeHeight = Math.clamp(minimum * 2 / 5, 40, 84);
+        int volumeWidth = Math.clamp(minimum / 9, 16, 25);
+        int volumeY = Math.max(cover.y() + edge,
+                Math.min(cover.y() + (cover.height() - volumeHeight) / 2,
+                        controlsY - volumeHeight - 3));
         ControlBounds volume = new ControlBounds(cover.right() - edge - volumeWidth,
-                cover.y() + (cover.height() - volumeHeight) / 2,
-                volumeWidth, volumeHeight);
+                volumeY, volumeWidth, volumeHeight);
 
         int heartSize = Math.clamp(minimum / 3, 30, 75);
         int heartCenterY = cover.y() + Math.max(heartSize / 2 + 5,
                 (controlsY - cover.y()) / 2);
         ControlBounds heart = new ControlBounds(cover.x() + (cover.width() - heartSize) / 2,
                 heartCenterY - heartSize / 2, heartSize, heartSize);
-        int muteSize = Math.clamp(minimum / 12, 15, 22);
-        int muteY = minimum < 110 ? volume.y() - muteSize - 4 : volume.y() + volume.height() + 4;
-        ControlBounds mute = new ControlBounds(volume.x() + (volume.width() - muteSize) / 2,
-                muteY, muteSize, muteSize);
+        int muteHeight = 20;
+        ControlBounds mute = new ControlBounds(volume.x(),
+                volume.y() + volume.height() - muteHeight, volume.width(), muteHeight);
+        boolean volumeFits = minimum >= 84;
 
         boolean interactive = visibility > .32;
         popupPreviousHover = fadeControl(popupPreviousHover,
@@ -838,10 +840,11 @@ public final class LyricsOverlay implements AutoCloseable {
         popupSettingsHover = fadeControl(popupSettingsHover,
                 interactive && settings.contains(pointerX, pointerY), delta, 13);
         popupVolumeHover = fadeControl(popupVolumeHover,
-                interactive && (popupVolumeScrubbing || volume.contains(pointerX, pointerY)
+                interactive && volumeFits && (popupVolumeScrubbing || volume.contains(pointerX, pointerY)
                         || contains(popupVolumeBounds, pointerX, pointerY)), delta, 13);
         popupMuteHover = fadeControl(popupMuteHover,
-                interactive && mute.contains(pointerX, pointerY), delta, 13);
+                interactive && volumeFits && (mute.contains(pointerX, pointerY)
+                        || contains(popupMuteButtonBounds, pointerX, pointerY)), delta, 13);
 
         popupPreviousButtonBounds = interactive ? previous : null;
         popupPlayPauseButtonBounds = interactive ? playPause : null;
@@ -850,8 +853,8 @@ public final class LyricsOverlay implements AutoCloseable {
         popupShuffleButtonBounds = interactive ? shuffle : null;
         popupRepeatButtonBounds = interactive ? repeat : null;
         popupSettingsButtonBounds = interactive ? settings : null;
-        popupVolumeBounds = interactive ? volume : null;
-        popupMuteButtonBounds = interactive ? mute : null;
+        popupVolumeBounds = interactive && volumeFits ? volume : null;
+        popupMuteButtonBounds = interactive && volumeFits ? mute : null;
         if (visibility <= .004) {
             clearPopupControlBounds();
             return;
@@ -883,10 +886,7 @@ public final class LyricsOverlay implements AutoCloseable {
         drawPopupSettings(context, settings,
                 popupControlColor(popupSettingsHover, visibility, true),
                 morphRadius(preferences.isModernMode() ? utilitySize / 2 : 0));
-        renderPopupVolume(context, volume, visibility);
-        PopupIcons.drawCentered(context, PopupIcons.volume(popupVolumeLevel()),
-                mute.x() + mute.width() / 2, mute.y() + mute.height() / 2,
-                muteSize - 1, popupControlColor(popupMuteHover, visibility, true));
+        if (volumeFits) renderPopupVolume(context, volume, visibility);
 
         long duration = Math.max(0, playback.durationMillis());
         long position = popupProgressScrubbing ? popupScrubPosition : Math.max(0, positionMillis());
@@ -1009,16 +1009,9 @@ public final class LyricsOverlay implements AutoCloseable {
             RoundedGui.fill(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
                     0, background);
         }
-        int cx = bounds.x() + bounds.width() / 2;
-        int cy = bounds.y() + bounds.height() / 2;
-        for (int i = 0; i < 8; i++) {
-            double angle = i * Math.PI / 4;
-            int px = cx + (int) Math.round(Math.cos(angle) * 5);
-            int py = cy + (int) Math.round(Math.sin(angle) * 5);
-            context.fill(px - 1, py - 1, px + 2, py + 2, color);
-        }
-        RetroDraw.circle(context, cx, cy, 4, color);
-        RetroDraw.circle(context, cx, cy, 2, background);
+        PopupIcons.drawCentered(context, PopupIcons.SETTINGS,
+                bounds.x() + bounds.width() / 2, bounds.y() + bounds.height() / 2,
+                Math.clamp(bounds.width() - 6, 12, 23), color);
     }
 
     private void renderPopupVolume(DrawContext context, ControlBounds bounds,
@@ -1026,26 +1019,47 @@ public final class LyricsOverlay implements AutoCloseable {
         int expanded = Math.min(5, (int) Math.round(popupVolumeHover * 5));
         int width = bounds.width() + expanded;
         int x = bounds.x() - expanded;
+        int iconHeight = 20;
+        int iconTop = bounds.y() + bounds.height() - iconHeight;
+        int trackY = bounds.y();
+        int trackHeight = iconTop - trackY;
         popupVolumeBounds = visibility > .32
-                ? new ControlBounds(x - 5, bounds.y() - 3, width + 10, bounds.height() + 6) : null;
-        int radius = morphRadius(preferences.isModernMode() ? width / 2 : 0);
-        int rail = multiplyAlpha(0x94616A70, visibility);
+                ? new ControlBounds(x, trackY, width, trackHeight) : null;
+        popupMuteButtonBounds = visibility > .32
+                ? new ControlBounds(x, iconTop, width, iconHeight) : null;
+
+        int outerRadius = morphRadius(preferences.isModernMode() ? width / 2 : 0);
+        int outerColor = multiplyAlpha(0xDFF3F5F5, visibility);
         if (preferences.isModernMode()) {
-            RoundedGui.smoothFill(context, x, bounds.y(), width, bounds.height(), radius, rail);
+            RoundedGui.smoothFill(context, x, bounds.y(), width, bounds.height(), outerRadius, outerColor);
         } else {
-            RoundedGui.fill(context, x, bounds.y(), width, bounds.height(), radius, rail);
+            RoundedGui.fill(context, x, bounds.y(), width, bounds.height(), 0, outerColor);
         }
-        int filled = Math.clamp((int) Math.round(bounds.height() * popupVolumeLevel()), 0, bounds.height());
+
+        int trackRadius = outerRadius;
+        int railColor = multiplyAlpha(0x94616A70, visibility);
+        if (preferences.isModernMode()) {
+            RoundedGui.smoothFill(context, x, trackY, width, trackHeight,
+                    trackRadius, railColor);
+        } else {
+            RoundedGui.fill(context, x, trackY, width, trackHeight, 0, railColor);
+        }
+        int filled = Math.clamp((int) Math.round(trackHeight * popupVolumeLevel()), 0, trackHeight);
         if (filled > 0) {
-            int color = multiplyAlpha(0xFFF5F7F7, visibility);
+            int fillRadius = Math.min(trackRadius, filled / 2);
+            int fillColor = multiplyAlpha(0xFFFDFEFE, visibility);
             if (preferences.isModernMode()) {
-                RoundedGui.smoothFill(context, x, bounds.y() + bounds.height() - filled,
-                        width, filled, radius, color);
+                RoundedGui.smoothFill(context, x, trackY + trackHeight - filled,
+                        width, filled, fillRadius, fillColor);
             } else {
-                RoundedGui.fill(context, x, bounds.y() + bounds.height() - filled,
-                        width, filled, radius, color);
+                RoundedGui.fill(context, x, trackY + trackHeight - filled,
+                        width, filled, 0, fillColor);
             }
         }
+        PopupIcons.drawCentered(context, PopupIcons.volume(popupVolumeLevel()),
+                x + width / 2, iconTop + iconHeight / 2,
+                Math.min(17, width - 4),
+                multiplyAlpha(0xFF4F585B, visibility * (.80 + .20 * popupMuteHover)));
     }
 
     private void renderLoadingSkeleton(DrawContext context, int x, int y, int width, double opacity) {

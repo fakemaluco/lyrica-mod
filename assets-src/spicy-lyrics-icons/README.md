@@ -8,3 +8,4 @@ for the popup. The game bundles 192 × 192 transparent PNG exports in
 group omitted. `pause.svg` is a small matching control drawn for Lyrica because
 the supplied set did not contain a pause icon. `close` and `lyrics-manager` are
 retained as source exports, although the current popup has no matching controls.
+`settings.svg` is the separate gear SVG supplied for the configuration button.

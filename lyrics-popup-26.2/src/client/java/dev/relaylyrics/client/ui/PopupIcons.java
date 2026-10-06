@@ -14,6 +14,7 @@ public final class PopupIcons {
     public static final Identifier NEXT = icon("next");
     public static final Identifier SHUFFLE = icon("shuffle");
     public static final Identifier REPEAT = icon("repeat");
+    public static final Identifier SETTINGS = icon("settings");
     public static final Identifier VOLUME_MUTED = icon("volume-muted");
     public static final Identifier VOLUME_SPEAKER = icon("volume-speaker");
     public static final Identifier VOLUME_LOW = icon("volume-low");
