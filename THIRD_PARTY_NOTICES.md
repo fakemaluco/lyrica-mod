@@ -8,6 +8,11 @@ Spikerko and contributors. Spicy Lyrics is distributed under the GNU Affero
 General Public License version 3. Lyrica is consequently distributed under
 the same license; see `LICENSE`.
 
+The supplied playback, heart and volume SVGs in `assets-src/spicy-lyrics-icons`
+are exports from Spicy Lyrics and are distributed under that project's
+AGPL-3.0 license. The game uses rasterized versions of these SVGs; the pause
+icon was drawn for Lyrica to match the set.
+
 ## Fraktality Spring
 
 The analytic spring used by the lyrics renderer is a Java adaptation of the

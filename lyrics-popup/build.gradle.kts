@@ -57,6 +57,7 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
     from(rootProject.file("mod/src/client/java")) {
         include("dev/fandroid/client/music/**")
         include("dev/fandroid/client/ui/LyricsOverlay.java")
+        include("dev/fandroid/client/ui/PopupIcons.java")
         include("dev/fandroid/client/ui/LyricsBloomRenderer.java")
         include("dev/fandroid/client/ui/GuiTransform.java")
         include("dev/fandroid/client/ui/PlatformTextStyles.java")

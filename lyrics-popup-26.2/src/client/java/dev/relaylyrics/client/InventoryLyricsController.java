@@ -3,6 +3,7 @@ package dev.relaylyrics.client;
 import dev.relaylyrics.client.ui.LyricsConfigScreen;
 import dev.relaylyrics.client.ui.GuiTransform;
 import dev.relaylyrics.client.ui.LyricsOverlay;
+import dev.relaylyrics.client.ui.PopupIcons;
 import dev.relaylyrics.client.ui.LyricsOverlay.PopupBounds;
 import dev.relaylyrics.client.ui.PlatformCursor;
 import dev.relaylyrics.client.ui.RoundedGui;
@@ -28,17 +29,6 @@ import net.minecraft.network.chat.Component;
 
 /** Shared inventory interaction logic; callback signatures live in version adapters. */
 public final class InventoryLyricsController {
-    private static final String[] HEART_MASK = {
-            "01110001110",
-            "11111011111",
-            "11111111111",
-            "11111111111",
-            "01111111110",
-            "00111111100",
-            "00011111000",
-            "00001110000",
-            "00000100000"
-    };
     private static final Set<Screen> REGISTERED = Collections.newSetFromMap(new WeakHashMap<>());
     private static final InventoryPopupTransition POPUP_TRANSITION = new InventoryPopupTransition();
     private static Screen activeScreen;
@@ -47,6 +37,7 @@ public final class InventoryLyricsController {
     private static boolean scrubbing;
     private static boolean volumeScrubbing;
     private static double volumeDragValue;
+    private static double lastAudibleVolume = .5;
     private static double lastVolumeCommandValue = Double.NaN;
     private static long lastVolumeCommandNanos;
     private static long scrubPosition;
@@ -596,11 +587,9 @@ public final class InventoryLyricsController {
         Bounds nextBounds = new Bounds(controlsX + (controlSize + gap) * 2,
                 controlsY, controlSize, controlSize);
 
-        int heartPixel = cover >= 68 ? 3 : cover >= 46 ? 2 : 1;
-        int heartWidth = HEART_MASK[0].length() * heartPixel;
-        int heartHeight = HEART_MASK.length * heartPixel;
-        Bounds heartBounds = new Bounds(x + (cover - heartWidth) / 2,
-                y + (cover - heartHeight) / 2 - Math.max(1, cover / 18), heartWidth, heartHeight);
+        int heartSize = cover >= 68 ? 30 : cover >= 46 ? 21 : 12;
+        Bounds heartBounds = new Bounds(x + (cover - heartSize) / 2,
+                y + (cover - heartSize) / 2 - Math.max(1, cover / 18), heartSize, heartSize);
 
         long now = System.nanoTime();
         double delta = Math.clamp((now - controlFadeNanos) / 1_000_000_000.0, 0, .05);
@@ -638,7 +627,7 @@ public final class InventoryLyricsController {
         drawTransportControl(context, nextBounds, TransportIcon.NEXT,
                 controlColor(nextHoverFade, coverControlsFade));
         boolean liked = RelayLyricsClient.music().snapshot().liked();
-        drawHeart(context, heartBounds.x, heartBounds.y, heartPixel, liked,
+        drawHeart(context, heartBounds, liked,
                 controlColor(heartHoverFade, coverControlsFade));
     }
 
@@ -660,75 +649,44 @@ public final class InventoryLyricsController {
 
     private static void drawTransportControl(GuiGraphicsExtractor context, Bounds bounds,
                                              TransportIcon icon, int color) {
-        int centerX = bounds.x + bounds.width / 2;
-        int centerY = bounds.y + bounds.height / 2;
-        int height = Math.clamp(bounds.height - 7, 5, 10);
-        int triangleWidth = Math.max(3, height / 2 + 1);
-        switch (icon) {
-            case PLAY -> drawTriangle(context, centerX - triangleWidth / 2, centerY,
-                    triangleWidth, height, true, color);
-            case PAUSE -> {
-                int barWidth = Math.max(2, bounds.width / 7);
-                int gap = Math.max(2, barWidth);
-                context.fill(centerX - gap / 2 - barWidth, centerY - height / 2,
-                        centerX - gap / 2, centerY + (height + 1) / 2, color);
-                context.fill(centerX + gap / 2, centerY - height / 2,
-                        centerX + gap / 2 + barWidth, centerY + (height + 1) / 2, color);
-            }
-            case PREVIOUS -> {
-                int barX = centerX - triangleWidth / 2 - 2;
-                context.fill(barX, centerY - height / 2, barX + 2,
-                        centerY + (height + 1) / 2, color);
-                drawTriangle(context, centerX + 1, centerY, triangleWidth, height, false, color);
-            }
-            case NEXT -> {
-                drawTriangle(context, centerX - 1, centerY, triangleWidth, height, true, color);
-                int barX = centerX + triangleWidth / 2 + 1;
-                context.fill(barX, centerY - height / 2, barX + 2,
-                        centerY + (height + 1) / 2, color);
-            }
-        }
+        var image = switch (icon) {
+            case PREVIOUS -> PopupIcons.PREVIOUS;
+            case PLAY -> PopupIcons.PLAY;
+            case PAUSE -> PopupIcons.PAUSE;
+            case NEXT -> PopupIcons.NEXT;
+        };
+        PopupIcons.drawCentered(context, image, bounds.x + bounds.width / 2,
+                bounds.y + bounds.height / 2, Math.max(8, bounds.height - 4), color);
     }
 
-    private static void drawTriangle(GuiGraphicsExtractor context, int centerX, int centerY,
-                                     int width, int height, boolean right, int color) {
-        for (int column = 0; column < width; column++) {
-            int distanceFromBase = right ? column : width - 1 - column;
-            int halfHeight = Math.max(0, (height - 1) * (width - distanceFromBase) / (2 * width));
-            int drawX = centerX - width / 2 + column;
-            context.fill(drawX, centerY - halfHeight, drawX + 1, centerY + halfHeight + 1, color);
-        }
-    }
-
-    private static void drawHeart(GuiGraphicsExtractor context, int x, int y, int pixel,
+    private static void drawHeart(GuiGraphicsExtractor context, Bounds bounds,
                                   boolean filled, int color) {
-        for (int row = 0; row < HEART_MASK.length; row++) {
-            for (int column = 0; column < HEART_MASK[row].length(); column++) {
-                if (HEART_MASK[row].charAt(column) != '1') continue;
-                boolean boundary = row == 0 || row == HEART_MASK.length - 1 || column == 0
-                        || column == HEART_MASK[row].length() - 1
-                        || HEART_MASK[row - 1].charAt(column) != '1'
-                        || HEART_MASK[row + 1].charAt(column) != '1'
-                        || HEART_MASK[row].charAt(column - 1) != '1'
-                        || HEART_MASK[row].charAt(column + 1) != '1';
-                if (filled || boundary) {
-                    context.fill(x + column * pixel, y + row * pixel,
-                            x + (column + 1) * pixel, y + (row + 1) * pixel, color);
-                }
-            }
-        }
+        PopupIcons.drawCentered(context, filled ? PopupIcons.HEART : PopupIcons.HEART_OUTLINE,
+                bounds.x + bounds.width / 2, bounds.y + bounds.height / 2,
+                bounds.width, color);
     }
 
     private static boolean runPopupControl(LyricsOverlay overlay, double mouseX, double mouseY) {
         if (overlay == null || RelayLyricsClient.music() == null) return false;
-        MusicAction action = switch (overlay.popupControlAt(mouseX, mouseY)) {
+        LyricsOverlay.PopupControl control = overlay.popupControlAt(mouseX, mouseY);
+        if (control == LyricsOverlay.PopupControl.TOGGLE_MUTE) {
+            double current = overlay.popupVolumeLevel();
+            if (current > .001) {
+                lastAudibleVolume = current;
+                updateVolumeDrag(0, true);
+            } else {
+                updateVolumeDrag(lastAudibleVolume, true);
+            }
+            return true;
+        }
+        MusicAction action = switch (control) {
             case TOGGLE_SHUFFLE -> MusicAction.TOGGLE_SHUFFLE;
             case PREVIOUS -> MusicAction.PREVIOUS;
             case PLAY_PAUSE -> MusicAction.PLAY_PAUSE;
             case TOGGLE_HEART -> MusicAction.TOGGLE_HEART;
             case NEXT -> MusicAction.NEXT;
             case CYCLE_REPEAT -> MusicAction.CYCLE_REPEAT;
-            case NONE, SETTINGS -> null;
+            case NONE, SETTINGS, TOGGLE_MUTE -> null;
         };
         if (action == null) return false;
         RelayLyricsClient.music().command(action);
@@ -737,6 +695,7 @@ public final class InventoryLyricsController {
 
     private static void updateVolumeDrag(double value, boolean finalOrInitial) {
         volumeDragValue = Math.clamp(value, 0, 1);
+        if (volumeDragValue > .001) lastAudibleVolume = volumeDragValue;
         LyricsOverlay overlay = RelayLyricsClient.overlay();
         if (overlay != null) overlay.previewPopupVolume(volumeDragValue);
         if (RelayLyricsClient.music() == null) return;

@@ -249,6 +249,11 @@ public final class SpotifyAccountClient implements AutoCloseable {
                     method = "PUT";
                     endpoint = "/me/player/seek?position_ms=" + Math.max(0, Math.round(
                             command.value() == null ? 0 : command.value()));
+                } else if (action == MusicAction.SET_VOLUME) {
+                    method = "PUT";
+                    double volume = command.value() == null ? latest.volume() : command.value();
+                    int percent = (int) Math.round(Math.clamp(Double.isFinite(volume) ? volume : 0, 0, 1) * 100);
+                    endpoint = "/me/player/volume?volume_percent=" + percent;
                 } else if (action == MusicAction.TOGGLE_HEART && latest.spotifyUri() != null) {
                     method = latest.liked() ? "DELETE" : "PUT";
                     endpoint = "/me/library?uris=" + encode(latest.spotifyUri());

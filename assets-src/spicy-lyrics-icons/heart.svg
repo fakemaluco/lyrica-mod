@@ -1,0 +1,27 @@
+<svg viewBox="0 0 1000 1000" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g id="SpicyLyrics_HeartFrame">
+    <g id="SpicyLyrics_Heart" clip-path="url(#clip0_1_2)">
+      <g id="SpicyLyrics_HeartOutline">
+        <path id="Vector" d="M982.995 324.097C982.995 180.45 866.598 64 723.02 64C628.493 64 545.998 114.641 500.496 190.119C454.992 114.641 372.499 64 277.973 64C134.394 64 18 180.45 18 324.097C18 356.935 24.3385 388.224 35.436 417.155C121.399 664.536 500.499 936 500.499 936C500.499 936 879.595 664.536 965.562 417.155C976.659 388.226 982.995 356.935 982.995 324.097Z" stroke="white" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+      <g id="SpicyLyrics_HeartFill">
+        <ellipse cx="276.5" cy="285.5" rx="244.5" ry="215.5" fill="white"/>
+        <ellipse cx="725" cy="285.5" rx="247" ry="217.5" fill="white"/>
+        <ellipse cx="189" cy="325.5" rx="165" ry="214.5" fill="white"/>
+        <ellipse cx="234.335" cy="472.198" rx="150" ry="272" transform="rotate(-34.3576 234.335 472.198)" fill="white"/>
+        <ellipse cx="298.508" cy="629.28" rx="97.5117" ry="183.378" transform="rotate(-42.2757 298.508 629.28)" fill="white"/>
+        <ellipse cx="390.743" cy="718.138" rx="102.44" ry="192.646" transform="rotate(-42.2757 390.743 718.138)" fill="white"/>
+        <ellipse cx="669.263" cy="652.69" rx="102.44" ry="328.343" transform="rotate(42.28 669.263 652.69)" fill="white"/>
+        <ellipse cx="788.346" cy="447.149" rx="150" ry="262.498" transform="rotate(-143.364 788.346 447.149)" fill="white"/>
+        <ellipse cx="500" cy="588" rx="150" ry="327" fill="white"/>
+        <ellipse cx="499.5" cy="914.5" rx="24.5" ry="13.5" fill="white"/>
+        <ellipse cx="822.516" cy="623.447" rx="55.9753" ry="13.5" transform="rotate(-52.0641 822.516 623.447)" fill="white"/>
+      </g>
+    </g>
+  </g>
+  <defs>
+    <clipPath id="clip0_1_2">
+      <rect width="994" height="994" fill="white" transform="translate(3 3)"/>
+    </clipPath>
+  </defs>
+</svg>
