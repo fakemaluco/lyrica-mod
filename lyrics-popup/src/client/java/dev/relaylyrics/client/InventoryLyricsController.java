@@ -640,12 +640,12 @@ public final class InventoryLyricsController {
         }
 
         drawTransportControl(context, previousBounds, TransportIcon.PREVIOUS,
-                controlColor(previousHoverFade, coverControlsFade), clickScale(previousClickNanos));
+                controlColor(previousHoverFade, coverControlsFade), clickScale(previousClickNanos, .14));
         drawTransportControl(context, playPauseBounds,
                 RelayLyricsClient.music().snapshot().playing() ? TransportIcon.PAUSE : TransportIcon.PLAY,
-                controlColor(playPauseHoverFade, coverControlsFade), clickScale(playPauseClickNanos));
+                controlColor(playPauseHoverFade, coverControlsFade), clickScale(playPauseClickNanos, .14));
         drawTransportControl(context, nextBounds, TransportIcon.NEXT,
-                controlColor(nextHoverFade, coverControlsFade), clickScale(nextClickNanos));
+                controlColor(nextHoverFade, coverControlsFade), clickScale(nextClickNanos, .14));
         boolean liked = RelayLyricsClient.music().snapshot().liked();
         drawHeart(context, heartBounds, liked,
                 controlColor(heartHoverFade, coverControlsFade));
@@ -656,12 +656,12 @@ public final class InventoryLyricsController {
         return current + (target - current) * (1 - Math.exp(-delta * speed));
     }
 
-    private static double clickScale(long startedNanos) {
+    private static double clickScale(long startedNanos, double strength) {
         if (!RelayLyricsClient.preferences().isLyricsAnimations()) return 1;
         long elapsed = System.nanoTime() - startedNanos;
         if (elapsed < 0 || elapsed >= 420_000_000L) return 1;
         double phase = elapsed / 420_000_000.0;
-        return 1 + .27 * Math.sin(phase * Math.PI * 2) * Math.exp(-1.2 * phase);
+        return 1 + strength * Math.sin(phase * Math.PI * 2) * Math.exp(-1.2 * phase);
     }
 
     private static int controlColor(double hover, double visibility) {
@@ -693,7 +693,7 @@ public final class InventoryLyricsController {
         int centerX = bounds.x + bounds.width / 2;
         int centerY = bounds.y + bounds.height / 2;
         int size = Math.max(1, (int) Math.round(bounds.width
-                * Math.clamp(HEART_SCALE.position() * clickScale(heartClickNanos), .68, 1.32)));
+                * Math.clamp(HEART_SCALE.position() * clickScale(heartClickNanos, .27), .68, 1.32)));
         if (heartHoverFade > .001) {
             int alpha = Math.clamp((int) Math.round(107 * heartHoverFade * coverControlsFade), 0, 255);
             PopupIcons.drawCentered(context, PopupIcons.HEART, centerX, centerY, size,

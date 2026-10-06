@@ -375,22 +375,25 @@ public final class LyricsOverlay implements AutoCloseable {
         hudHitRegions.clear();
         clearPopupControlBounds();
         renderingOverScreen = overScreen;
-        int centerX = bounds.x() + bounds.width() / 2;
-        int centerY = bounds.y() + bounds.height() / 2;
-        int clipWidth = Math.max(1, (int) Math.round(bounds.width() * amount));
-        int clipHeight = Math.max(1, (int) Math.round(bounds.height() * amount));
-        int clipLeft = centerX - clipWidth / 2;
-        int clipTop = centerY - clipHeight / 2;
-        // Keep the Back curve's slight under/overshoot in the transform while
-        // clipping remains constrained to the real popup rectangle.
-        float scale = (float) (.82 + rawAmount * .18);
+        double centerX = bounds.x() + bounds.width() / 2.0;
+        double centerY = bounds.y() + bounds.height() / 2.0;
+        // Scale the complete surface with its clip. Cropping a full-sized popup
+        // into a shrinking window leaves square corners and detached content.
+        float scale = (float) Math.clamp(rawAmount, .001, 1.03);
+        int clipLeft = (int) Math.floor(centerX - bounds.width() * scale / 2);
+        int clipTop = (int) Math.floor(centerY - bounds.height() * scale / 2);
+        int clipRight = (int) Math.ceil(centerX + bounds.width() * scale / 2);
+        int clipBottom = (int) Math.ceil(centerY + bounds.height() * scale / 2);
+        int clipWidth = Math.max(1, clipRight - clipLeft);
+        int clipHeight = Math.max(1, clipBottom - clipTop);
         GuiTransform.push(context);
         try {
-            GuiTransform.translate(context, centerX, centerY);
+            GuiTransform.translate(context, (float) centerX, (float) centerY);
             GuiTransform.scale(context, scale, scale);
-            GuiTransform.translate(context, -centerX, -centerY);
+            GuiTransform.translate(context, (float) -centerX, (float) -centerY);
             if (preferences.isModernMode()) {
-                int radius = morphRadius(Math.clamp(Math.min(bounds.width(), bounds.height()) / 22, 9, 16));
+                int radius = Math.max(1, (int) Math.round(scale * morphRadius(
+                        Math.clamp(Math.min(bounds.width(), bounds.height()) / 22, 9, 16))));
                 bandedTransitionDrawing = true;
                 bandedLyricsFramePlan = null;
                 try {
@@ -402,7 +405,7 @@ public final class LyricsOverlay implements AutoCloseable {
                     bandedLyricsFramePlan = null;
                 }
             } else {
-                context.enableScissor(clipLeft, clipTop, clipLeft + clipWidth, clipTop + clipHeight);
+                context.enableScissor(clipLeft, clipTop, clipRight, clipBottom);
                 try {
                     renderCompact(context, bounds.x(), bounds.y(), bounds.width(), bounds.height());
                 } finally {
@@ -556,7 +559,8 @@ public final class LyricsOverlay implements AutoCloseable {
         long elapsed = System.nanoTime() - popupClickNanos[control.ordinal()];
         if (elapsed < 0 || elapsed >= 420_000_000L) return 1;
         double phase = elapsed / 420_000_000.0;
-        return 1 + .27 * Math.sin(phase * Math.PI * 2) * Math.exp(-1.2 * phase);
+        double strength = control == PopupControl.TOGGLE_HEART ? .27 : .14;
+        return 1 + strength * Math.sin(phase * Math.PI * 2) * Math.exp(-1.2 * phase);
     }
 
     public void previewPopupVolume(double value) {
@@ -630,7 +634,7 @@ public final class LyricsOverlay implements AutoCloseable {
         double delta = frameDelta * preferences.getLyricsTransitionSpeed().deltaMultiplier();
         stepCornerMorph(delta);
         PopupMotion.State animation = popupMotion.step(delta,
-                preferences.isLyricsAnimations() && !renderingOverScreen);
+                preferences.isLyricsAnimations() && !renderingOverScreen && !bandedTransitionDrawing);
         GuiTransform.push(context);
         GuiTransform.translate(context, (float) (x + width / 2.0),
                 (float) (y + height / 2.0 + animation.offset()));
@@ -925,7 +929,8 @@ public final class LyricsOverlay implements AutoCloseable {
                 popupControlColor(popupHeartHover, visibility, true), visibility);
         drawPopupSettings(context, settings,
                 popupControlColor(popupSettingsHover, visibility, true),
-                morphRadius(preferences.isModernMode() ? utilitySize / 2 : 0));
+                morphRadius(preferences.isModernMode() ? Math.max(0, utilitySize / 2 - 1) : 0),
+                popupSettingsHover * visibility);
         if (volumeFits) renderPopupVolume(context, volume, visibility, delta);
 
         long duration = Math.max(0, playback.durationMillis());
@@ -1043,14 +1048,24 @@ public final class LyricsOverlay implements AutoCloseable {
                 Math.max(1, (int) Math.round(Math.clamp(bounds.height() - 6, 8, 17) * clickScale)), color);
     }
 
-    private void drawPopupSettings(GuiGraphicsExtractor context, ControlBounds bounds, int color, int radius) {
-        int background = (Math.clamp((color >>> 24) / 3, 0, 90) << 24) | 0xFFFFFF;
+    private void drawPopupSettings(GuiGraphicsExtractor context, ControlBounds bounds,
+                                   int color, int radius, double hover) {
+        int hoverFill = multiplyAlpha(0xFFFFFFFF, hover * .15);
+        if (hoverFill >>> 24 > 0) {
+            if (preferences.isModernMode()) {
+                RoundedGui.smoothFill(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+                        radius, hoverFill);
+            } else {
+                RoundedGui.fill(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+                        0, hoverFill);
+            }
+        }
         if (preferences.isModernMode()) {
-            RoundedGui.smoothFill(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
-                    radius, background);
+            RoundedGui.smoothOutline(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+                    radius, color);
         } else {
-            RoundedGui.fill(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
-                    0, background);
+            RoundedGui.outline(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+                    0, color);
         }
         PopupIcons.drawCentered(context, PopupIcons.SETTINGS,
                 bounds.x() + bounds.width() / 2, bounds.y() + bounds.height() / 2,
