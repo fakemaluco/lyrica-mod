@@ -95,9 +95,9 @@ public final class LyricsAnimation {
         GlowLevel level = intensityMultiplier < .78 ? GlowLevel.SOFT
                 : intensityMultiplier > 1.22 ? GlowLevel.STRONG : GlowLevel.NORMAL;
         return switch (level) {
-            case SOFT -> new ActiveGlowProfile(.26 * normalized, 1.5, .09 * normalized, 3.0);
-            case NORMAL -> new ActiveGlowProfile(.40 * normalized, 2.0, .16 * normalized, 4.6);
-            case STRONG -> new ActiveGlowProfile(.54 * normalized, 2.5, .22 * normalized, 5.8);
+            case SOFT -> new ActiveGlowProfile(.28 * normalized, 1.4, .10 * normalized, 2.8);
+            case NORMAL -> new ActiveGlowProfile(.44 * normalized, 1.7, .18 * normalized, 3.5);
+            case STRONG -> new ActiveGlowProfile(.58 * normalized, 2.0, .24 * normalized, 4.2);
         };
     }
 
@@ -120,17 +120,17 @@ public final class LyricsAnimation {
         return mix(Math.clamp(futureAlpha, 0, 1), Math.clamp(activeAlpha, 0, 1), lateFill);
     }
 
-    /** A soft halo follows every sung word, including short words without per-glyph motion. */
+    /** Combines the stable word halo with animation energy and a 25% leading-edge pulse. */
     public static double activeGlyphGlow(double motionGlow, long durationMillis,
                                          double wordProgress, double boundaryAmount) {
-        if (wordProgress <= 0 || wordProgress >= 1) return 0;
-        double bed = .62 + .13 * sustainedGlowStrength(durationMillis);
-        double motion = Math.clamp(motionGlow, 0, 1) * .90;
-        double boundary = Math.clamp(boundaryAmount, 0, 1) * .15;
+        if (!usesPerGlyphMotion(durationMillis) || wordProgress <= 0 || wordProgress >= 1) return 0;
+        double bed = .70 + .15 * sustainedGlowStrength(durationMillis);
+        double motion = Math.clamp(motionGlow, 0, 1);
+        double boundary = Math.clamp(boundaryAmount, 0, 1) * .25;
         return Math.clamp((Math.max(bed, motion) + boundary) * activeGlowEnvelope(wordProgress), 0, 1);
     }
 
-    /** Slow, derivative-free entrance and exit so the halo never pops on or off. */
+    /** Slow, derivative-free entrance and exit so the framebuffer halo never pops on or off. */
     public static double activeGlowEnvelope(double wordProgress) {
         if (wordProgress <= 0 || wordProgress >= 1) return 0;
         double entrance = smoother(Math.clamp(wordProgress / .20, 0, 1));
@@ -169,10 +169,10 @@ public final class LyricsAnimation {
         private static final ActiveGlowProfile NONE = new ActiveGlowProfile(0, 1.4, 0, 2.8);
 
         public ActiveGlowProfile {
-            coreOpacity = Math.clamp(coreOpacity, 0, .54);
-            coreRadius = Math.clamp(coreRadius, 1.5, 2.5);
-            outerOpacity = Math.clamp(outerOpacity, 0, .22);
-            outerRadius = Math.clamp(outerRadius, 3.0, 5.8);
+            coreOpacity = Math.clamp(coreOpacity, 0, .58);
+            coreRadius = Math.clamp(coreRadius, 1.4, 2.0);
+            outerOpacity = Math.clamp(outerOpacity, 0, .24);
+            outerRadius = Math.clamp(outerRadius, 2.8, 4.2);
         }
 
         public double opacity(GlowBand band) {

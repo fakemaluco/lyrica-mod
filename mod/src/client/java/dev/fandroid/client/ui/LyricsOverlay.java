@@ -70,13 +70,9 @@ public final class LyricsOverlay implements AutoCloseable {
     private static final int MAX_LAYOUTS = 384;
     private static final int MAX_SCENES = 24;
     private static final int MAX_STYLED_TEXT = 2_048;
-    private static final double[][] GLOW_DIRECTIONS = {
-            {1, 0}, {-1, 0}, {0, 1}, {0, -1},
-            {.707, .707}, {-.707, .707}, {.707, -.707}, {-.707, -.707}
-    };
 
     public static void initializeRenderingBackend() {
-        // The lyric halo now uses the same GUI drawing path on every supported version.
+        LyricsBloomRenderer.register();
     }
     private static final long INTERLUDE_MIN_GAP_MILLIS = LyricsAnimation.INTERLUDE_MIN_GAP_MILLIS;
     private static final int INTERLUDE_LAYOUT_HEIGHT = 30;
@@ -117,6 +113,7 @@ public final class LyricsOverlay implements AutoCloseable {
     private final PopupMotion popupMotion = new PopupMotion();
     private final EmptyStateMotion emptyStateMotion = new EmptyStateMotion();
     private final CoverFocusMotion popupCoverMotion = new CoverFocusMotion();
+    private final LyricsBloomRenderer bloomRenderer = new LyricsBloomRenderer();
     private final CoverArtTexture makerAvatarTexture = new CoverArtTexture();
     private final CoverArtTexture uploaderAvatarTexture = new CoverArtTexture();
     private volatile LyricsDocument document = new LyricsDocument(List.of());
@@ -126,6 +123,8 @@ public final class LyricsOverlay implements AutoCloseable {
     private volatile boolean lyricsLoading;
     private volatile int artworkAccent;
     private volatile CoverArtTexture artworkTexture;
+    private boolean hudEnhancedFailed;
+    private boolean phoneEnhancedFailed;
     private boolean renderingInPhone;
     private boolean renderingOverScreen;
     private boolean bandedTransitionDrawing;
@@ -1063,7 +1062,7 @@ public final class LyricsOverlay implements AutoCloseable {
             }
         }
         if (preferences.isModernMode()) {
-            RoundedGui.smoothHairlineOutline(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+            RoundedGui.smoothOutline(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
                     radius, color);
         } else {
             RoundedGui.outline(context, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
@@ -1348,7 +1347,8 @@ public final class LyricsOverlay implements AutoCloseable {
             LyricsViewport.Range window = currentScene.visibleRange(
                     minimum - interlude.expansion(), maximum + interlude.expansion());
             updateFrameMotion(currentScene, window, active, now, delta, manualReading);
-            boolean distantBloomNeeded = false;
+            boolean distantBloomNeeded = enhancedEffects()
+                    && currentScene.needsDistantBloom(window, preferences.isSimpleLyricsMode(), manualReading);
             List<ActiveGlowCommand> glowCommands = enhancedEffects()
                     ? buildActiveGlowCommands(currentScene, x, textWidth, focusY, scroll,
                     active, now, manualReading) : List.of();
@@ -1376,6 +1376,11 @@ public final class LyricsOverlay implements AutoCloseable {
                 renderActiveGlowPass(context, glowCommands, x, y, width, height,
                         accent, RenderPass.ACTIVE_GLOW_CORE, activeGlowCoreRadius());
             }
+        }
+        if (distantBloomNeeded && enhancedEffects()) {
+            renderEnhancedPass(context, currentScene, window, x, y, width, height,
+                    textWidth, focusY, scroll, active, now, accent, manualReading,
+                    RenderPass.DISTANT_BLOOM, distantBlurRadius(), interlude);
         }
         int visibleTokens;
         enableLyricsScissor(context, clipLeft, clipTop, clipRight, clipBottom);
@@ -1406,27 +1411,52 @@ public final class LyricsOverlay implements AutoCloseable {
         }
     }
 
-    /** Draws the planned active-word halo directly on the version's GUI surface. */
+    /** Reuses the same temporary framebuffer for the active halo and distant-line blur. */
+    private void renderEnhancedPass(DrawContext context, LyricsScene currentScene, LyricsViewport.Range window,
+                                    int x, int y, int width, int height, int textWidth, double focusY,
+                                    double scroll, int active, long now, int accent,
+                                    boolean manualReading, RenderPass pass, float radius,
+                                    InterludeLayout interlude) {
+        ClipBounds bounds = clipBounds(x + 2, y + 2, x + width - 2, y + height - 2);
+        if (!bloomRenderer.begin(context, bounds.left(), bounds.top(), bounds.right(), bounds.bottom(),
+                renderingInPhone)) {
+            markEnhancedFailed();
+            return;
+        }
+        renderScenePass(context, currentScene, window, x, y, width, height, textWidth,
+                focusY, scroll, active, now, accent, 0, false, manualReading, pass, false,
+                interlude);
+        if (!bloomRenderer.finish(context, bounds.left(), bounds.top(), bounds.right(), bounds.bottom(),
+                radius, true, pass.activeGlow())) {
+            markEnhancedFailed();
+        }
+    }
+
+    /** Submits an already planned active-line source; empty plans never touch a framebuffer. */
     private void renderActiveGlowPass(DrawContext context, List<ActiveGlowCommand> commands,
                                       int x, int y, int width, int height, int accent,
                                       RenderPass pass, float radius) {
         if (commands.isEmpty()) return;
         ClipBounds bounds = clipBounds(x + 2, y + 2, x + width - 2, y + height - 2);
-        context.enableScissor(bounds.left(), bounds.top(), bounds.right(), bounds.bottom());
+        if (!bloomRenderer.begin(context, bounds.left(), bounds.top(), bounds.right(), bounds.bottom(),
+                renderingInPhone)) {
+            markEnhancedFailed();
+            return;
+        }
         var band = pass == RenderPass.ACTIVE_GLOW_CORE
                 ? dev.fandroid.client.music.LyricsAnimation.GlowBand.CORE
                 : dev.fandroid.client.music.LyricsAnimation.GlowBand.OUTER;
-        int color = ACTIVE_TEXT;
+        double accentMix = pass == RenderPass.ACTIVE_GLOW_CORE ? .04 : .18;
+        int color = blend(ACTIVE_TEXT, accent, accentMix);
         double intensity = preferences.getLyricsGlowIntensity().multiplier();
-        try {
-            for (ActiveGlowCommand command : commands) {
-                var glow = activeGlowProfile(command.glowAmount(), intensity);
-                drawActiveGlowGlyph(context, command.glyph(), command.x(), command.y(), command.scale(),
-                        color, command.opacity() * glow.opacity(band), command.fillLeft(),
-                        command.fillRight(), radius, band == dev.fandroid.client.music.LyricsAnimation.GlowBand.OUTER);
-            }
-        } finally {
-            context.disableScissor();
+        for (ActiveGlowCommand command : commands) {
+            var glow = activeGlowProfile(command.glowAmount(), intensity);
+            drawActiveGlowGlyph(context, command.glyph(), command.x(), command.y(), command.scale(),
+                    color, command.opacity() * glow.opacity(band), command.fillLeft(), command.fillRight());
+        }
+        if (!bloomRenderer.finish(context, bounds.left(), bounds.top(), bounds.right(), bounds.bottom(),
+                radius, true, true)) {
+            markEnhancedFailed();
         }
     }
 
@@ -1479,7 +1509,6 @@ public final class LyricsOverlay implements AutoCloseable {
                 ? now >= token.timing.startMillis() ? 1 : -1
                 : (now - token.timing.startMillis())
                 / (double) (token.timing.endMillis() - token.timing.startMillis());
-        if (wordProgress <= 0 || wordProgress >= 1) return;
         var motionPlan = token.motionPlan(false);
         double durationStrength = motionPlan.glyphMotion()
                 ? individualMotionStrength(token.visualWordDurationMillis) : 0;
@@ -1491,41 +1520,39 @@ public final class LyricsOverlay implements AutoCloseable {
         var fill = fillInterval(token.rawWidth, fillOffset / token.rawWidth, isRightToLeft(token.text));
         double fillLeft = wordCenterX + (x + fill.start() * scale - wordCenterX) * wordScale;
         double fillRight = wordCenterX + (x + fill.end() * scale - wordCenterX) * wordScale;
-        if (motionPlan.glyphMotion()) {
-            for (Glyph glyph : token.glyphs) {
-                if (glyph.startMillis == Long.MIN_VALUE) continue;
-                Segment segment = token.segments.get(glyph.segmentIndex);
-                double restingX = x + glyph.x * scale;
-                double baseX = wordCenterX + (restingX - wordCenterX) * wordScale;
-                double characterScale = segment.motion.scale() * glyph.motion.scale();
-                double animatedScale = wordGlyphScale * characterScale;
-                double drawX = baseX + glyph.rawWidth * wordGlyphScale * (1 - characterScale) / 2;
-                double drawY = y + renderer().fontHeight * scale / 2
-                        - renderer().fontHeight * animatedScale / 2
-                        - (segment.motion.elevation() + glyph.motion.elevation()) * scale;
-                double motionGlow = Math.clamp(
-                        Math.max(glyph.motion.glow(), segment.motion.glow()) / 1.65, 0, 1);
-                double boundaryPixels = Math.clamp(fillOffset, 0, Math.max(0, token.rawWidth));
-                double edgeGlow = boundaryGlow(
-                        (boundaryPixels - (glyph.x + glyph.rawWidth / 2)) / Math.max(glyph.rawWidth, 1));
-                double glowAmount = activeGlyphGlow(motionGlow, token.visualWordDurationMillis,
-                        wordProgress, edgeGlow);
-                if (fillRight <= drawX + .01 || fillLeft >= drawX + glyph.rawWidth * animatedScale) continue;
-                activeGlowCommands.add(new ActiveGlowCommand(glyph, drawX, drawY, animatedScale,
-                        glowAmount, opacity, fillLeft, fillRight));
-            }
-            return;
+        for (Glyph glyph : token.glyphs) {
+            if (glyph.startMillis == Long.MIN_VALUE) continue;
+            Segment segment = token.segments.get(glyph.segmentIndex);
+            boolean glyphMotion = motionPlan.glyphMotionForFragment(segment.durationMillis());
+            if (!glyphMotion) continue;
+            double glowProgress = motionPlan.syllableMotion()
+                    ? timedProgress(now, segment.startMillis, segment.endMillis) : wordProgress;
+            long glowDuration = motionPlan.syllableMotion()
+                    ? segment.durationMillis() : token.visualWordDurationMillis;
+            double wordSustainedGlow = sustainedWordGlow(glowDuration, glowProgress);
+            double restingX = x + glyph.x * scale;
+            double baseX = wordCenterX + (restingX - wordCenterX) * wordScale;
+            double characterScale = segment.motion.scale() * glyph.motion.scale();
+            double animatedScale = wordGlyphScale * characterScale;
+            double drawX = baseX + glyph.rawWidth * wordGlyphScale * (1 - characterScale) / 2;
+            double drawY = y + renderer().fontHeight * scale / 2
+                    - renderer().fontHeight * animatedScale / 2
+                    - (segment.motion.elevation() + glyph.motion.elevation()) * scale;
+            double motionGlow = Math.clamp(
+                    Math.max(glyph.motion.glow(), segment.motion.glow()) / 1.65, 0, 1);
+            double boundaryPixels = Math.clamp(fillOffset, 0, Math.max(0, token.rawWidth));
+            double edgeGlow = boundaryGlow(
+                    (boundaryPixels - (glyph.x + glyph.rawWidth / 2)) / Math.max(glyph.rawWidth, 1));
+            double glowAmount = activeGlyphGlow(
+                    Math.max(motionGlow, Math.min(1, wordSustainedGlow / 1.45)),
+                    glowDuration, glowProgress, edgeGlow);
+            if (!activeGlowProfile(glowAmount,
+                    preferences.getLyricsGlowIntensity().multiplier()).needsBloom()) continue;
+            double glyphRight = drawX + glyph.rawWidth * animatedScale;
+            if (fillRight <= drawX + .01 || fillLeft >= glyphRight - .01) continue;
+            activeGlowCommands.add(new ActiveGlowCommand(glyph, drawX, drawY, animatedScale,
+                    glowAmount, opacity, fillLeft, fillRight));
         }
-        double glowAmount = activeGlyphGlow(
-                sustainedWordGlow(token.visualWordDurationMillis, wordProgress),
-                token.visualWordDurationMillis, wordProgress, .25);
-        if (!activeGlowProfile(glowAmount,
-                preferences.getLyricsGlowIntensity().multiplier()).needsBloom()) return;
-        double drawX = wordCenterX + (x - wordCenterX) * wordScale;
-        Glyph wholeWord = new Glyph(token.text, 0, token.rawWidth,
-                token.timing.startMillis(), token.timing.endMillis(), 0);
-        activeGlowCommands.add(new ActiveGlowCommand(wholeWord, drawX, y, wordGlyphScale,
-                glowAmount, opacity, fillLeft, fillRight));
     }
 
     /** Advances every visible spring exactly once before any framebuffer or base pass draws it. */
@@ -1999,9 +2026,7 @@ public final class LyricsOverlay implements AutoCloseable {
                             : dev.fandroid.client.music.LyricsAnimation.GlowBand.OUTER;
                     drawActiveGlowGlyph(context, glyph, drawX, drawY, animatedScale,
                             blend(ACTIVE_TEXT, accent, accentMix),
-                            opacity * glow.opacity(band), fillLeft, fillRight,
-                            (float) glow.radius(band),
-                            band == dev.fandroid.client.music.LyricsAnimation.GlowBand.OUTER);
+                            opacity * glow.opacity(band), fillLeft, fillRight);
                 }
                 continue;
             }
@@ -2011,38 +2036,19 @@ public final class LyricsOverlay implements AutoCloseable {
         }
     }
 
-    /** Two low-opacity radial bands create a soft halo on every graphics pipeline. */
+    /** Emits one clipped source for the shader; it never fakes a halo with offset text draws. */
     private void drawActiveGlowGlyph(DrawContext context, Glyph glyph, double x, double y, double scale,
-                                     int color, double opacity, double fillLeft, double fillRight,
-                                     float radius, boolean outer) {
+                                     int color, double opacity, double fillLeft, double fillRight) {
         double glyphRight = x + glyph.rawWidth * scale;
         if (fillRight <= x + .01 || fillLeft >= glyphRight - .01) return;
-        double coverage = Math.clamp((Math.min(glyphRight, fillRight) - Math.max(x, fillLeft))
-                / Math.max(glyphRight - x, .001), 0, 1);
-        int margin = (int) Math.ceil(radius) + 2;
-        int clipLeft = (int) Math.floor(Math.max(x, fillLeft) - margin);
-        int clipTop = (int) Math.floor(y - margin);
-        int clipRight = (int) Math.ceil(Math.min(glyphRight, fillRight) + margin);
-        int clipBottom = (int) Math.ceil(y + renderer().fontHeight * scale + margin);
+        int clipLeft = (int) Math.floor(Math.max(x, fillLeft) - 1);
+        int clipTop = (int) Math.floor(y - 2);
+        int clipRight = (int) Math.ceil(Math.min(glyphRight, fillRight) + 1);
+        int clipBottom = (int) Math.ceil(y + renderer().fontHeight * scale + 2);
         if (clipRight <= clipLeft || clipBottom <= clipTop) return;
-        enableLyricsScissor(context, clipLeft, clipTop, clipRight, clipBottom);
-        try {
-            int rings = outer ? 2 : 1;
-            for (int ring = 0; ring < rings; ring++) {
-                double ringRadius = outer && ring == 0 ? radius * .55 : radius;
-                double weight = outer ? ring == 0 ? .25 : .16 : .38;
-                int layerColor = multiplyAlpha(color, opacity * weight * Math.sqrt(coverage));
-                if (layerColor >>> 24 == 0) continue;
-                for (double[] direction : GLOW_DIRECTIONS) {
-                    drawScaledWithoutShadow(context, renderer(), glyph.text,
-                            x + Math.round(direction[0] * ringRadius),
-                            y + Math.round(direction[1] * ringRadius),
-                            layerColor, scale);
-                }
-            }
-        } finally {
-            context.disableScissor();
-        }
+        bloomRenderer.drawGlyph(context, renderer(), styledText(glyph.text), x, y, scale,
+                multiplyAlpha(color, opacity * lyricsSurfaceOpacity),
+                clipLeft, clipTop, clipRight, clipBottom);
     }
 
     private void drawProgressiveGlyph(DrawContext context, Glyph glyph, double x, double y, double scale,
@@ -2378,7 +2384,13 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     private boolean enhancedEffects() {
-        return !preferences.isSimpleLyricsMode();
+        if (preferences.isSimpleLyricsMode()) return false;
+        return renderingInPhone ? !phoneEnhancedFailed : !hudEnhancedFailed;
+    }
+
+    private void markEnhancedFailed() {
+        if (renderingInPhone) phoneEnhancedFailed = true;
+        else hudEnhancedFailed = true;
     }
 
     private void enableLyricsScissor(DrawContext context, int left, int top, int right, int bottom) {
@@ -2446,6 +2458,7 @@ public final class LyricsOverlay implements AutoCloseable {
 
     @Override
     public void close() {
+        bloomRenderer.close();
         makerAvatarTexture.close();
         uploaderAvatarTexture.close();
     }
@@ -2490,16 +2503,14 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     private void drawShadowAtOrigin(DrawContext context, TextRenderer renderer, String value, int sourceAlpha) {
-        // A single restrained silhouette keeps the shadow legible without the
-        // overlapping black blocks produced by several nearly opaque copies.
-        int shadowAlpha = Math.min(128, (int) Math.round(sourceAlpha
-                * preferences.getLyricsShadowOpacity() / 100.0 * .48));
+        int shadowAlpha = Math.min(230, (int) Math.round(sourceAlpha
+                * preferences.getLyricsShadowOpacity() / 100.0));
         if (shadowAlpha <= 0) return;
         Text styled = styledText(value);
         int distance = preferences.getLyricsShadowDistance();
         int softness = preferences.getLyricsShadowSoftness();
         if (softness > 0) {
-            int haloAlpha = Math.max(1, shadowAlpha / (softness == 1 ? 12 : 16));
+            int haloAlpha = Math.max(1, shadowAlpha / (softness == 1 ? 5 : 7));
             int halo = haloAlpha << 24;
             context.drawText(renderer, styled, distance - 1, distance, halo, false);
             context.drawText(renderer, styled, distance + 1, distance, halo, false);

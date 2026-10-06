@@ -23,8 +23,6 @@ public final class RoundedGui {
             new LinkedHashMap<>(8, .75F, true);
     private static final Map<Integer, MaskTexture> FILL_TEXTURES =
             new LinkedHashMap<>(8, .75F, true);
-    private static final Map<Integer, MaskTexture> HAIRLINE_TEXTURES =
-            new LinkedHashMap<>(8, .75F, true);
     private static final List<List<RoundedClipBand>> CLIP_PLANS = createClipPlans();
 
     private RoundedGui() { }
@@ -176,18 +174,6 @@ public final class RoundedGui {
         smoothOutline(context, x, y, width, height, radius, color, color);
     }
 
-    /** A tintable one-pixel stroke for small circular controls. */
-    public static void smoothHairlineOutline(DrawContext context, int x, int y, int width, int height,
-                                             int radius, int color) {
-        if (width <= 2 || height <= 2 || color >>> 24 == 0) return;
-        int r = radius(width, height, radius);
-        if (r == 0) {
-            outline(context, x, y, width, height, 0, color);
-        } else {
-            drawMaskNineSlice(context, hairlineTexture(r), x, y, width, height, color);
-        }
-    }
-
     private static BorderTexture borderTexture(BorderKey key) {
         synchronized (BORDER_TEXTURES) {
             BorderTexture existing = BORDER_TEXTURES.get(key);
@@ -243,40 +229,6 @@ public final class RoundedGui {
             texture.upload();
             MaskTexture created = new MaskTexture(id, texture, textureSize, cap);
             FILL_TEXTURES.put(radius, created);
-            return created;
-        }
-    }
-
-    private static MaskTexture hairlineTexture(int radius) {
-        synchronized (HAIRLINE_TEXTURES) {
-            MaskTexture existing = HAIRLINE_TEXTURES.get(radius);
-            if (existing != null) return existing;
-            int cap = Math.max(1, radius);
-            int textureSize = (cap * 2 + 2) * BORDER_SUPERSAMPLE;
-            NativeImageBackedTexture texture = PlatformTextures.empty(
-                    "Relay hairline border", textureSize, textureSize);
-            Identifier id = PlatformTextures.register("relay_hairline_border_" + radius, texture);
-            NativeImage image = texture.getImage();
-            if (image == null) throw new IllegalStateException("hairline border texture has no image");
-            double half = textureSize / 2.0;
-            double stroke = BORDER_SUPERSAMPLE;
-            for (int py = 0; py < textureSize; py++) {
-                for (int px = 0; px < textureSize; px++) {
-                    double outer = roundedRectDistance(px + .5, py + .5,
-                            half, half, half, half, radius * BORDER_SUPERSAMPLE);
-                    double inner = roundedRectDistance(px + .5, py + .5,
-                            half, half, half - stroke, half - stroke,
-                            Math.max(0, radius * BORDER_SUPERSAMPLE - stroke));
-                    double outerCoverage = Math.clamp(.5 - outer, 0, 1);
-                    double innerCoverage = Math.clamp(.5 - inner, 0, 1);
-                    int alpha = Math.clamp((int) Math.round(
-                            Math.clamp(outerCoverage - innerCoverage, 0, 1) * 255), 0, 255);
-                    image.setColor(px, py, toAbgr(alpha << 24 | 0xFFFFFF));
-                }
-            }
-            texture.upload();
-            MaskTexture created = new MaskTexture(id, texture, textureSize, cap);
-            HAIRLINE_TEXTURES.put(radius, created);
             return created;
         }
     }

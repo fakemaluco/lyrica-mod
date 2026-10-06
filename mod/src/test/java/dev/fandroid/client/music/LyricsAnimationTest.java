@@ -166,18 +166,18 @@ class LyricsAnimationTest {
         LyricsAnimation.ActiveGlowProfile strong = LyricsAnimation.activeGlowProfile(1.65, 1.45);
 
         assertThat(none.needsBloom()).isFalse();
-        assertThat(soft.coreOpacity()).isEqualTo(.26);
-        assertThat(soft.outerOpacity()).isEqualTo(.09);
-        assertThat(normal.coreOpacity()).isEqualTo(.40);
-        assertThat(normal.outerOpacity()).isEqualTo(.16);
-        assertThat(strong.coreOpacity()).isEqualTo(.54);
-        assertThat(strong.outerOpacity()).isEqualTo(.22);
-        assertThat(soft.coreRadius()).isEqualTo(1.5);
-        assertThat(normal.coreRadius()).isEqualTo(2.0);
-        assertThat(strong.coreRadius()).isEqualTo(2.5);
-        assertThat(soft.outerRadius()).isEqualTo(3.0);
-        assertThat(normal.outerRadius()).isEqualTo(4.6);
-        assertThat(strong.outerRadius()).isEqualTo(5.8);
+        assertThat(soft.coreOpacity()).isEqualTo(.28);
+        assertThat(soft.outerOpacity()).isEqualTo(.10);
+        assertThat(normal.coreOpacity()).isEqualTo(.44);
+        assertThat(normal.outerOpacity()).isEqualTo(.18);
+        assertThat(strong.coreOpacity()).isEqualTo(.58);
+        assertThat(strong.outerOpacity()).isEqualTo(.24);
+        assertThat(soft.coreRadius()).isEqualTo(1.4);
+        assertThat(normal.coreRadius()).isEqualTo(1.7);
+        assertThat(strong.coreRadius()).isEqualTo(2.0);
+        assertThat(soft.outerRadius()).isEqualTo(2.8);
+        assertThat(normal.outerRadius()).isEqualTo(3.5);
+        assertThat(strong.outerRadius()).isEqualTo(4.2);
         assertThat(none.renderPlan().activeGlowTextLayers()).isZero();
         assertThat(normal.renderPlan().baseTextLayers()).isZero();
         assertThat(normal.renderPlan().distantBloomTextLayers()).isZero();
@@ -208,12 +208,12 @@ class LyricsAnimationTest {
     }
 
     @Test
-    void leadingEdgeAddsARestrainedBoostAndQuickWordsAlsoGlow() {
+    void leadingEdgeAddsAtMostTwentyFivePercentAndNeverLeavesResidue() {
         double bed = LyricsAnimation.activeGlyphGlow(0, 5_000, .5, 0);
         double edge = LyricsAnimation.activeGlyphGlow(0, 5_000, .5, 1);
 
         assertThat(edge - bed).isCloseTo(.15, org.assertj.core.data.Offset.offset(.000001));
-        assertThat(LyricsAnimation.activeGlyphGlow(1, 400, .5, 1)).isPositive();
+        assertThat(LyricsAnimation.activeGlyphGlow(1, 400, .5, 1)).isZero();
         assertThat(LyricsAnimation.activeGlyphGlow(1, 5_000, 0, 1)).isZero();
         assertThat(LyricsAnimation.activeGlyphGlow(1, 5_000, 1, 1)).isZero();
         assertThat(LyricsAnimation.activeGlyphGlow(1, 5_000, .5, 1)).isEqualTo(1);

@@ -16,20 +16,6 @@ class LyricsAnimationTest {
     }
 
     @Test
-    void activeHaloCoversQuickAndHeldWordsWithoutLingering() {
-        double quick = LyricsAnimation.activeGlyphGlow(0, 400, .5, .25);
-        double held = LyricsAnimation.activeGlyphGlow(0, 5_000, .5, .25);
-        assertThat(quick).isPositive();
-        assertThat(held).isGreaterThan(quick);
-        assertThat(LyricsAnimation.activeGlyphGlow(0, 400, 0, .25)).isZero();
-        assertThat(LyricsAnimation.activeGlyphGlow(0, 400, 1, .25)).isZero();
-        var soft = LyricsAnimation.activeGlowProfile(quick, .55);
-        var strong = LyricsAnimation.activeGlowProfile(quick, 1.45);
-        assertThat(strong.coreOpacity()).isGreaterThan(soft.coreOpacity());
-        assertThat(strong.outerRadius()).isGreaterThan(soft.outerRadius());
-    }
-
-    @Test
     void liftUsesASlowerRoundedEntranceAndExit() {
         assertThat(LyricsAnimation.liftKeyframe(0)).isZero();
         assertThat(LyricsAnimation.liftKeyframe(.12)).isLessThan(.5);
