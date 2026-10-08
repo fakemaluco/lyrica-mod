@@ -19,6 +19,7 @@ pub struct Server {
     port: u16,
     pairing_code: String,
     clients: Arc<Mutex<Vec<mpsc::Sender<String>>>>,
+    youtube_clients: Arc<Mutex<Vec<mpsc::Sender<String>>>>,
 }
 
 impl Server {
@@ -34,7 +35,10 @@ impl Server {
         let token = load_or_create_token()?;
         let clients = Arc::new(Mutex::new(Vec::new()));
         let active_clients = Arc::new(AtomicUsize::new(0));
+        let youtube_clients = Arc::new(Mutex::new(Vec::new()));
+        let active_youtube_clients = Arc::new(AtomicUsize::new(0));
         let accept_clients = clients.clone();
+        let accept_youtube_clients = youtube_clients.clone();
         let accept_code = pairing_code.clone();
         thread::spawn(move || {
             for stream in listener.incoming().flatten() {
@@ -42,14 +46,18 @@ impl Server {
                 let code = accept_code.clone();
                 let token = token.clone();
                 let clients = accept_clients.clone();
+                let youtube_clients = accept_youtube_clients.clone();
                 let active_clients = active_clients.clone();
-                thread::spawn(move || handle(stream, events, code, token, clients, active_clients));
+                let active_youtube_clients = active_youtube_clients.clone();
+                thread::spawn(move || handle(stream, events, code, token, clients,
+                    youtube_clients, active_clients, active_youtube_clients));
             }
         });
         Ok(Self {
             port,
             pairing_code,
             clients,
+            youtube_clients,
         })
     }
 
@@ -60,8 +68,21 @@ impl Server {
         &self.pairing_code
     }
 
-    pub fn broadcast(&self, message: &str) {
-        if let Ok(mut clients) = self.clients.lock() {
+    pub fn broadcast_spicetify(&self, message: &str) {
+        Self::broadcast_to(&self.clients, message);
+    }
+
+    pub fn broadcast_youtube(&self, message: &str) {
+        Self::broadcast_to(&self.youtube_clients, message);
+    }
+
+    pub fn broadcast_all(&self, message: &str) {
+        self.broadcast_spicetify(message);
+        self.broadcast_youtube(message);
+    }
+
+    fn broadcast_to(clients: &Mutex<Vec<mpsc::Sender<String>>>, message: &str) {
+        if let Ok(mut clients) = clients.lock() {
             clients.retain(|client| client.send(message.to_owned()).is_ok());
         }
     }
@@ -96,7 +117,9 @@ fn handle(
     pairing_code: String,
     token: String,
     clients: Arc<Mutex<Vec<mpsc::Sender<String>>>>,
+    youtube_clients: Arc<Mutex<Vec<mpsc::Sender<String>>>>,
     active_clients: Arc<AtomicUsize>,
+    active_youtube_clients: Arc<AtomicUsize>,
 ) {
     let Ok(mut socket) = accept(stream) else {
         return;
@@ -136,18 +159,12 @@ fn handle(
     } else {
         let _ = socket.send(Message::Text(json!({"type": "ready"}).to_string().into()));
     }
-    let was_empty = active_clients.fetch_add(1, Ordering::SeqCst) == 0;
-    if was_empty {
-        let _ = events.send(Event::SpicetifyStatus(true));
-    }
-    let _connection = ConnectionGuard {
+    let mut connection = ConnectionGuard {
         events: events.clone(),
-        active_clients,
+        active_clients: None,
+        youtube: false,
     };
-    let (outgoing, receiver) = mpsc::channel();
-    if let Ok(mut all) = clients.lock() {
-        all.push(outgoing);
-    }
+    let (outgoing, receiver) = mpsc::channel::<String>();
     let _ = socket.get_mut().set_nonblocking(true);
     loop {
         while let Ok(message) = receiver.try_recv() {
@@ -162,20 +179,52 @@ fn handle(
                 }
                 if let Ok(value) = serde_json::from_str::<Value>(&text) {
                     if value.get("type").and_then(Value::as_str) == Some("snapshot") {
+                        // Older Spotify companions sent snapshots without a hello.
+                        // Keep them working; the YouTube companion always identifies
+                        // itself first so its playback cannot enter this channel.
+                        if connection.active_clients.is_none() {
+                            if let Ok(mut all) = clients.lock() { all.push(outgoing.clone()); }
+                            if active_clients.fetch_add(1, Ordering::SeqCst) == 0 {
+                                let _ = events.send(Event::SpicetifyStatus(true));
+                            }
+                            connection.active_clients = Some(active_clients.clone());
+                        }
                         if let Ok(snapshot) =
                             serde_json::from_value::<PlaybackSnapshot>(value["snapshot"].clone())
                         {
-                            let _ = events.send(Event::SpicetifySnapshot(snapshot));
+                            if connection.active_clients.is_some() {
+                                let event = if connection.youtube { Event::YoutubeSnapshot(snapshot) }
+                                    else { Event::SpicetifySnapshot(snapshot) };
+                                let _ = events.send(event);
+                            }
                         }
                     } else if value.get("type").and_then(Value::as_str) == Some("client_hello") {
                         if let Ok(hello) =
                             serde_json::from_value::<SpicetifyClientHello>(value.clone())
                         {
                             if valid_hello(&hello) {
-                                let _ = events.send(Event::SpicetifyClientHello(hello));
+                                if connection.active_clients.is_none() {
+                                    connection.youtube = hello.client_kind == "youtube_music";
+                                    let (list, count) = if connection.youtube {
+                                        (&youtube_clients, &active_youtube_clients)
+                                    } else {
+                                        (&clients, &active_clients)
+                                    };
+                                    if let Ok(mut all) = list.lock() { all.push(outgoing.clone()); }
+                                    if count.fetch_add(1, Ordering::SeqCst) == 0 {
+                                        let status = if connection.youtube {
+                                            Event::YoutubeStatus(true)
+                                        } else { Event::SpicetifyStatus(true) };
+                                        let _ = events.send(status);
+                                    }
+                                    connection.active_clients = Some(count.clone());
+                                }
+                                if !connection.youtube {
+                                    let _ = events.send(Event::SpicetifyClientHello(hello));
+                                }
                             }
                         }
-                    } else if value.get("type").and_then(Value::as_str) == Some("lyrics_status") {
+                    } else if !connection.youtube && value.get("type").and_then(Value::as_str) == Some("lyrics_status") {
                         if let Ok(status) =
                             serde_json::from_value::<SpicetifyLyricsStatus>(value.clone())
                         {
@@ -183,7 +232,7 @@ fn handle(
                                 let _ = events.send(Event::SpicetifyLyricsStatus(status));
                             }
                         }
-                    } else if value.get("type").and_then(Value::as_str) == Some("lyrics_payload") {
+                    } else if !connection.youtube && value.get("type").and_then(Value::as_str) == Some("lyrics_payload") {
                         let uri = value.get("uri").and_then(Value::as_str).unwrap_or("");
                         let format = value.get("format").and_then(Value::as_str).unwrap_or("");
                         let payload = value.get("payload").and_then(Value::as_str).unwrap_or("");
@@ -267,6 +316,7 @@ fn valid_hello(hello: &SpicetifyClientHello) -> bool {
         && hello.protocol_version <= 16
         && !hello.extension_version.is_empty()
         && hello.extension_version.len() <= 40
+        && (hello.client_kind.is_empty() || hello.client_kind == "youtube_music")
         && hello.capabilities.is_object()
 }
 
@@ -286,13 +336,18 @@ fn valid_lyrics_status(status: &SpicetifyLyricsStatus) -> bool {
 
 struct ConnectionGuard {
     events: mpsc::Sender<Event>,
-    active_clients: Arc<AtomicUsize>,
+    active_clients: Option<Arc<AtomicUsize>>,
+    youtube: bool,
 }
 
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
-        if self.active_clients.fetch_sub(1, Ordering::SeqCst) == 1 {
-            let _ = self.events.send(Event::SpicetifyStatus(false));
+        if let Some(clients) = &self.active_clients {
+            if clients.fetch_sub(1, Ordering::SeqCst) == 1 {
+                let status = if self.youtube { Event::YoutubeStatus(false) }
+                    else { Event::SpicetifyStatus(false) };
+                let _ = self.events.send(status);
+            }
         }
     }
 }
@@ -307,8 +362,12 @@ mod tests {
             protocol_version: 2,
             extension_version: "0.2.0".into(),
             capabilities: json!({"artwork": true, "spicyCache": true, "rawTtml": true}),
+            client_kind: String::new(),
         };
         assert!(valid_hello(&hello));
+        assert!(valid_hello(&SpicetifyClientHello {
+            client_kind: "youtube_music".into(), ..hello.clone()
+        }));
         assert!(valid_lyrics_status(&SpicetifyLyricsStatus {
             uri: "spotify:track:6wOYnPq1hPihRepcDClPUw".into(),
             status: "HIT_CACHE".into(),

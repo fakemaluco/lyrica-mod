@@ -6,6 +6,10 @@ import net.minecraft.client.gui.DrawContext;
 public final class GuiTransform {
     private GuiTransform() { }
 
+    public static boolean scissorTransformsPose() { return false; }
+    public static boolean nativeTextShadow() { return false; }
+    public static boolean dualGlow() { return false; }
+
     public static void push(DrawContext context) {
         context.getMatrices().push();
     }

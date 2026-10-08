@@ -32,8 +32,11 @@ jobs:
           Get-ChildItem lyrics-popup/build/libs,lyrics-popup-1.21.11/build/libs,lyrics-popup-26.2/build/libs -Filter "lyrica-*.jar" |
             Where-Object { $_.Name -notmatch "sources|dev" } |
             Copy-Item -Destination release-assets
+          Compress-Archive -Path youtube-music-extension/manifest.json,youtube-music-extension/content.js,youtube-music-extension/background.js,youtube-music-extension/README.md `
+            -DestinationPath release-assets/lyrica-youtube-music-bridge-$releaseVersion.zip
       - name: Publish standalone jars
         uses: softprops/action-gh-release@v2
         with:
           files: |
             release-assets/*.jar
+            release-assets/*.zip

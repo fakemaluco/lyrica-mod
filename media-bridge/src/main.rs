@@ -1,5 +1,6 @@
 mod platform;
 mod spicetify;
+mod timeline;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -127,6 +128,8 @@ pub struct SpicetifyClientHello {
     pub protocol_version: u32,
     pub extension_version: String,
     pub capabilities: Value,
+    #[serde(default)]
+    pub client_kind: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -142,10 +145,12 @@ enum Event {
     Source(String),
     ReloadAudioOutput,
     SpicetifySnapshot(PlaybackSnapshot),
+    YoutubeSnapshot(PlaybackSnapshot),
     SpicetifyLyrics(SpicetifyLyricsPayload),
     SpicetifyClientHello(SpicetifyClientHello),
     SpicetifyLyricsStatus(SpicetifyLyricsStatus),
     SpicetifyStatus(bool),
+    YoutubeStatus(bool),
     Shutdown,
 }
 
@@ -200,17 +205,21 @@ fn main() -> Result<()> {
     let mut system = platform::SystemMedia::new()?;
     let mut intensity = platform::start_intensity_capture();
     let mut latest_spicetify: Option<(PlaybackSnapshot, Instant)> = None;
+    let mut latest_youtube: Option<(PlaybackSnapshot, Instant)> = None;
     let mut spicetify_connected = false;
+    let mut youtube_connected = false;
     let mut active_source = "AUTOMATIC".to_owned();
     let mut last_state_request = Instant::now() - Duration::from_secs(5);
+    let mut timeline = timeline::TimelineTracker::default();
     loop {
         if !drain_events(&receiver, &mut system, &spicetify, &mut latest_spicetify,
-            &mut spicetify_connected, &mut active_source, &mut intensity) {
+            &mut latest_youtube, &mut spicetify_connected, &mut youtube_connected,
+            &mut active_source, &mut intensity) {
             intensity.stop();
             return Ok(());
         }
         if last_state_request.elapsed() >= Duration::from_secs(2) {
-            spicetify.broadcast(&json!({"type": "request_state"}).to_string());
+            spicetify.broadcast_all(&json!({"type": "request_state"}).to_string());
             last_state_request = Instant::now();
         }
         let system_snapshot = system.snapshot_for(&active_source).ok();
@@ -219,15 +228,28 @@ fn main() -> Result<()> {
                     && observed.elapsed() < Duration::from_secs(15 * 60))
                 .map(|(snapshot, _)| snapshot.clone())
                 .unwrap_or_else(PlaybackSnapshot::unavailable);
+        let youtube_snapshot = || latest_youtube.as_ref()
+                .filter(|(snapshot, observed)| snapshot.is_meaningful()
+                    && observed.elapsed() < Duration::from_secs(60))
+                .map(|(snapshot, _)| snapshot.clone())
+                .unwrap_or_else(PlaybackSnapshot::unavailable);
         let mut snapshot = match active_source.as_str() {
-            "SPICETIFY_BRIDGE" => spicetify_snapshot(),
-            "AUTOMATIC" if spicetify_connected => spicetify_snapshot(),
+            "SPICETIFY_BRIDGE" => select_snapshot(latest_spicetify.as_ref(), system_snapshot),
+            "AUTOMATIC" if spicetify_connected && spicetify_snapshot().is_meaningful() =>
+                select_snapshot(latest_spicetify.as_ref(), system_snapshot),
+            "AUTOMATIC" if youtube_connected && youtube_snapshot().is_meaningful() =>
+                select_snapshot_with_timeout(latest_youtube.as_ref(), system_snapshot,
+                    Duration::from_secs(60)),
+            "YOUTUBE_MUSIC" if youtube_connected && youtube_snapshot().is_meaningful() =>
+                select_snapshot_with_timeout(latest_youtube.as_ref(), system_snapshot,
+                    Duration::from_secs(60)),
             "WINDOWS_MEDIA" | "YOUTUBE_MUSIC" =>
                 system_snapshot.unwrap_or_else(PlaybackSnapshot::unavailable),
             "SPOTIFY_ACCOUNT" => PlaybackSnapshot::unavailable(),
             _ => select_snapshot(latest_spicetify.as_ref(), system_snapshot),
         };
         snapshot.intensity = intensity.intensity();
+        timeline.update(&mut snapshot, Instant::now());
         snapshot.beat_phase = intensity.beat_phase();
         snapshot.bpm = intensity.bpm();
         snapshot.spectral_centroid = intensity.centroid();
@@ -241,16 +263,31 @@ fn select_snapshot(
     spicetify: Option<&(PlaybackSnapshot, Instant)>,
     system: Option<PlaybackSnapshot>,
 ) -> PlaybackSnapshot {
+    select_snapshot_with_timeout(spicetify, system, Duration::from_secs(15 * 60))
+}
+
+fn select_snapshot_with_timeout(
+    spicetify: Option<&(PlaybackSnapshot, Instant)>,
+    system: Option<PlaybackSnapshot>,
+    max_age: Duration,
+) -> PlaybackSnapshot {
     let Some((rich, observed)) = spicetify.filter(|(snapshot, observed)| {
-        snapshot.is_meaningful() && observed.elapsed() < Duration::from_secs(15 * 60)
+        snapshot.is_meaningful() && observed.elapsed() < max_age
     }) else {
         return system.unwrap_or_else(PlaybackSnapshot::unavailable);
     };
     let fresh = observed.elapsed() < Duration::from_secs(10);
     match system {
-        Some(system) if fresh || same_track(rich, &system) => {
-            rich.clone().enrich_from(Some(&system))
+        Some(system) if same_track(rich, &system) => {
+            let mut selected = rich.clone().enrich_from(Some(&system));
+            if !fresh {
+                selected.position_millis = system.position_millis;
+                selected.playing = system.playing;
+                selected.observed_at = system.observed_at;
+            }
+            selected
         }
+        Some(system) if fresh => rich.clone().enrich_from(Some(&system)),
         Some(system) => system,
         None => rich.clone(),
     }
@@ -266,7 +303,10 @@ fn same_track(first: &PlaybackSnapshot, second: &PlaybackSnapshot) -> bool {
     }
     let first_title = normalized(&first.title);
     let second_title = normalized(&second.title);
-    !first_title.is_empty() && first_title == second_title
+    if first_title.is_empty() || first_title != second_title { return false; }
+    let first_artist = normalized(&first.artist);
+    let second_artist = normalized(&second.artist);
+    first_artist.is_empty() || second_artist.is_empty() || first_artist == second_artist
 }
 
 fn drain_events(
@@ -274,16 +314,20 @@ fn drain_events(
     system: &mut platform::SystemMedia,
     spicetify: &spicetify::Server,
     latest: &mut Option<(PlaybackSnapshot, Instant)>,
+    latest_youtube: &mut Option<(PlaybackSnapshot, Instant)>,
     spicetify_connected: &mut bool,
+    youtube_connected: &mut bool,
     active_source: &mut String,
     intensity: &mut platform::IntensityCapture,
 ) -> bool {
     while let Ok(event) = receiver.try_recv() {
         match event {
             Event::Command(command, source) => {
-                let targets = command_targets(&source, *spicetify_connected);
+                let targets = command_targets(&source, *spicetify_connected, *youtube_connected);
                 if targets.system { let _ = system.command_for(&command, &source); }
-                if targets.spicetify { spicetify.broadcast(
+                if targets.spicetify { spicetify.broadcast_spicetify(
+                    &json!({"type": "command", "command": command}).to_string()); }
+                if targets.youtube { spicetify.broadcast_youtube(
                     &json!({"type": "command", "command": command}).to_string()); }
             }
             Event::Source(source) => *active_source = source,
@@ -295,6 +339,13 @@ fn drain_events(
             Event::SpicetifySnapshot(snapshot) => {
                 if snapshot.is_meaningful() {
                     *latest = Some((snapshot, Instant::now()));
+                }
+            }
+            Event::YoutubeSnapshot(snapshot) => {
+                if snapshot.is_meaningful() {
+                    *latest_youtube = Some((snapshot, Instant::now()));
+                } else {
+                    *latest_youtube = None;
                 }
             }
             Event::SpicetifyLyrics(payload) => {
@@ -313,6 +364,11 @@ fn drain_events(
                     *latest = None;
                 }
             }
+            Event::YoutubeStatus(connected) => {
+                *youtube_connected = connected;
+                output(json!({"type": "youtube_status", "youtubeConnected": connected}));
+                if !connected { *latest_youtube = None; }
+            }
             Event::Shutdown => return false,
         }
     }
@@ -320,14 +376,15 @@ fn drain_events(
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct CommandTargets { system: bool, spicetify: bool }
+struct CommandTargets { system: bool, spicetify: bool, youtube: bool }
 
-fn command_targets(source: &str, spicetify_connected: bool) -> CommandTargets {
+fn command_targets(source: &str, spicetify_connected: bool, youtube_connected: bool) -> CommandTargets {
     match source {
-        "SPOTIFY_ACCOUNT" => CommandTargets { system: false, spicetify: false },
-        "SPICETIFY_BRIDGE" => CommandTargets { system: false, spicetify: true },
-        "AUTOMATIC" if spicetify_connected => CommandTargets { system: false, spicetify: true },
-        _ => CommandTargets { system: true, spicetify: false },
+        "SPOTIFY_ACCOUNT" => CommandTargets { system: false, spicetify: false, youtube: false },
+        "SPICETIFY_BRIDGE" => CommandTargets { system: false, spicetify: true, youtube: false },
+        "AUTOMATIC" if spicetify_connected => CommandTargets { system: false, spicetify: true, youtube: false },
+        "YOUTUBE_MUSIC" | "AUTOMATIC" if youtube_connected => CommandTargets { system: false, spicetify: false, youtube: true },
+        _ => CommandTargets { system: true, spicetify: false, youtube: false },
     }
 }
 
@@ -418,6 +475,27 @@ mod tests {
     }
 
     #[test]
+    fn youtube_uses_windows_time_when_browser_updates_slow_down() {
+        let mut youtube = PlaybackSnapshot::unavailable();
+        youtube.title = "Track".into();
+        youtube.artist = "Artist".into();
+        youtube.spotify_uri = Some("youtube:video:abcdefghijk".into());
+        youtube.position_millis = 1_000;
+        youtube.playing = true;
+        let mut system = PlaybackSnapshot::unavailable();
+        system.title = "Track".into();
+        system.artist = "Artist".into();
+        system.position_millis = 20_000;
+        system.playing = true;
+
+        let selected = select_snapshot_with_timeout(
+            Some(&(youtube, Instant::now() - Duration::from_secs(20))),
+            Some(system), Duration::from_secs(60));
+        assert_eq!(selected.position_millis, 20_000);
+        assert_eq!(selected.spotify_uri.as_deref(), Some("youtube:video:abcdefghijk"));
+    }
+
+    #[test]
     fn releases_stale_spicetify_state_when_system_media_changes_track() {
         let mut extension = PlaybackSnapshot::unavailable();
         extension.title = "Old track".into();
@@ -436,13 +514,19 @@ mod tests {
 
     #[test]
     fn paired_automatic_commands_never_touch_system_media() {
-        assert_eq!(command_targets("AUTOMATIC", true),
-            CommandTargets { system: false, spicetify: true });
-        assert_eq!(command_targets("AUTOMATIC", false),
-            CommandTargets { system: true, spicetify: false });
-        assert_eq!(command_targets("SPICETIFY_BRIDGE", false),
-            CommandTargets { system: false, spicetify: true });
-        assert_eq!(command_targets("SPOTIFY_ACCOUNT", true),
-            CommandTargets { system: false, spicetify: false });
+        assert_eq!(command_targets("AUTOMATIC", true, true),
+            CommandTargets { system: false, spicetify: true, youtube: false });
+        assert_eq!(command_targets("AUTOMATIC", false, false),
+            CommandTargets { system: true, spicetify: false, youtube: false });
+        assert_eq!(command_targets("AUTOMATIC", false, true),
+            CommandTargets { system: false, spicetify: false, youtube: true });
+        assert_eq!(command_targets("SPICETIFY_BRIDGE", false, true),
+            CommandTargets { system: false, spicetify: true, youtube: false });
+        assert_eq!(command_targets("SPOTIFY_ACCOUNT", true, true),
+            CommandTargets { system: false, spicetify: false, youtube: false });
+        assert_eq!(command_targets("YOUTUBE_MUSIC", true, true),
+            CommandTargets { system: false, spicetify: false, youtube: true });
+        assert_eq!(command_targets("YOUTUBE_MUSIC", false, false),
+            CommandTargets { system: true, spicetify: false, youtube: false });
     }
 }

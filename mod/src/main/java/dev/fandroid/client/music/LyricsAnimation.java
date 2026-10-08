@@ -83,22 +83,39 @@ public final class LyricsAnimation {
     }
 
     /**
-     * A compact halo behind the filled part of the word currently being sung.
-     * It is independent from the distant-line blur, so changing glow intensity
-     * never makes inactive text brighter or blurrier.
+     * A centered Gaussian halo from the active word's full glyph coverage.
+     * Intensity changes its opacity; typography and radius remain independent.
      */
     public static ActiveGlowProfile activeGlowProfile(double glowAmount, double intensityMultiplier) {
-        // The source signal is normalized before reaching the profile. Keep the response
-        // bright through the middle of a word while retaining a soft entrance and exit.
-        double normalized = Math.pow(Math.clamp(glowAmount, 0, 1), .62);
-        if (normalized <= .005) return ActiveGlowProfile.NONE;
-        GlowLevel level = intensityMultiplier < .78 ? GlowLevel.SOFT
-                : intensityMultiplier > 1.22 ? GlowLevel.STRONG : GlowLevel.NORMAL;
-        return switch (level) {
-            case SOFT -> new ActiveGlowProfile(.28 * normalized, 1.4, .10 * normalized, 2.8);
-            case NORMAL -> new ActiveGlowProfile(.44 * normalized, 1.7, .18 * normalized, 3.5);
-            case STRONG -> new ActiveGlowProfile(.58 * normalized, 2.0, .24 * normalized, 4.2);
-        };
+        return activeGlowProfile(glowAmount, intensityMultiplier, false);
+    }
+
+    /** Spicy's single centered text-shadow; CSS pixels normalized to its 28px popup font. */
+    public static ActiveGlowProfile activeGlowProfile(double glowAmount, double intensityMultiplier,
+                                                      boolean emphasized) {
+        double signal = Math.clamp(glowAmount, 0, 2);
+        if (signal <= .001) return ActiveGlowProfile.NONE;
+        double opacity = Math.clamp((emphasized ? 1.85 : .35) * signal * intensityMultiplier, 0, 1);
+        double radius = (4 + (emphasized ? 12 : 2) * signal) * 9.0 / 28.0;
+        return new ActiveGlowProfile(opacity, radius, 0, radius);
+    }
+
+    /** Natural cubic spline from Spicy's (0,0),(.15,1),(.6,1),(1,0) glow timeline. */
+    public static double spicyGlowTarget(double progress) {
+        if (progress <= 0 || progress >= 1) return 0;
+        double left, right, first, second, curvatureLeft, curvatureRight;
+        if (progress < .15) {
+            left = 0; right = .15; first = 0; second = 1;
+            curvatureLeft = 0; curvatureRight = -100.0 / 3;
+        } else if (progress < .6) {
+            left = .15; right = .6; first = second = 1;
+            curvatureLeft = -100.0 / 3; curvatureRight = 0;
+        } else {
+            return (1 - progress) / .4;
+        }
+        double h = right - left, a = (right - progress) / h, b = (progress - left) / h;
+        return a * first + b * second
+                + ((a * a * a - a) * curvatureLeft + (b * b * b - b) * curvatureRight) * h * h / 6;
     }
 
     /** Stable halo bed only for held words that animate their glyphs independently. */
@@ -109,22 +126,17 @@ public final class LyricsAnimation {
         return (.70 + heldBoost) * envelope;
     }
 
-    /**
-     * Keeps a partially filled glyph's shadow matched to its still-muted face.
-     * The shadow approaches active opacity only after most of the glyph is white,
-     * preventing a black flash at the beginning of a word.
-     */
-    public static double progressiveShadowOpacity(double futureAlpha, double activeAlpha,
-                                                   double coverage) {
-        double lateFill = smoother(Math.clamp((coverage - .72) / .28, 0, 1));
-        return mix(Math.clamp(futureAlpha, 0, 1), Math.clamp(activeAlpha, 0, 1), lateFill);
+    /** Only sung glyphs cast a shadow; muted future text stays light and readable. */
+    public static double sungShadowOpacity(double activeAlpha, double coverage) {
+        double sung = smoother(Math.clamp((coverage - .45) / .55, 0, 1));
+        return Math.clamp(activeAlpha, 0, 1) * sung;
     }
 
-    /** Combines the stable word halo with animation energy and a 25% leading-edge pulse. */
+    /** Every timed word has a smooth glow envelope, even when it is too short for glyph motion. */
     public static double activeGlyphGlow(double motionGlow, long durationMillis,
                                          double wordProgress, double boundaryAmount) {
-        if (!usesPerGlyphMotion(durationMillis) || wordProgress <= 0 || wordProgress >= 1) return 0;
-        double bed = .70 + .15 * sustainedGlowStrength(durationMillis);
+        if (wordProgress <= 0 || wordProgress >= 1) return 0;
+        double bed = .48 + .37 * sustainedGlowStrength(durationMillis);
         double motion = Math.clamp(motionGlow, 0, 1);
         double boundary = Math.clamp(boundaryAmount, 0, 1) * .25;
         return Math.clamp((Math.max(bed, motion) + boundary) * activeGlowEnvelope(wordProgress), 0, 1);
@@ -133,8 +145,8 @@ public final class LyricsAnimation {
     /** Slow, derivative-free entrance and exit so the framebuffer halo never pops on or off. */
     public static double activeGlowEnvelope(double wordProgress) {
         if (wordProgress <= 0 || wordProgress >= 1) return 0;
-        double entrance = smoother(Math.clamp(wordProgress / .20, 0, 1));
-        double exit = smoother(Math.clamp((1 - wordProgress) / .32, 0, 1));
+        double entrance = smoother(Math.clamp(wordProgress / .26, 0, 1));
+        double exit = smoother(Math.clamp((1 - wordProgress) / .38, 0, 1));
         return entrance * exit;
     }
 
@@ -161,18 +173,16 @@ public final class LyricsAnimation {
 
     public enum GlowBand { OUTER, CORE }
 
-    private enum GlowLevel { SOFT, NORMAL, STRONG }
-
-    /** Two real filtered sources are emitted only for an active glyph with visible glow. */
+    /** A single alpha-blurred source, separate from the sharp face and optional black shadow. */
     public record ActiveGlowProfile(double coreOpacity, double coreRadius,
                                     double outerOpacity, double outerRadius) {
         private static final ActiveGlowProfile NONE = new ActiveGlowProfile(0, 1.4, 0, 2.8);
 
         public ActiveGlowProfile {
-            coreOpacity = Math.clamp(coreOpacity, 0, .58);
-            coreRadius = Math.clamp(coreRadius, 1.4, 2.0);
-            outerOpacity = Math.clamp(outerOpacity, 0, .24);
-            outerRadius = Math.clamp(outerRadius, 2.8, 4.2);
+            coreOpacity = Math.clamp(coreOpacity, 0, 1);
+            coreRadius = Math.clamp(coreRadius, 0, 9);
+            outerOpacity = 0;
+            outerRadius = coreRadius;
         }
 
         public double opacity(GlowBand band) {
@@ -186,7 +196,7 @@ public final class LyricsAnimation {
         public boolean needsBloom() { return coreOpacity > .005 || outerOpacity > .005; }
 
         public RenderPlan renderPlan() {
-            return new RenderPlan(0, 0, needsBloom() ? 2 : 0);
+            return new RenderPlan(0, 0, needsBloom() ? 1 : 0);
         }
     }
 

@@ -14,6 +14,7 @@ final class ClientPreferencesCompatibilityTest {
         assertThat(preferences.isLyricsPinned()).isTrue();
         assertThat(preferences.isLyricsDynamicBackground()).isTrue();
         assertThat(preferences.isLyricsBorder()).isTrue();
+        assertThat(preferences.isLyricsResizeGrip()).isFalse();
         assertThat(preferences.isLyricsTextShadow()).isTrue();
         assertThat(preferences.isLyricsBold()).isFalse();
         assertThat(preferences.getGoogleFontFamily()).isEmpty();
@@ -76,6 +77,16 @@ final class ClientPreferencesCompatibilityTest {
         assertThat(preferences.isLyricsTextShadow()).isFalse();
         assertThat(preferences.isLyricsBold()).isTrue();
         assertThat(preferences.getLyricsFontWeight()).isEqualTo(LyricsFontWeight.BOLD);
+    }
+
+    @Test
+    void resizeGripChoicePersistsWithoutChangingLegacyDefaults() throws Exception {
+        ClientPreferences preferences = ProtocolCodec.mapper().readValue("{}", ClientPreferences.class);
+        assertThat(preferences.isLyricsResizeGrip()).isFalse();
+        preferences.setLyricsResizeGrip(true);
+        ClientPreferences restored = ProtocolCodec.mapper().readValue(
+                ProtocolCodec.mapper().writeValueAsBytes(preferences), ClientPreferences.class);
+        assertThat(restored.isLyricsResizeGrip()).isTrue();
     }
 
     @Test

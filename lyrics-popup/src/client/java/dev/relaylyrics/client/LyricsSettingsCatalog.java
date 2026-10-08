@@ -1,0 +1,333 @@
+package dev.relaylyrics.client;
+
+import dev.relaylyrics.client.music.WorldLyricsDirector;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.DoubleConsumer;
+import java.util.function.DoubleSupplier;
+import java.util.function.IntConsumer;
+import java.util.function.IntSupplier;
+import java.util.function.Supplier;
+
+/** Shared decisions, dependencies and restore scopes. No Minecraft widget or rendering APIs. */
+public final class LyricsSettingsCatalog {
+    public static final String PREFIX = "config.relaylyrics.";
+    public enum Category {
+        GENERAL("general"), APPEARANCE("appearance"), CUSTOM("custom"), CONNECTION("connection"), ADVANCED("advanced"), WORLD("world");
+        public final String key;
+        Category(String name) { key = PREFIX + "category." + name; }
+    }
+    public enum Kind { TOGGLE, CHOICE, SLIDER, ACTION, INFO, GROUP }
+    public interface Actions {
+        void run(String action);
+        String status(String name);
+    }
+    public static final class Entry {
+        public final String key;
+        public final Kind kind;
+        public Supplier<String> value = () -> "";
+        public List<String> options = List.of();
+        public IntSupplier selected = () -> 0;
+        public IntConsumer select = ignored -> { };
+        public Runnable activate = () -> { };
+        public DoubleSupplier number = () -> 0;
+        public DoubleConsumer setNumber = ignored -> { };
+        public double min, max, step;
+        public boolean changesStructure;
+        Entry(String name, Kind kind) { this.key = PREFIX + name; this.kind = kind; }
+    }
+    private final ClientPreferences p;
+    private final Actions actions;
+    private final Set<String> expanded = new HashSet<>();
+    private final List<Entry> entries = new ArrayList<>();
+
+    public LyricsSettingsCatalog(ClientPreferences preferences, Actions actions) {
+        p = preferences;
+        this.actions = actions;
+    }
+    public List<Category> categories() {
+        return Arrays.stream(Category.values()).filter(c -> c != Category.WORLD || p.isWorldLyrics()).toList();
+    }
+    public void expand(String group) { expanded.add(group); }
+    public boolean expanded(String group) { return expanded.contains(group); }
+
+    public List<Entry> entries(Category category) {
+        entries.clear();
+        switch (category) {
+            case GENERAL -> {
+                toggle("visible", p::isLyricsVisible, p::setLyricsVisible);
+                choice("render_type", LyricsRenderType.values(), p::getLyricsRenderType, p::setLyricsRenderType);
+                indexed("inventory_content", List.of("inventory_content.none", "inventory_content.lyrics", "inventory_content.cover", "inventory_content.both"),
+                        () -> LyricsSettingsPresets.inventoryContent(p), n -> LyricsSettingsPresets.setInventoryContent(p, n));
+                toggle("pinned", p::isLyricsPinned, p::setLyricsPinned);
+                indexed("additional_text", List.of("additional_text.none", "additional_text.translation", "additional_text.romanization", "additional_text.both"),
+                        () -> LyricsSettingsPresets.additionalText(p), n -> LyricsSettingsPresets.setAdditionalText(p, n));
+                toggle("animations", p::isLyricsAnimations, p::setLyricsAnimations).changesStructure = true;
+                action("adjust_layout", "adjust_layout.button", () -> actions.run("layout"));
+            }
+            case APPEARANCE -> {
+                indexed("visual_style", List.of("visual_style.classic", "visual_style.modern"), () -> p.isModernMode() ? 1 : 0, n -> p.setModernMode(n == 1));
+                action("font", "font", () -> actions.run("font")).value = () -> p.getGoogleFontFamily().isEmpty() ? "@" + PREFIX + "google_font.minecraft" : p.getGoogleFontFamily();
+                percent("scale", .6, 1.8, .05, p::getLyricsTextScale, p::setLyricsTextScale);
+                choice("alignment", LyricsTextAlignment.values(), p::getLyricsAlignment, p::setLyricsAlignment);
+                choice("effects_preset", LyricsSettingsPresets.Effects.values(), () -> LyricsSettingsPresets.effects(p), v -> {
+                    if (v == LyricsSettingsPresets.Effects.CUSTOM) { expanded.add("effects"); actions.run("custom_effects"); }
+                    else LyricsSettingsPresets.applyEffects(p, v);
+                });
+                choice("background_preset", LyricsSettingsPresets.Background.values(), () -> LyricsSettingsPresets.background(p), v -> LyricsSettingsPresets.applyBackground(p, v));
+                action("restore_appearance", "restore", () -> restore("appearance"));
+            }
+            case CONNECTION -> {
+                List<MusicSource> main = List.of(MusicSource.values());
+                indexed("music_app", main.stream().map(v -> "music_source." + lower(v)).toList(), () -> main.indexOf(p.getMusicSource()), n -> {
+                    p.setMusicSource(main.get(n)); actions.run("source");
+                }).changesStructure = true;
+                action("connection.setup", "connection.setup.button", () -> actions.run("connection_setup"));
+                info("connection.status", () -> actions.status("connection"));
+                info("connection.method", () -> actions.status("method"));
+                info("connection.playback", () -> actions.status("playback"));
+                info("connection.lyrics", () -> actions.status("lyrics"));
+                action("reload", "reload.button", () -> actions.run("retry"));
+                if (group("connection_details")) {
+                    choice("music_source", MusicSource.values(), p::getMusicSource, v -> { p.setMusicSource(v); actions.run("source"); }).changesStructure = true;
+                    if (p.getMusicSource() == MusicSource.YOUTUBE_MUSIC) action("youtube.matching", "spotify.configure", () -> actions.run("spotify"));
+                    info("connection.client_id", p::getSpotifyClientId);
+                    info("connection.code", () -> actions.status("code"));
+                    info("connection.port", () -> actions.status("port"));
+                    info("connection.extension", () -> actions.status("extension"));
+                    info("connection.track", () -> actions.status("track"));
+                    info("connection.device", () -> actions.status("device"));
+                    info("youtube.track_match", () -> actions.status("match"));
+                }
+            }
+            case CUSTOM -> custom();
+            case ADVANCED -> advanced();
+            case WORLD -> {
+                indexed("world_mode", List.of("world_mode.automatic", "world_mode.fixed"), () -> p.isWorldLyricsAutomatic() ? 0 : 1, n -> p.setWorldLyricsAutomatic(n == 0)).changesStructure = true;
+                if (!p.isWorldLyricsAutomatic()) choice("world_preset", WorldLyricsDirector.Preset.values(), p::getWorldLyricsPreset, p::setWorldLyricsPreset);
+                percent("world_size", .75, 2, .05, p::getWorldLyricsSize, p::setWorldLyricsSize);
+                choice("world_material", WorldLyricsDirector.Material.values(), p::getWorldLyricsMaterial, p::setWorldLyricsMaterial);
+                choice("world_intensity", ClientPreferences.WorldIntensity.values(), p::getWorldLyricsIntensity, p::setWorldLyricsIntensity);
+                choice("world_quality", WorldLyricsDirector.Quality.values(), p::getWorldLyricsQuality, p::setWorldLyricsQuality);
+                action("world_customize", "customize.button", () -> { expanded.add("world"); actions.run("custom_world"); });
+            }
+        }
+        return List.copyOf(entries);
+    }
+
+    private void advanced() {
+        if (group("performance")) {
+            indexed("animation_fps", List.of("animation_fps.0", "animation_fps.30", "animation_fps.60"),
+                    () -> p.getLyricsAnimationFrameRate() == 0 ? 0 : p.getLyricsAnimationFrameRate() == 30 ? 1 : 2,
+                    n -> p.setLyricsAnimationFrameRate(n == 0 ? 0 : n == 1 ? 30 : 60));
+            toggle("loading_skeleton", p::isLyricsLoadingSkeleton, p::setLyricsLoadingSkeleton);
+            action("restore_performance", "restore", () -> restore("performance"));
+        }
+        if (group("experimental")) toggle("world_lyrics", p::isWorldLyrics, enabled -> {
+            if (enabled) p.enableWorldLyricsWithModernDefaults(); else p.setWorldLyrics(false);
+        }).changesStructure = true;
+        action("defaults", "restore", () -> actions.run("restore_all"));
+    }
+
+    private void custom() {
+        if (group("typography")) {
+            action("font", "font", () -> actions.run("font")).value = () -> p.getGoogleFontFamily().isEmpty() ? "@" + PREFIX + "google_font.minecraft" : p.getGoogleFontFamily();
+            choice("weight", LyricsFontWeight.values(), p::getLyricsFontWeight, v -> { p.setLyricsFontWeight(v); actions.run("weight"); });
+            percent("scale", .6, 1.8, .05, p::getLyricsTextScale, p::setLyricsTextScale);
+            choice("alignment", LyricsTextAlignment.values(), p::getLyricsAlignment, p::setLyricsAlignment);
+            toggle("translation", p::isLyricsTranslation, p::setLyricsTranslation);
+            toggle("romanization", p::isLyricsRomanization, p::setLyricsRomanization);
+        }
+        if (group("interaction")) {
+            toggle("allow_gui_overlap", p::isLyricsAllowGuiOverlap, p::setLyricsAllowGuiOverlap);
+            toggle("click_seek", p::isLyricsClickSeek, p::setLyricsClickSeek);
+            toggle("border", p::isLyricsBorder, p::setLyricsBorder);
+            toggle("resize_grip", p::isLyricsResizeGrip, p::setLyricsResizeGrip);
+            integer("width", 160, 900, 10, p::getLyricsWidth, p::setLyricsWidth, " px");
+            integer("height", 100, 600, 10, p::getLyricsHeight, p::setLyricsHeight, " px");
+            action("reset_layout", "reset", p::resetLayout);
+        }
+        if (group("effects")) {
+            toggle("simple", p::isSimpleLyricsMode, p::setSimpleLyricsMode).changesStructure = true;
+            if (!p.isSimpleLyricsMode()) choice("glow", LyricsGlowIntensity.values(), p::getLyricsGlowIntensity, p::setLyricsGlowIntensity);
+            if (p.isLyricsAnimations()) choice("transition", LyricsTransitionSpeed.values(), p::getLyricsTransitionSpeed, p::setLyricsTransitionSpeed);
+            toggle("shadow", p::isLyricsTextShadow, p::setLyricsTextShadow).changesStructure = true;
+            if (p.isLyricsTextShadow()) {
+                integer("shadow_opacity", 0, 100, 5, p::getLyricsShadowOpacity, p::setLyricsShadowOpacity, "%");
+                integer("shadow_distance", 1, 4, 1, p::getLyricsShadowDistance, p::setLyricsShadowDistance, " px");
+                indexed("shadow_softness", List.of("shadow_softness.0", "shadow_softness.1", "shadow_softness.2"), p::getLyricsShadowSoftness, p::setLyricsShadowSoftness);
+            }
+            action("restore_effects", "restore", () -> restore("effects"));
+        }
+        if (group("background")) {
+            toggle("dynamic", p::isLyricsDynamicBackground, p::setLyricsDynamicBackground).changesStructure = true;
+            toggle("reactive", p::isLyricsReactiveBackground, p::setLyricsReactiveBackground).changesStructure = true;
+            integer("opacity", 0, 100, 5, p::getLyricsBackgroundOpacity, p::setLyricsBackgroundOpacity, "%");
+            toggle("cover_shadow", p::isLyricsCoverShadow, p::setLyricsCoverShadow);
+            if (p.isLyricsDynamicBackground()) {
+                integer("blur", 0, 3, 1, p::getLyricsBlurStrength, p::setLyricsBlurStrength, "");
+                if (p.isLyricsAnimations()) integer("speed", 0, 3, 1, p::getLyricsBackgroundSpeed, p::setLyricsBackgroundSpeed, "");
+            }
+            if (p.isLyricsReactiveBackground()) {
+                choice("reactive_source", ClientPreferences.ReactiveSource.values(), p::getLyricsReactiveSource, p::setLyricsReactiveSource).changesStructure = true;
+                if (p.getLyricsReactiveSource() != ClientPreferences.ReactiveSource.WORDS) action("reactive_output_reload", "reactive_output_reload.button", () -> actions.run("audio"));
+                percent("reactive_intensity", .25, 3, .05, p::getLyricsReactiveIntensity, p::setLyricsReactiveIntensity);
+                toggle("reactive_hue", p::isLyricsReactiveHue, p::setLyricsReactiveHue).changesStructure = true;
+                if (p.isLyricsReactiveHue()) {
+                    toggle("reactive_hue_auto", p::isLyricsReactiveHueAuto, p::setLyricsReactiveHueAuto);
+                    slider("reactive_hue_amount", 0, 180, 5, p::getLyricsReactiveHueAmount, p::setLyricsReactiveHueAmount, "°");
+                }
+                toggle("reactive_bloom", p::isLyricsReactiveBloom, p::setLyricsReactiveBloom).changesStructure = true;
+                if (p.isLyricsReactiveBloom()) slider("reactive_bloom_amount", 0, 300, 5, p::getLyricsReactiveBloomAmount, p::setLyricsReactiveBloomAmount, "%");
+                toggle("reactive_spectral", p::isLyricsReactiveSpectral, p::setLyricsReactiveSpectral).changesStructure = true;
+                if (p.isLyricsReactiveSpectral()) slider("reactive_spectral_amount", 0, 300, 5, p::getLyricsReactiveSpectralAmount, p::setLyricsReactiveSpectralAmount, "%");
+            }
+            action("restore_background", "restore", () -> restore("background"));
+        }
+        if (p.isWorldLyrics() && group("world")) {
+            {
+                choice("world_surface_preference", WorldLyricsDirector.SurfacePreference.values(), p::getWorldLyricsSurfacePreference, p::setWorldLyricsSurfacePreference);
+                toggle("world_auto_walls", p::isWorldLyricsAutoWalls, p::setWorldLyricsAutoWalls);
+                toggle("world_cinematic", p::isWorldLyricsCinematic, p::setWorldLyricsCinematic);
+                toggle("world_player_reactions", p::isWorldLyricsPlayerReactions, p::setWorldLyricsPlayerReactions);
+                slider("world_distance_min", 3, 64, .5, p::getWorldLyricsMinimumDistance, p::setWorldLyricsMinimumDistance, "");
+                slider("world_distance_max", 3, 256, 1, p::getWorldLyricsMaximumDistance, p::setWorldLyricsMaximumDistance, "");
+                percent("world_distance_sensitivity", 0, 2, .1, p::getWorldLyricsDistanceSensitivity, p::setWorldLyricsDistanceSensitivity);
+                percent("world_arc_radius", 0, 1, .05, p::getWorldLyricsArcRadius, p::setWorldLyricsArcRadius);
+                percent("world_center_gap", 0, .8, .04, p::getWorldLyricsCenterGap, p::setWorldLyricsCenterGap);
+                if (p.isWorldLyricsAutomatic()) {
+                    choice("world_variation", WorldLyricsDirector.Variation.values(), p::getWorldLyricsVariation, p::setWorldLyricsVariation);
+                    for (var preset : WorldLyricsDirector.Preset.values()) toggle("world_include." + lower(preset), () -> p.isWorldLyricsPresetEnabled(preset), v -> p.setWorldLyricsPresetEnabled(preset, v));
+                }
+                action("world_reset_position", "restore", () -> restore("world_position"));
+            }
+            {
+                slider("world_depth", 0, .30, .025, p::getWorldLyricsDepth, p::setWorldLyricsDepth, "");
+                toggle("world_bevel", p::isWorldLyricsBevel, p::setWorldLyricsBevel).changesStructure = true;
+                if (p.isWorldLyricsBevel()) percent("world_bevel_width", .15, 1.2, .05, p::getWorldLyricsBevelWidth, p::setWorldLyricsBevelWidth);
+                toggle("world_contact_shadow", p::isWorldLyricsContactShadow, p::setWorldLyricsContactShadow);
+                toggle("world_light", p::isWorldLyricsWorldLight, p::setWorldLyricsWorldLight);
+                colors("world_face_color", new int[]{0xFFFFFF, 0xE4F5FF, 0xFFF0D2, 0xDEF7E4, 0xF5E1FF}, p::getWorldLyricsFaceColor, p::setWorldLyricsFaceColor);
+                colors("world_side_color", new int[]{0x56647A, 0x323A4B, 0x7A5B3C, 0x377B85, 0x805487}, p::getWorldLyricsSideColor, p::setWorldLyricsSideColor);
+                action("world_reset_volume", "restore", () -> restore("world_volume"));
+            }
+            if (p.isLyricsAnimations()) {
+                List<WorldLyricsDirector.Entrance> modes = new ArrayList<>(); modes.add(null); modes.addAll(List.of(WorldLyricsDirector.Entrance.values()));
+                indexed("world_entrance", modes.stream().map(v -> "world_entrance." + (v == null ? "auto" : lower(v))).toList(),
+                        () -> modes.indexOf(p.getWorldLyricsEntranceOverride()), n -> p.setWorldLyricsEntranceOverride(modes.get(n)));
+                percent("world_animation_strength", 0, 2, .1, p::getWorldLyricsAnimationIntensity, p::setWorldLyricsAnimationIntensity);
+                percent("world_animation_speed", .25, 2, .1, p::getWorldLyricsAnimationSpeed, p::setWorldLyricsAnimationSpeed);
+                toggle("world_trails", p::isWorldLyricsTrails, p::setWorldLyricsTrails);
+                action("world_reset_animation", "restore", () -> restore("world_animation"));
+            }
+        }
+    }
+
+    public void restore(String scope) {
+        ClientPreferences d = new ClientPreferences();
+        switch (scope) {
+            case "appearance" -> {
+                p.setModernMode(d.isModernMode()); p.setGoogleFontFamily(""); p.setLyricsFontWeight(d.getLyricsFontWeight());
+                p.setLyricsTextScale(d.getLyricsTextScale()); p.setLyricsAlignment(d.getLyricsAlignment());
+                restore("effects"); restore("background"); actions.run("font_changed");
+            }
+            case "effects" -> LyricsSettingsPresets.applyEffects(p, LyricsSettingsPresets.Effects.SPICY);
+            case "background" -> {
+                p.setLyricsDynamicBackground(d.isLyricsDynamicBackground()); p.setLyricsReactiveBackground(d.isLyricsReactiveBackground());
+                p.setLyricsBackgroundOpacity(d.getLyricsBackgroundOpacity()); p.setLyricsBlurStrength(d.getLyricsBlurStrength());
+                p.setLyricsBackgroundSpeed(d.getLyricsBackgroundSpeed()); p.setLyricsCoverShadow(d.isLyricsCoverShadow());
+                p.setLyricsReactiveSource(d.getLyricsReactiveSource()); p.setLyricsReactiveIntensity(d.getLyricsReactiveIntensity());
+                p.setLyricsReactiveHue(d.isLyricsReactiveHue()); p.setLyricsReactiveHueAuto(d.isLyricsReactiveHueAuto());
+                p.setLyricsReactiveHueAmount(d.getLyricsReactiveHueAmount()); p.setLyricsReactiveBloom(d.isLyricsReactiveBloom());
+                p.setLyricsReactiveBloomAmount(d.getLyricsReactiveBloomAmount()); p.setLyricsReactiveSpectral(d.isLyricsReactiveSpectral());
+                p.setLyricsReactiveSpectralAmount(d.getLyricsReactiveSpectralAmount());
+            }
+            case "performance" -> { p.setLyricsAnimationFrameRate(d.getLyricsAnimationFrameRate()); p.setLyricsLoadingSkeleton(d.isLyricsLoadingSkeleton()); }
+            case "world_position" -> {
+                p.setWorldLyricsSurfacePreference(d.getWorldLyricsSurfacePreference()); p.setWorldLyricsAutoWalls(d.isWorldLyricsAutoWalls());
+                p.setWorldLyricsCinematic(d.isWorldLyricsCinematic()); p.setWorldLyricsPlayerReactions(d.isWorldLyricsPlayerReactions());
+                p.setWorldLyricsMaximumDistance(d.getWorldLyricsMaximumDistance()); p.setWorldLyricsMinimumDistance(d.getWorldLyricsMinimumDistance());
+                p.setWorldLyricsDistanceSensitivity(d.getWorldLyricsDistanceSensitivity()); p.setWorldLyricsArcRadius(d.getWorldLyricsArcRadius());
+                p.setWorldLyricsCenterGap(d.getWorldLyricsCenterGap()); p.setWorldLyricsVariation(d.getWorldLyricsVariation());
+                for (var preset : WorldLyricsDirector.Preset.values()) p.setWorldLyricsPresetEnabled(preset, true);
+            }
+            case "world_volume" -> {
+                p.setWorldLyricsMaterial(d.getWorldLyricsMaterial()); p.setWorldLyricsDepth(d.getWorldLyricsDepth());
+                p.setWorldLyricsBevel(d.isWorldLyricsBevel()); p.setWorldLyricsBevelWidth(d.getWorldLyricsBevelWidth());
+                p.setWorldLyricsContactShadow(d.isWorldLyricsContactShadow()); p.setWorldLyricsWorldLight(d.isWorldLyricsWorldLight());
+                p.setWorldLyricsSideColor(d.getWorldLyricsSideColor()); p.setWorldLyricsFaceColor(d.getWorldLyricsFaceColor());
+            }
+            case "world_animation" -> {
+                p.setWorldLyricsEntranceOverride(null); p.setWorldLyricsAnimationIntensity(d.getWorldLyricsAnimationIntensity());
+                p.setWorldLyricsAnimationSpeed(d.getWorldLyricsAnimationSpeed()); p.setWorldLyricsTrails(d.isWorldLyricsTrails());
+            }
+            case "all" -> {
+                restore("appearance"); restore("performance"); restore("world_position"); restore("world_volume"); restore("world_animation");
+                p.resetLayout(); p.setLyricsVisible(d.isLyricsVisible()); p.setLyricsPinned(d.isLyricsPinned());
+                p.setLyricsRenderType(d.getLyricsRenderType()); p.setInventoryPopup(d.isInventoryPopup()); p.setInventoryNowPlaying(d.isInventoryNowPlaying());
+                p.setLyricsTranslation(d.isLyricsTranslation()); p.setLyricsRomanization(d.isLyricsRomanization()); p.setLyricsAnimations(d.isLyricsAnimations());
+                p.setLyricsAllowGuiOverlap(d.isLyricsAllowGuiOverlap()); p.setLyricsClickSeek(d.isLyricsClickSeek());
+                p.setLyricsBorder(d.isLyricsBorder()); p.setLyricsResizeGrip(d.isLyricsResizeGrip()); p.setWorldLyrics(false);
+                p.setWorldLyricsAutomatic(true); p.setWorldLyricsPreset(d.getWorldLyricsPreset()); p.setWorldLyricsIntensity(d.getWorldLyricsIntensity());
+                p.setWorldLyricsSize(d.getWorldLyricsSize()); p.setWorldLyricsQuality(d.getWorldLyricsQuality());
+            }
+            default -> throw new IllegalArgumentException("Unknown restore scope: " + scope);
+        }
+    }
+
+    private boolean group(String name) {
+        Entry e = entry("group." + name, Kind.GROUP);
+        e.value = () -> expanded.contains(name) ? "@" + PREFIX + "collapse" : "@" + PREFIX + "expand";
+        e.activate = () -> { if (!expanded.remove(name)) expanded.add(name); };
+        e.changesStructure = true;
+        return expanded.contains(name);
+    }
+    private Entry entry(String name, Kind kind) { Entry e = new Entry(name, kind); entries.add(e); return e; }
+    private Entry toggle(String name, BooleanSupplier getter, Consumer<Boolean> setter) {
+        Entry e = entry(name, Kind.TOGGLE);
+        e.value = () -> "@options." + (getter.getAsBoolean() ? "on" : "off");
+        e.activate = () -> setter.accept(!getter.getAsBoolean());
+        return e;
+    }
+    private Entry indexed(String name, List<String> keys, IntSupplier getter, IntConsumer setter) {
+        Entry e = entry(name, Kind.CHOICE);
+        e.options = keys.stream().map(v -> "@" + PREFIX + v).toList(); e.selected = getter; e.select = setter;
+        e.value = () -> e.options.get(Math.clamp(getter.getAsInt(), 0, e.options.size() - 1));
+        return e;
+    }
+    private <T extends Enum<T>> Entry choice(String name, T[] values, Supplier<T> getter, Consumer<T> setter) {
+        return indexed(name, Arrays.stream(values).map(v -> name + "." + lower(v)).toList(), () -> getter.get().ordinal(), n -> setter.accept(values[n]));
+    }
+    private Entry slider(String name, double min, double max, double step, DoubleSupplier getter, DoubleConsumer setter, String suffix) {
+        Entry e = entry(name, Kind.SLIDER); e.min = min; e.max = max; e.step = step; e.number = getter; e.setNumber = setter;
+        e.value = () -> (step >= 1 ? Long.toString(Math.round(getter.getAsDouble())) : String.format(Locale.ROOT, "%.2f", getter.getAsDouble())) + suffix;
+        return e;
+    }
+    private void percent(String name, double min, double max, double step, DoubleSupplier getter, DoubleConsumer setter) {
+        slider(name, min, max, step, getter, setter, "").value = () -> Math.round(getter.getAsDouble() * 100) + "%";
+    }
+    private void integer(String name, int min, int max, int step, IntSupplier getter, IntConsumer setter, String suffix) {
+        slider(name, min, max, step, () -> getter.getAsInt(), v -> setter.accept((int) Math.round(v)), suffix);
+    }
+    private Entry action(String name, String button, Runnable runnable) {
+        Entry e = entry(name, Kind.ACTION); e.activate = runnable; e.value = () -> "@" + PREFIX + button; e.changesStructure = name.contains("restore") || name.contains("reset"); return e;
+    }
+    private void info(String name, Supplier<String> value) { entry(name, Kind.INFO).value = value; }
+    private void colors(String name, int[] colors, IntSupplier getter, IntConsumer setter) {
+        List<String> values = new ArrayList<>(); for (int color : colors) values.add(String.format(Locale.ROOT, "#%06X", color));
+        int found = -1; for (int i = 0; i < colors.length; i++) if (colors[i] == getter.getAsInt()) found = i;
+        int current = found;
+        if (found < 0) values.add(String.format(Locale.ROOT, "#%06X", getter.getAsInt()));
+        Entry e = entry(name, Kind.CHOICE); e.options = List.copyOf(values); e.selected = () -> current < 0 ? colors.length : current;
+        e.select = n -> { if (n < colors.length) setter.accept(colors[n]); };
+        e.value = () -> String.format(Locale.ROOT, "#%06X", getter.getAsInt());
+    }
+    private static String lower(Enum<?> value) { return value.name().toLowerCase(Locale.ROOT); }
+}

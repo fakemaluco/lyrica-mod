@@ -44,6 +44,9 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
     dependsOn(":lyrics-popup-1.21.11:prepareStandaloneClientJava")
     from(rootProject.file("lyrics-popup/src/client/java")) {
         include("dev/relaylyrics/client/ClientPreferences.java")
+        include("dev/relaylyrics/client/LyricsSettingsCatalog.java")
+        include("dev/relaylyrics/client/LyricsSettingsPresets.java")
+        include("dev/relaylyrics/client/LyricsSettingsDemo.java")
         include("dev/relaylyrics/client/InventoryPopupTransition.java")
         include("dev/relaylyrics/client/RelayLyricsModMenu.java")
         include("dev/relaylyrics/client/ui/WorldGlyphMesh.java")

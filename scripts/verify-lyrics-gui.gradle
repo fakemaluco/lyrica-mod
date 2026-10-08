@@ -1,0 +1,11 @@
+// Opt-in native GUI checks. Never connects accounts or writes fixture preferences.
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        if (name == 'runClient') {
+            systemProperty 'lyrica.configSelfTest', 'true'
+            systemProperty 'lyrica.configNoticeOnlySelfTest', providers.gradleProperty('noticeOnly').getOrElse('false')
+            systemProperty 'lyrica.configProbeOutput', rootProject.layout.buildDirectory.dir('lyrics-gui-qa').get().asFile.absolutePath
+            args '--width', '1280', '--height', '720'
+        }
+    }
+}

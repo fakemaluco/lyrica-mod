@@ -38,8 +38,11 @@ public final class MusicService implements AutoCloseable {
     private final LyricsOverlay overlay;
     private final ClientPreferences preferences;
     private final SpotifyAccountClient spotifyAccount;
+    private volatile MusicSource lastSyncedSource;
     private volatile String lookupKey;
     private volatile String lookupTrackKey;
+    private volatile long lookupCredentialGeneration;
+    private volatile long nextLookupRetryMillis;
     private long lookupGeneration;
     private volatile String importsPendingKey;
     private volatile String importedLyricsKey;
@@ -77,7 +80,8 @@ public final class MusicService implements AutoCloseable {
         }
         connector = MediaBridgeConnector.start(path);
         spotifyAccount = new SpotifyAccountClient(preferences, this::update,
-                () -> !(connector instanceof MediaBridgeConnector bridge) || !bridge.spicetifyConnected());
+                () -> !(connector instanceof MediaBridgeConnector bridge)
+                        || (!bridge.spicetifyConnected() && !bridge.youtubeConnected()));
         connector.subscribe(value -> {
             if (!spotifyAccount.shouldOverrideBridge()) update(value);
         });
@@ -92,10 +96,14 @@ public final class MusicService implements AutoCloseable {
     }
 
     public void syncMusicSource() {
+        MusicSource selected = preferences.getMusicSource();
         if (connector instanceof MediaBridgeConnector bridge) {
-            MusicSource selected = preferences.getMusicSource();
             bridge.setSource(selected == MusicSource.SPOTIFY_ACCOUNT
                     ? MusicSource.WINDOWS_MEDIA.name() : selected.name());
+        }
+        if (selected != lastSyncedSource) {
+            lastSyncedSource = selected;
+            spotifyAccount.requestPlaybackRefresh();
         }
     }
 
@@ -113,6 +121,9 @@ public final class MusicService implements AutoCloseable {
         refreshIdleArtworkFallback();
     }
     public boolean spotifyAccountConnected() { return spotifyAccount.connected(); }
+    /** The selected account may only be used for matching, not for playback. */
+    public boolean spotifyPlaybackActive() { return spotifyAccount.shouldOverrideBridge(); }
+    public String spotifyTrackMatchStatus() { return spotifyAccount.matchStatus(); }
     public String spotifyAccountStatus() { return spotifyAccount.status(); }
 
     private void update(PlaybackSnapshot value) {
@@ -144,6 +155,8 @@ public final class MusicService implements AutoCloseable {
         if (value.title() == null || value.title().equals("Nothing playing")) {
             lookupKey = null;
             lookupTrackKey = null;
+            lookupCredentialGeneration = spotifyAccount.credentialGeneration();
+            nextLookupRetryMillis = 0;
             importsPendingKey = null;
             importedLyricsKey = null;
             spicyLyricsKey = null;
@@ -169,8 +182,12 @@ public final class MusicService implements AutoCloseable {
         }
         String trackKey = (value.spotifyUri() == null ? "" : value.spotifyUri()) + '\n'
                 + value.title() + '\n' + value.artist() + '\n' + value.album();
-        if (trackKey.equals(lookupTrackKey)) return;
+        long credentialGeneration = spotifyAccount.credentialGeneration();
+        if (trackKey.equals(lookupTrackKey) && lookupCredentialGeneration == credentialGeneration
+                && (nextLookupRetryMillis == 0 || System.currentTimeMillis() < nextLookupRetryMillis)) return;
         lookupTrackKey = trackKey;
+        lookupCredentialGeneration = credentialGeneration;
+        nextLookupRetryMillis = 0;
         String key = trackKey + "\nlookup=" + ++lookupGeneration;
         lookupKey = key;
         importsPendingKey = key;
@@ -201,28 +218,44 @@ public final class MusicService implements AutoCloseable {
         } else {
             lyricsStatus = "Finding lyrics...";
         }
-        String resolvedId = spotifyId == null ? spotifyAccount.resolveTrackId(value) : spotifyId;
+        List<String> resolvedIds = spotifyAccount.resolveTrackIds(value);
         if (!key.equals(lookupKey)) return;
+        if (resolvedIds.isEmpty() && spotifyAccount.matchStatus().startsWith("Spotify search HTTP ")) {
+            nextLookupRetryMillis = System.currentTimeMillis() + 60_000;
+        }
+        String resolvedId = resolvedIds.isEmpty() ? null : resolvedIds.getFirst();
         if (spotifyId == null && resolvedId != null) {
-            FanDroidMod.LOGGER.info("Resolved Windows Media metadata to Spotify track {}", resolvedId);
+            FanDroidMod.LOGGER.info("Resolved music metadata to Spotify track {}", resolvedId);
         }
         String resolvedUri = resolvedId == null ? value.spotifyUri() : "spotify:track:" + resolvedId;
         if (resolvedId != null && prefersSpicetifyLyrics()) {
             loadCachedSpicy(resolvedUri, key, resolvedId);
         }
-        beginNetworkLookup(value, key, resolvedId, resolvedUri);
+        beginNetworkLookup(key, resolvedIds, 0);
     }
 
-    private void beginNetworkLookup(PlaybackSnapshot value, String key, String spotifyId, String resolvedUri) {
+    private void beginNetworkLookup(String key, List<String> spotifyIds, int index) {
         if (!stillNeedsFallback(key)) return;
+        if (index >= spotifyIds.size()) {
+            markUnavailable(spotifyIds.isEmpty() ? "Spotify track ID unavailable" : "No lyrics in Spicy Lyrics");
+            return;
+        }
         lyricsStatus = "Searching Spicy Lyrics...";
+        String spotifyId = spotifyIds.get(index);
         spicyApi.find(spotifyId).thenAccept(result -> {
             if (!stillNeedsFallback(key)) return;
             if (result.payload().isPresent()) {
-                parseAndApplySpicy(new SpicetifyLyricsPayload(resolvedUri, "spicy-json",
+                parseAndApplySpicy(new SpicetifyLyricsPayload("spotify:track:" + spotifyId, "spicy-json",
                         new String(result.payload().get(), StandardCharsets.UTF_8), "Spicy Lyrics API"), key, true);
+            } else if (result.status() == SpicyLyricsApiClient.Status.NOT_FOUND
+                    && index + 1 < spotifyIds.size()) {
+                beginNetworkLookup(key, spotifyIds, index + 1);
             } else if (result.status() == SpicyLyricsApiClient.Status.FAILED
                     || result.status() == SpicyLyricsApiClient.Status.MISSING_KEY) {
+                if (result.message().contains("rate limit") || result.message().contains("connection failed")
+                        || result.message().contains("HTTP 5")) {
+                    nextLookupRetryMillis = System.currentTimeMillis() + 60_000;
+                }
                 markLookupError(result.message());
             } else {
                 markUnavailable(result.message());
@@ -260,6 +293,9 @@ public final class MusicService implements AutoCloseable {
     }
     public boolean spicetifyConnected() {
         return connector instanceof MediaBridgeConnector bridge && bridge.spicetifyConnected();
+    }
+    public boolean youtubeMusicConnected() {
+        return connector instanceof MediaBridgeConnector bridge && bridge.youtubeConnected();
     }
     public boolean spicetifyExtensionOutdated() {
         return connector instanceof MediaBridgeConnector bridge && bridge.extensionOutdated();
@@ -326,6 +362,7 @@ public final class MusicService implements AutoCloseable {
     public int artworkAccent() { return artwork.accentColor(); }
     public String artworkStatus() { return artwork.status(); }
     public void retryLyrics() {
+        spotifyAccount.requestPlaybackRefresh();
         PlaybackSnapshot current = snapshot();
         lookupTrackKey = null;
         lookupKey = null;
@@ -356,7 +393,8 @@ public final class MusicService implements AutoCloseable {
 
     private void refreshIdleArtworkFallback() {
         boolean connected = spotifyAccount.connected()
-                || connector instanceof MediaBridgeConnector bridge && bridge.spicetifyConnected();
+                || connector instanceof MediaBridgeConnector bridge
+                && (bridge.spicetifyConnected() || bridge.youtubeConnected());
         artwork.setFallback(connected ? CoverArtTexture.Fallback.SONG_NOT_FOUND
                 : CoverArtTexture.Fallback.CONNECT_ACCOUNT);
     }
@@ -377,7 +415,8 @@ public final class MusicService implements AutoCloseable {
 
     private boolean prefersSpicetifyLyrics() {
         MusicSource selected = preferences.getMusicSource();
-        return selected == MusicSource.AUTOMATIC || selected == MusicSource.SPICETIFY_BRIDGE;
+        return selected == MusicSource.AUTOMATIC || selected == MusicSource.SPICETIFY_BRIDGE
+                || selected == MusicSource.YOUTUBE_MUSIC;
     }
 
     private void loadCachedSpicy(String uri, String key, String trackId) {

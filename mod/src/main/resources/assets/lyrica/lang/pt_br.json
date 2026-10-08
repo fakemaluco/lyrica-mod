@@ -79,6 +79,7 @@
   "settings.fandroid.cover_shadow": "Sombra na capa",
   "settings.fandroid.modern": "Modo moderno",
   "config.fandroid.allow_gui_overlap": "Permitir pop-up sobre a GUI",
+  "config.fandroid.resize_grip": "Mostrar alça de redimensionamento",
   "settings.fandroid.music_source": "Fonte de reprodução",
   "settings.fandroid.music_source.automatic": "Automático",
   "settings.fandroid.music_source.windows_media": "Windows Media",
@@ -86,6 +87,8 @@
   "settings.fandroid.music_source.spicetify_bridge": "Spicetify Bridge",
   "settings.fandroid.music_source.youtube_music": "YouTube Music",
   "settings.fandroid.spotify_account": "Configurar conta do Spotify",
+  "settings.fandroid.youtube_bridge": "Conectar YouTube Music",
+  "settings.fandroid.youtube_track_match": "ID da faixa no Spotify",
   "config.fandroid.spotify.title": "Conectar conta do Spotify",
   "config.fandroid.spotify.client_id": "Client ID da aplicação do Spotify",
   "config.fandroid.spotify.connect": "Conectar",
@@ -141,6 +144,7 @@
   "settings.fandroid.global_service": "Serviço global",
   "settings.fandroid.pair_code": "Código de pareamento",
   "settings.fandroid.connection_hint": "O chat global e o controle de mídia funcionam de forma independente. Recursos locais continuam disponíveis offline.",
+  "settings.fandroid.youtube_hint": "Abra a pasta, carregue-a como complemento descompactado no navegador e acesse music.youtube.com. A conexão é local e não pede sua senha do Google.",
   "settings.fandroid.read_receipts": "Enviar confirmações de leitura",
   "settings.fandroid.device": "Este dispositivo",
   "settings.fandroid.privacy_hint": "O histórico permanece local neste dispositivo. O Relay preserva a criptografia e as configurações existentes.",
@@ -256,19 +260,47 @@
   "clock.fandroid.start": "INICIAR",
   "clock.fandroid.pause": "PAUSAR",
   "clock.fandroid.reset": "ZERAR",
-  "music.fandroid.choose_import_short": "ESCOLHA A LETRA IMPORTADA"
-  ,"music.fandroid.nothing_playing": "Nada tocando"
-  ,"music.fandroid.status_start": "Inicie a reprodução para buscar letras"
-  ,"music.fandroid.status_dj": "Trecho de voz do Spotify DJ • sem letras"
-  ,"music.fandroid.status_finding": "Buscando letras…"
-  ,"music.fandroid.status_choose_import": "Escolha uma correspondência TTML importada"
-  ,"music.fandroid.status_loading": "Carregando letras…"
-  ,"music.fandroid.status_ready": "Letras prontas"
-  ,"music.fandroid.status_not_found": "Nenhuma letra sincronizada encontrada"
-  ,"lyrics.fandroid.no_synced": "Nenhuma letra sincronizada encontrada"
-  ,"lyrics.fandroid.finding": "Buscando letras sincronizadas…"
-  ,"lyrics.fandroid.synced": "LETRAS SINCRONIZADAS"
-  ,"lyrics.fandroid.searching": "BUSCANDO"
-  ,"lyrics.fandroid.not_found": "NÃO ENCONTRADA"
-  ,"lyrics.fandroid.dj_talking": "O Spotify DJ está falando. A letra volta na próxima música."
+  "music.fandroid.choose_import_short": "ESCOLHA A LETRA IMPORTADA",
+  "music.fandroid.nothing_playing": "Nada tocando",
+  "music.fandroid.status_start": "Inicie a reprodução para buscar letras",
+  "music.fandroid.status_dj": "Trecho de voz do Spotify DJ • sem letras",
+  "music.fandroid.status_finding": "Buscando letras…",
+  "music.fandroid.status_choose_import": "Escolha uma correspondência TTML importada",
+  "music.fandroid.status_loading": "Carregando letras…",
+  "music.fandroid.status_ready": "Letras prontas",
+  "music.fandroid.status_not_found": "Nenhuma letra sincronizada encontrada",
+  "lyrics.fandroid.no_synced": "Nenhuma letra sincronizada encontrada",
+  "lyrics.fandroid.finding": "Buscando letras sincronizadas…",
+  "lyrics.fandroid.synced": "LETRAS SINCRONIZADAS",
+  "lyrics.fandroid.searching": "BUSCANDO",
+  "lyrics.fandroid.not_found": "NÃO ENCONTRADA",
+  "lyrics.fandroid.dj_talking": "O Spotify DJ está falando. A letra volta na próxima música.",
+  "config.fandroid.spotify.setup.intro": "Conecte sua conta Spotify para ler a reprodução e identificar músicas para o Spicy Lyrics. Sua fonte de música continua a mesma.",
+  "config.fandroid.spotify.setup.application": "1. Abra o Spotify for Developers, crie ou selecione seu aplicativo e copie o Client ID.",
+  "config.fandroid.spotify.setup.dashboard": "Abrir painel do Spotify Developer",
+  "config.fandroid.spotify.setup.redirect": "2. Nas configurações do aplicativo, adicione esta Redirect URI exatamente. Clique para copiar:",
+  "config.fandroid.spotify.setup.redirect_copied": "Redirect URI copiada. Salve-a nas configurações do seu aplicativo Spotify Developer.",
+  "config.fandroid.spotify.setup.client": "3. Cole o Client ID abaixo e conecte. Não é necessário Client Secret.",
+  "config.fandroid.spotify.setup.reopen": "Reabrir link de autorização",
+  "config.fandroid.spotify.setup.browser_hint": "Autorize no navegador e volte aqui. O link também é copiado para você abrir em outro navegador. Se o Spotify rejeitar, confira a Redirect URI e os usuários permitidos no aplicativo.",
+  "config.fandroid.spotify.setup.link_copied": "Link do navegador copiado.",
+  "config.fandroid.youtube.setup.title": "Conectar YouTube Music",
+  "config.fandroid.youtube.setup.intro": "Use a extensão incluída para Chrome / Edge para conectar sua aba do YouTube Music. Ela envia a reprodução localmente e não pede sua senha Google.",
+  "config.fandroid.youtube.setup.install": "1. Prepare a pasta da extensão. O caminho é copiado automaticamente.",
+  "config.fandroid.youtube.setup.prepare": "Preparar e abrir pasta",
+  "config.fandroid.youtube.setup.copy_folder": "Copiar caminho da pasta",
+  "config.fandroid.youtube.setup.extensions": "2. Copie o endereço do seu navegador, cole na barra de endereços e abra:",
+  "config.fandroid.youtube.setup.chrome": "Copiar endereço do Chrome",
+  "config.fandroid.youtube.setup.edge": "Copiar endereço do Edge",
+  "config.fandroid.youtube.setup.load": "Ative o Modo do desenvolvedor, escolha Carregar sem compactação e selecione a pasta preparada. Se a extensão já estiver instalada, clique em Recarregar no cartão dela.",
+  "config.fandroid.youtube.setup.play": "3. Abra o YouTube Music e toque uma música. Se a aba já estava aberta, recarregue-a. Mantenha o Minecraft aberto. O modo Automático também detecta a extensão.",
+  "config.fandroid.youtube.setup.open_music": "Abrir YouTube Music",
+  "config.fandroid.youtube.setup.use_source": "Usar esta fonte",
+  "config.fandroid.youtube.setup.pairing": "O pareamento desta extensão é automático. Se um cliente compatível pedir um código, copie o código atual abaixo.",
+  "config.fandroid.youtube.setup.copy_code": "Copiar código de pareamento",
+  "config.fandroid.youtube.setup.spicy": "Opcional: conecte o Spotify abaixo para o Spicy Lyrics buscar um ID Spotify correspondente à música. Isso não muda sua fonte YouTube Music.",
+  "config.fandroid.youtube.setup.folder_ready": "Extensão preparada. Caminho da pasta copiado.",
+  "config.fandroid.youtube.setup.copied": "Copiado.",
+  "config.fandroid.youtube.setup.ready": "Extensão do YouTube Music conectada",
+  "config.fandroid.youtube.setup.waiting": "Aguardando a extensão do YouTube Music…"
 }

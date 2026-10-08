@@ -50,6 +50,7 @@ public final class ClientPreferences {
     private double lyricsReactiveSpectralAmount = 100;
     private boolean lyricsAnimations = true;
     private boolean lyricsBorder = true;
+    private boolean lyricsResizeGrip;
     private boolean phoneDarkMode;
     private boolean modernMode;
     private MusicSource musicSource = MusicSource.AUTOMATIC;
@@ -285,6 +286,8 @@ public final class ClientPreferences {
     public void setLyricsAnimations(boolean lyricsAnimations) { this.lyricsAnimations = lyricsAnimations; }
     public boolean isLyricsBorder() { return lyricsBorder; }
     public void setLyricsBorder(boolean lyricsBorder) { this.lyricsBorder = lyricsBorder; }
+    public boolean isLyricsResizeGrip() { return lyricsResizeGrip; }
+    public void setLyricsResizeGrip(boolean lyricsResizeGrip) { this.lyricsResizeGrip = lyricsResizeGrip; }
     public boolean isReadReceipts() { return readReceipts; }
     public void setReadReceipts(boolean readReceipts) { this.readReceipts = readReceipts; }
     public boolean isPhoneDarkMode() { return phoneDarkMode; }

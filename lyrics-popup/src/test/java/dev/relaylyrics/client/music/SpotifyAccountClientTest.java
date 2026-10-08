@@ -56,6 +56,8 @@ class SpotifyAccountClientTest {
         PlaybackSnapshot track = snapshot("Dynamite", "BTS", "BE", 199_054);
         assertThat(SpotifyAccountClient.bestTrackId(track, weak)).isNull();
         assertThat(SpotifyAccountClient.bestTrackId(track, equivalentDuplicates)).isEqualTo(EXACT_ID);
+        assertThat(SpotifyAccountClient.bestTrackIds(track, equivalentDuplicates))
+                .containsExactly(EXACT_ID, "abcdefghijklmnopqrstuv");
     }
 
     @Test
@@ -77,6 +79,19 @@ class SpotifyAccountClientTest {
         assertThat(SpotifyAccountClient.bestTrackId(
                 snapshot("Amianto", "Supercombo", "Amianto", 257_252), items))
                 .isEqualTo("3SliIEDG2MqiurzdU60QRq");
+    }
+
+    @Test
+    void searchesCleanYouTubeMetadataAndAcceptsTheMatchingSpotifyTrack() throws Exception {
+        PlaybackSnapshot youtube = snapshot("BTS - Dynamite (Official Video)",
+                "BTS - Topic", "", 199_054);
+        assertThat(SpotifyAccountClient.searchQueries(youtube)).containsExactly(
+                "track:Dynamite artist:BTS", "Dynamite BTS", "Dynamite");
+        JsonNode items = ProtocolCodec.mapper().readTree("""
+                [{"id":"1234567890123456789012","name":"Dynamite","duration_ms":199054,
+                  "artists":[{"name":"BTS"}],"album":{"name":"BE"}}]
+                """);
+        assertThat(SpotifyAccountClient.bestTrackId(youtube, items)).isEqualTo(EXACT_ID);
     }
 
     private static PlaybackSnapshot snapshot(String title, String artist, String album, long duration) {

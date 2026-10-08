@@ -6,6 +6,8 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.NativeImageBackedTexture;
 import net.minecraft.util.Identifier;
+import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL12;
 
 /** Minecraft 1.21.1 dynamic-texture and GUI drawing adapter. */
 public final class PlatformTextures {
@@ -30,6 +32,24 @@ public final class PlatformTextures {
 
     public static Identifier register(String name, NativeImageBackedTexture texture) {
         return MinecraftClient.getInstance().getTextureManager().registerDynamicTexture(name, texture);
+    }
+
+    public static Identifier registerEffectMask(String name, LyricsEffectRaster.Mask mask) {
+        NativeImageBackedTexture texture = empty(name, mask.width(), mask.height());
+        NativeImage image = texture.getImage();
+        for (int y = 0; y < mask.height(); y++) for (int x = 0; x < mask.width(); x++)
+            setColorArgb(image, x, y, (mask.alpha()[y * mask.width() + x] & 255) << 24 | 0xFFFFFF);
+        texture.upload();
+        // NativeImage.upload resets the 1.21.1 GL filters; restore them afterwards.
+        texture.setFilter(true, false);
+        texture.bindTexture();
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_S, GL12.GL_CLAMP_TO_EDGE);
+        GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_WRAP_T, GL12.GL_CLAMP_TO_EDGE);
+        return register(name, texture);
+    }
+
+    public static void releaseEffectMask(Identifier id) {
+        MinecraftClient.getInstance().getTextureManager().destroyTexture(id);
     }
 
     static void flush(DrawContext context) {

@@ -37,6 +37,19 @@ class MusicPlaybackClockTest {
         assertThat(clock.positionMillis()).isEqualTo(7_500);
     }
 
+    @Test
+    void repeatedWindowsPositionDoesNotFreezeLyrics() {
+        AtomicLong nanos = new AtomicLong();
+        MusicPlaybackClock clock = new MusicPlaybackClock(nanos::get, () -> NOW);
+        for (int index = 0; index < 8; index++) {
+            clock.update(snapshot("track", 1_000, true));
+            nanos.addAndGet(500_000_000);
+        }
+        assertThat(clock.positionMillis()).isBetween(4_950L, 5_050L);
+        clock.update(snapshot("track", 2_000, false));
+        assertThat(clock.positionMillis()).isEqualTo(2_000);
+    }
+
     private static PlaybackSnapshot snapshot(String uri, long position, boolean playing) {
         return new PlaybackSnapshot("Track", "Artist", "Album", null, "spotify:track:" + uri,
                 null, position, 20_000, playing, .5, false, "off", false, 0.0, 0, 0, 0.5,

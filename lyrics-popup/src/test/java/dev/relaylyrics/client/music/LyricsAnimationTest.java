@@ -3,16 +3,111 @@ package dev.relaylyrics.client.music;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.data.Offset.offset;
 
 class LyricsAnimationTest {
     @Test
-    void shadowStaysMutedUntilMostOfTheGlyphIsFilled() {
-        double future = .20;
-        assertThat(LyricsAnimation.progressiveShadowOpacity(future, 1, 0)).isEqualTo(future);
-        assertThat(LyricsAnimation.progressiveShadowOpacity(future, 1, .72)).isEqualTo(future);
-        assertThat(LyricsAnimation.progressiveShadowOpacity(future, 1, .86))
-                .isBetween(future, 1.0);
-        assertThat(LyricsAnimation.progressiveShadowOpacity(future, 1, 1)).isEqualTo(1);
+    void spicyGlowMatchesTheReferenceKnotsAndHasAContinuousHeldWordCurve() {
+        assertThat(LyricsAnimation.spicyGlowTarget(-.5)).isZero();
+        assertThat(LyricsAnimation.spicyGlowTarget(0)).isZero();
+        assertThat(LyricsAnimation.spicyGlowTarget(.15)).isCloseTo(1, offset(1E-12));
+        assertThat(LyricsAnimation.spicyGlowTarget(.6)).isCloseTo(1, offset(1E-12));
+        assertThat(LyricsAnimation.spicyGlowTarget(.8)).isCloseTo(.5, offset(1E-12));
+        assertThat(LyricsAnimation.spicyGlowTarget(1)).isZero();
+        assertThat(LyricsAnimation.spicyGlowTarget(1.5)).isZero();
+        // The reference's natural spline deliberately rises above the held keys.
+        assertThat(LyricsAnimation.spicyGlowTarget(.34)).isBetween(1.4, 1.5);
+        assertThat(LyricsAnimation.spicyGlowTarget(.02))
+                .isLessThan(LyricsAnimation.spicyGlowTarget(.10));
+        assertThat(LyricsAnimation.spicyGlowTarget(.7))
+                .isGreaterThan(LyricsAnimation.spicyGlowTarget(.95));
+        for (double key : new double[]{.15, .6}) {
+            double delta = 1E-6;
+            double center = LyricsAnimation.spicyGlowTarget(key);
+            double leftSlope = (center - LyricsAnimation.spicyGlowTarget(key - delta)) / delta;
+            double rightSlope = (LyricsAnimation.spicyGlowTarget(key + delta) - center) / delta;
+            assertThat(rightSlope).isCloseTo(leftSlope, offset(.0001));
+        }
+    }
+
+    @Test
+    void spicyProfileUsesOneCenteredHaloAndKeepsIntensitySeparateFromBlurSize() {
+        var normal = LyricsAnimation.activeGlowProfile(1, 1, false);
+        var dimmed = LyricsAnimation.activeGlowProfile(1, .5, false);
+        var emphasized = LyricsAnimation.activeGlowProfile(1, 1, true);
+        assertThat(normal.coreOpacity()).isCloseTo(.35, offset(1E-12));
+        assertThat(normal.coreRadius()).isCloseTo(6 * 9.0 / 28, offset(1E-12));
+        assertThat(emphasized.coreOpacity()).isEqualTo(1);
+        assertThat(emphasized.coreRadius()).isCloseTo(16 * 9.0 / 28, offset(1E-12));
+        assertThat(dimmed.coreOpacity()).isCloseTo(normal.coreOpacity() / 2, offset(1E-12));
+        assertThat(dimmed.coreRadius()).isEqualTo(normal.coreRadius());
+        for (var profile : new LyricsAnimation.ActiveGlowProfile[]{normal, dimmed, emphasized}) {
+            assertThat(profile.outerOpacity()).isZero();
+            assertThat(profile.outerRadius()).isEqualTo(profile.coreRadius());
+            assertThat(profile.renderPlan().baseTextLayers()).isZero();
+            assertThat(profile.renderPlan().activeGlowTextLayers()).isEqualTo(1);
+        }
+        assertThat(LyricsAnimation.activeGlowProfile(0, 1).needsBloom()).isFalse();
+        assertThat(LyricsAnimation.activeGlowProfile(-.1, 1).needsBloom()).isFalse();
+        assertThat(LyricsAnimation.activeGlowProfile(1, 0).needsBloom()).isFalse();
+        assertThat(LyricsAnimation.activeGlowProfile(2, 20, true).coreRadius()).isLessThanOrEqualTo(9);
+    }
+
+    @Test
+    void glowSpringFadesAtTheStartAndContinuesSettlingAfterTheWordEnds() {
+        SpringValue spring = new SpringValue(0, 1.18, .56);
+        spring.setGoal(LyricsAnimation.spicyGlowTarget(.15));
+        double firstFrame = spring.step(1 / 60.0);
+        assertThat(firstFrame).isBetween(0.0, .05);
+        for (int frame = 0; frame < 30; frame++) spring.step(1 / 60.0);
+        assertThat(spring.position()).isGreaterThan(.8);
+        spring.setGoal(LyricsAnimation.spicyGlowTarget(1));
+        double beforeExit = spring.position();
+        double firstExitFrame = spring.step(1 / 60.0);
+        assertThat(firstExitFrame).isGreaterThan(.5);
+        assertThat(Math.abs(firstExitFrame - beforeExit)).isLessThan(.1);
+        double fadeStartOpacity = LyricsAnimation.activeGlowProfile(firstExitFrame, 1).coreOpacity();
+        for (int frame = 0; frame < 12; frame++) spring.step(1 / 60.0);
+        assertThat(LyricsAnimation.activeGlowProfile(spring.position(), 1).coreOpacity())
+                .isLessThan(fadeStartOpacity);
+        for (int frame = 0; frame < 150; frame++) spring.step(1 / 60.0);
+        assertThat(LyricsAnimation.activeGlowProfile(spring.position(), 1).needsBloom()).isFalse();
+    }
+
+    @Test
+    void glowSpringProducesTheSameFadeAtDifferentAnimationFrameRates() {
+        SpringValue thirtyFps = new SpringValue(0, 1.18, .56);
+        SpringValue oneTwentyFps = new SpringValue(0, 1.18, .56);
+        thirtyFps.setGoal(1);
+        oneTwentyFps.setGoal(1);
+        for (int frame = 0; frame < 30; frame++) thirtyFps.step(1 / 30.0);
+        for (int frame = 0; frame < 120; frame++) oneTwentyFps.step(1 / 120.0);
+        assertThat(thirtyFps.position()).isCloseTo(oneTwentyFps.position(), offset(1E-10));
+        thirtyFps.setGoal(0);
+        oneTwentyFps.setGoal(0);
+        for (int frame = 0; frame < 6; frame++) thirtyFps.step(1 / 30.0);
+        for (int frame = 0; frame < 24; frame++) oneTwentyFps.step(1 / 120.0);
+        assertThat(LyricsAnimation.activeGlowProfile(thirtyFps.position(), 1).coreOpacity())
+                .isCloseTo(LyricsAnimation.activeGlowProfile(oneTwentyFps.position(), 1).coreOpacity(), offset(1E-10));
+    }
+
+    @Test
+    void activeWordGlowFadesInAndOutEvenForQuickWords() {
+        assertThat(LyricsAnimation.activeGlyphGlow(0, 350, 0, 0)).isZero();
+        assertThat(LyricsAnimation.activeGlyphGlow(0, 350, .08, 0))
+                .isLessThan(LyricsAnimation.activeGlyphGlow(0, 350, .30, 0));
+        assertThat(LyricsAnimation.activeGlyphGlow(0, 350, .50, 0))
+                .isGreaterThan(LyricsAnimation.activeGlyphGlow(0, 350, .88, 0));
+        assertThat(LyricsAnimation.activeGlyphGlow(0, 350, 1, 0)).isZero();
+    }
+
+    @Test
+    void onlySungGlyphsCastAShadow() {
+        assertThat(LyricsAnimation.sungShadowOpacity(1, 0)).isZero();
+        assertThat(LyricsAnimation.sungShadowOpacity(1, .45)).isZero();
+        assertThat(LyricsAnimation.sungShadowOpacity(1, .72))
+                .isBetween(.1, .9);
+        assertThat(LyricsAnimation.sungShadowOpacity(1, 1)).isEqualTo(1);
     }
 
     @Test

@@ -9,6 +9,7 @@ import dev.fandroid.client.MusicSource;
 import dev.fandroid.client.chat.LocalChatStore;
 import dev.fandroid.client.chat.GlobalChatClient;
 import dev.fandroid.client.music.MusicService;
+import dev.fandroid.client.music.YouTubeMusicCompanion;
 import dev.fandroid.client.essential.EssentialAdapter;
 import dev.fandroid.client.voice.VoiceNoteController;
 import dev.fandroid.protocol.VoiceAttachment;
@@ -33,6 +34,7 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.OptionalLong;
 import java.nio.file.Files;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.concurrent.CompletableFuture;
@@ -903,23 +905,34 @@ public final class FanDroidScreen extends FanDroidScreenBase {
                 tr("settings.fandroid.music_source."
                         + runtime.preferences().getMusicSource().name().toLowerCase(Locale.ROOT)),
                 92, 282, mouseX, mouseY);
+        boolean youtube = runtime.preferences().getMusicSource() == MusicSource.YOUTUBE_MUSIC;
         settingsButton(context, tr("settings.fandroid.spotify_account"),
-                92, 342, 560, 46, mouseX, mouseY);
+                92, 342, 270, 46, mouseX, mouseY);
+        settingsButton(context, tr("settings.fandroid.youtube_bridge"),
+                382, 342, 270, 46, mouseX, mouseY);
         String globalState = runtime.globalChat() == null ? tr("state.fandroid.not_configured")
                 : titleCase(runtime.globalChat().state().name());
         settingsInfoCard(context, tr("settings.fandroid.global_service"), globalState, 92, 404,
                 runtime.globalChat() != null && runtime.globalChat().state() == GlobalChatClient.State.ONLINE);
-        String musicState = music.spicetifyConnected() ? tr("state.fandroid.connected")
+        boolean musicConnected = youtube ? music.youtubeMusicConnected() : music.spicetifyConnected();
+        String musicState = musicConnected ? tr("state.fandroid.connected")
                 : music.bridgeAlive() ? tr("state.fandroid.starting") : tr("state.fandroid.offline");
-        settingsInfoCard(context, "Spotify / Spicetify", musicState, 92, 512, music.spicetifyConnected());
+        settingsInfoCard(context, youtube ? "YouTube Music" : "Spotify / Spicetify",
+                musicState, 92, 512, musicConnected);
         if (music.pairingCode() != null) {
             RetroDraw.text(context, textRenderer, tr("settings.fandroid.pair_code"), 116, 626,
                     RelayTheme.TEXT_MUTED, 1.1F);
             RetroDraw.text(context, textRenderer, music.pairingCode(), 116, 658,
                     RelayTheme.TEXT, 2.6F);
         }
-        drawWrapped(context, tr("settings.fandroid.connection_hint"),
-                100, 742, 548, RelayTheme.TEXT_MUTED);
+        if (youtube) {
+            drawWrapped(context, tr("settings.fandroid.youtube_track_match") + ": "
+                            + music.spotifyTrackMatchStatus(),
+                    100, 704, 548, RelayTheme.TEXT_MUTED);
+        }
+        drawWrapped(context, tr(youtube ? "settings.fandroid.youtube_hint"
+                        : "settings.fandroid.connection_hint"),
+                100, youtube ? 784 : 742, 548, RelayTheme.TEXT_MUTED);
     }
 
     private void renderPrivacySettings(DrawContext context, int mouseX, int mouseY) {
@@ -1819,9 +1832,19 @@ public final class FanDroidScreen extends FanDroidScreenBase {
                 runtime.preferences().setMusicSource(runtime.preferences().getMusicSource().next());
                 music.syncMusicSource();
                 runtime.preferences().save();
-            } else if (inside(x, y, 92, 342, 560, 46)) {
+            } else if (inside(x, y, 92, 342, 270, 46)) {
                 MinecraftClient.getInstance().setScreen(
                         new SpotifyAccountScreen(this, runtime.preferences(), music));
+            } else if (inside(x, y, 382, 342, 270, 46)) {
+                runtime.preferences().setMusicSource(MusicSource.YOUTUBE_MUSIC);
+                music.syncMusicSource();
+                runtime.preferences().save();
+                try {
+                    MinecraftClient.getInstance().keyboard.setClipboard(
+                            YouTubeMusicCompanion.installAndOpen().toString());
+                } catch (IOException exception) {
+                    dev.fandroid.FanDroidMod.LOGGER.warn("Could not extract YouTube Music companion", exception);
+                }
             }
             return;
         }

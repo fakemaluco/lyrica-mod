@@ -42,6 +42,10 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
     from(layout.projectDirectory.dir("src/version/1.21.1/java"))
     from(rootProject.file("mod/src/main/java")) {
         include("dev/fandroid/client/music/LyricsAnimation.java")
+        include("dev/fandroid/client/music/UnavailableLyricsTransition.java")
+        include("dev/fandroid/client/music/LyricsEffectRaster.java")
+        include("dev/fandroid/client/music/LyricsEffectCache.java")
+        include("dev/fandroid/client/music/LyricsShadowKernel.java")
         include("dev/fandroid/client/music/LyricsRenderText.java")
         include("dev/fandroid/client/music/LyricsRomanizer.java")
         include("dev/fandroid/client/music/WorldLyricsPlan.java")
@@ -66,6 +70,7 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
         include("dev/fandroid/client/ui/FanDroidScreenBase.java")
         include("dev/fandroid/client/ui/GoogleFontScreen.java")
         include("dev/fandroid/client/ui/SpotifyAccountScreen.java")
+        include("dev/fandroid/client/ui/YouTubeMusicConnectionScreen.java")
         include("dev/fandroid/client/LyricsEffectsMode.java")
         include("dev/fandroid/client/LyricsFont.java")
         include("dev/fandroid/client/LyricsTextAlignment.java")

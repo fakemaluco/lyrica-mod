@@ -62,6 +62,19 @@ public final class PlatformTextures {
         return image.getColorArgb(x, y);
     }
 
+    public static Identifier registerEffectMask(String name, LyricsEffectRaster.Mask mask) {
+        NativeImageBackedTexture texture = empty(name, mask.width(), mask.height());
+        NativeImage image = texture.getImage();
+        for (int y = 0; y < mask.height(); y++) for (int x = 0; x < mask.width(); x++)
+            setColorArgb(image, x, y, (mask.alpha()[y * mask.width() + x] & 255) << 24 | 0xFFFFFF);
+        texture.upload();
+        return register(name, texture);
+    }
+
+    public static void releaseEffectMask(Identifier id) {
+        MinecraftClient.getInstance().getTextureManager().destroyTexture(id);
+    }
+
     static void setColorArgb(NativeImage image, int x, int y, int argb) {
         image.setColorArgb(x, y, argb);
     }

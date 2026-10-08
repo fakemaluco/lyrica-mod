@@ -16,7 +16,7 @@ public final class WorldGlyphAtlas {
 
     public static void changed(RenderType layer, int textureId, boolean color) {
         Source source = SOURCES.get(layer);
-        if (source == null || source.textureId != textureId) SOURCES.put(layer, new Source(textureId, color));
+        if (source == null || source.textureId != textureId || source.color != color) SOURCES.put(layer, new Source(textureId, color));
         else source.pixels = null;
         while (SOURCES.size() > 128) SOURCES.remove(SOURCES.keySet().iterator().next());
     }
@@ -59,6 +59,9 @@ public final class WorldGlyphAtlas {
     }
 
     record Pixels(int width, int height, byte[] mask) {
+        int alpha(int x, int y) {
+            return x >= 0 && y >= 0 && x < width && y < height ? mask[y * width + x] & 255 : 0;
+        }
         boolean solid(int x, int y) {
             return x >= 0 && y >= 0 && x < width && y < height && (mask[y * width + x] & 255) >= 128;
         }

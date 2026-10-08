@@ -40,6 +40,19 @@ public final class PlatformTextures {
         // pipeline below is already ordered and there is no public manual flush method.
     }
 
+    public static Identifier registerEffectMask(String name, LyricsEffectRaster.Mask mask) {
+        DynamicTexture texture = empty(name, mask.width(), mask.height());
+        NativeImage image = texture.getPixels();
+        for (int y = 0; y < mask.height(); y++) for (int x = 0; x < mask.width(); x++)
+            setColorArgb(image, x, y, (mask.alpha()[y * mask.width() + x] & 255) << 24 | 0xFFFFFF);
+        texture.upload();
+        return register(name, texture);
+    }
+
+    public static void releaseEffectMask(Identifier id) {
+        Minecraft.getInstance().getTextureManager().release(id);
+    }
+
     public static void draw(GuiGraphicsExtractor context, Identifier id, int x, int y, int width, int height,
                             int cropX, int cropY, int cropWidth, int cropHeight,
                             int sourceWidth, int sourceHeight, double opacity, double brightness) {

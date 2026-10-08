@@ -6,6 +6,8 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 public final class GuiTransform {
     private GuiTransform() { }
 
+    public static boolean scissorTransformsPose() { return true; }
+
     public static void push(GuiGraphicsExtractor context) {
         context.pose().pushMatrix();
     }

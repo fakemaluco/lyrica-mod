@@ -1,0 +1,9 @@
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        if (name == 'runClient') {
+            systemProperty 'lyrica.effectsSelfTest', 'true'
+            systemProperty 'lyrica.effectsProbeOutput', rootProject.layout.buildDirectory.dir('lyrics-effects-qa').get().asFile.absolutePath
+            args '--width', '854', '--height', '480'
+        }
+    }
+}

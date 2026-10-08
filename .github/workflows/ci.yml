@@ -46,4 +46,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      - name: Test YouTube Music companion
+        working-directory: youtube-music-extension
+        run: node --test background.test.cjs content.test.cjs
 

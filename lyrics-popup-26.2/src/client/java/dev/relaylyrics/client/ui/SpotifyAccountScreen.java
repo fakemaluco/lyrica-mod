@@ -5,19 +5,32 @@ import dev.relaylyrics.client.music.MusicService;
 import dev.relaylyrics.client.music.SpotifyAccountClient;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
+import org.lwjgl.glfw.GLFW;
 
-/** Vanilla OAuth setup screen. Client secret is deliberately never requested or stored. */
+import java.awt.Desktop;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+/** Guided desktop OAuth setup. Credentials never change the selected playback source. */
 public final class SpotifyAccountScreen extends FanDroidScreenBase {
     private final Screen parent;
     private final ClientPreferences preferences;
     private final MusicService music;
+    private final List<Label> labels = new ArrayList<>();
+    private final List<PositionedWidget> controls = new ArrayList<>();
     private EditBox clientId;
-    private Component status = Component.empty();
-    private int statusColor = 0xFFA0A0A0;
+    private Button connectButton, disconnectButton, reopenButton;
+    private URI authorizationLink;
+    private Component notice = Component.empty();
+    private boolean opening;
+    private int left, panelWidth, bodyTop, bodyBottom, contentHeight, scroll, statusY;
 
     public SpotifyAccountScreen(Screen parent, ClientPreferences preferences, MusicService music) {
         super(Component.translatable("config.relaylyrics.spotify.title"));
@@ -26,71 +39,164 @@ public final class SpotifyAccountScreen extends FanDroidScreenBase {
         this.music = music;
     }
 
-    @Override
-    protected void init() {
-        int panelWidth = Math.min(460, width - 32);
-        int left = (width - panelWidth) / 2;
-        int fieldY = height / 2 - 38;
-        clientId = new EditBox(font, left, fieldY, panelWidth, 20,
+    @Override protected void init() {
+        String pendingId = clientId == null ? preferences.getSpotifyClientId() : clientId.getValue();
+        clearWidgets();
+        labels.clear(); controls.clear();
+        panelWidth = Math.min(560, Math.max(180, width - 32));
+        left = (width - panelWidth) / 2;
+        bodyTop = 62; bodyBottom = height - 40;
+        int y = label("config.relaylyrics.spotify.setup.intro", 0, 0xFFBFC9D9);
+        y = label("config.relaylyrics.spotify.setup.application", y + 10, 0xFFFFFFFF);
+        addButton("config.relaylyrics.spotify.setup.dashboard", left, y, panelWidth,
+                () -> browse(URI.create("https://developer.spotify.com/dashboard")));
+        y = label("config.relaylyrics.spotify.setup.redirect", y + 32, 0xFFFFFFFF);
+        addButton(SpotifyAccountClient.REDIRECT_URI, true, left, y, panelWidth, () -> {
+            Minecraft.getInstance().keyboardHandler.setClipboard(SpotifyAccountClient.REDIRECT_URI);
+            notice = Component.translatable("config.relaylyrics.spotify.setup.redirect_copied");
+        });
+        y = label("config.relaylyrics.spotify.setup.client", y + 32, 0xFFFFFFFF);
+        clientId = new EditBox(font, left, bodyTop + y, panelWidth, 20,
                 Component.translatable("config.relaylyrics.spotify.client_id"));
         clientId.setMaxLength(80);
-        clientId.setValue(preferences.getSpotifyClientId());
-        addRenderableWidget(clientId);
-        int buttonWidth = (panelWidth - 8) / 3;
-        int buttonY = fieldY + 30;
-        addRenderableWidget(Button.builder(Component.translatable("config.relaylyrics.spotify.connect"),
-                ignored -> connect()).bounds(left, buttonY, buttonWidth, 20).build());
-        addRenderableWidget(Button.builder(Component.translatable("config.relaylyrics.spotify.disconnect"),
-                ignored -> disconnect()).bounds(left + buttonWidth + 4, buttonY, buttonWidth, 20).build());
+        clientId.setValue(pendingId);
+        addControl(clientId, y);
+        int half = (panelWidth - 6) / 2;
+        connectButton = addButton("config.relaylyrics.spotify.connect", left, y + 28, half, this::connect);
+        disconnectButton = addButton("config.relaylyrics.spotify.disconnect", left + half + 6, y + 28,
+                panelWidth - half - 6, this::disconnect);
+        reopenButton = addButton("config.relaylyrics.spotify.setup.reopen", left, y + 54, panelWidth, () -> {
+            if (authorizationLink != null) browse(authorizationLink);
+        });
+        y = label("config.relaylyrics.spotify.setup.browser_hint", y + 84, 0xFFBFC9D9);
+        statusY = y + 12;
+        contentHeight = statusY + 64;
         addRenderableWidget(Button.builder(Component.translatable("gui.done"), ignored -> onClose())
-                .bounds(left + (buttonWidth + 4) * 2, buttonY, buttonWidth, 20).build());
+                .bounds((width - 120) / 2, height - 28, 120, 20).build());
+        updateButtons(); positionControls();
     }
 
+    private int label(String key, int y, int color) {
+        Component text = Component.translatable(key);
+        labels.add(new Label(text, y, color));
+        return y + font.split(text, panelWidth).size() * 12;
+    }
+    private Button addButton(String key, int x, int y, int w, Runnable action) {
+        return addButton(key, false, x, y, w, action);
+    }
+    private Button addButton(String value, boolean literal, int x, int y, int w, Runnable action) {
+        Button button = Button.builder(literal ? Component.literal(value) : Component.translatable(value),
+                ignored -> action.run()).bounds(x, bodyTop + y, w, 20).build();
+        addControl(button, y); return button;
+    }
+    private void addControl(AbstractWidget widget, int y) {
+        controls.add(new PositionedWidget(widget, y)); addRenderableWidget(widget);
+    }
+    private void positionControls() {
+        scroll = Math.clamp(scroll, 0, Math.max(0, contentHeight - (bodyBottom - bodyTop)));
+        for (PositionedWidget control : controls) {
+            int y = bodyTop + control.y - scroll;
+            control.widget.setY(y);
+            control.widget.visible = y >= bodyTop && y + control.widget.getHeight() <= bodyBottom;
+        }
+    }
+    private void updateButtons() {
+        connectButton.active = music != null && !opening
+                && clientId.getValue().strip().matches("[A-Za-z0-9]{16,64}");
+        disconnectButton.active = music != null && music.spotifyAccountConnected();
+        reopenButton.active = authorizationLink != null;
+    }
+    @Override public void tick() { super.tick(); updateButtons(); }
+
     private void connect() {
+        if (music == null || opening) return;
         String id = clientId.getValue().strip();
-        preferences.setSpotifyClientId(id);
-        preferences.save();
-        status = Component.translatable("config.relaylyrics.spotify.opening");
-        statusColor = 0xFFFFD37A;
+        if (!id.matches("[A-Za-z0-9]{16,64}")) return;
+        preferences.setSpotifyClientId(id); preferences.save();
+        opening = true;
+        notice = Component.translatable("config.relaylyrics.spotify.opening");
         music.connectSpotifyAccount(id).whenComplete((link, error) -> {
             Minecraft client = Minecraft.getInstance();
             if (client == null) return;
             client.execute(() -> {
+                opening = false;
                 if (error == null) {
+                    authorizationLink = link;
                     client.keyboardHandler.setClipboard(link.toString());
-                    status = Component.translatable("config.relaylyrics.spotify.waiting");
-                    statusColor = 0xFF73E49A;
-                } else {
-                    status = Component.translatable("config.relaylyrics.spotify.failed");
-                    statusColor = 0xFFFF6B6B;
-                }
+                    notice = Component.translatable("config.relaylyrics.spotify.waiting");
+                } else notice = Component.translatable("config.relaylyrics.spotify.failed");
+                updateButtons();
+                scroll = Math.max(0, contentHeight - (bodyBottom - bodyTop));
+                positionControls();
             });
         });
     }
-
     private void disconnect() {
-        music.disconnectSpotifyAccount();
-        status = Component.translatable("config.relaylyrics.spotify.disconnected");
-        statusColor = 0xFFA0A0A0;
+        if (music != null) music.disconnectSpotifyAccount();
+        authorizationLink = null;
+        notice = Component.translatable("config.relaylyrics.spotify.disconnected");
+        updateButtons();
     }
-
-    @Override
-    public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+    private void browse(URI link) {
+        Minecraft.getInstance().keyboardHandler.setClipboard(link.toString());
+        notice = Component.translatable("config.relaylyrics.spotify.setup.link_copied");
+        CompletableFuture.runAsync(() -> {
+            try {
+                if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE))
+                    Desktop.getDesktop().browse(link);
+            } catch (Exception ignored) { /* The clipboard remains usable in headless environments. */ }
+        });
+    }
+    @Override protected boolean handleMouseScrolled(double x, double y, double h, double v) {
+        if (y < bodyTop || y > bodyBottom) return false;
+        scroll -= (int) Math.round(v * 28); positionControls(); return true;
+    }
+    @Override protected boolean handleKeyPressed(int key, int scanCode, int modifiers) {
+        if (key != GLFW.GLFW_KEY_PAGE_DOWN && key != GLFW.GLFW_KEY_PAGE_UP) return false;
+        scroll += (key == GLFW.GLFW_KEY_PAGE_DOWN ? 1 : -1) * Math.max(28, bodyBottom - bodyTop - 24);
+        positionControls(); return true;
+    }
+    @Override public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
         renderVanillaScreen(context, mouseX, mouseY, delta);
-        drawCentered(context, title, height / 2 - 92, 0xFFFFFFFF);
-        drawCentered(context, Component.translatable("config.relaylyrics.spotify.hint"),
-                height / 2 - 72, 0xFFB7B7B7);
-        drawCentered(context, Component.literal(SpotifyAccountClient.REDIRECT_URI),
-                height / 2 - 57, 0xFF8FCAD4);
-        String liveStatus = music.spotifyAccountStatus();
-        Component shown = status.getString().isBlank() ? Component.literal(liveStatus) : status;
-        if (!shown.getString().isBlank()) drawCentered(context, shown, height / 2 + 25, statusColor);
+        context.text(font, title, (width - font.width(title)) / 2, 14, 0xFFFFFFFF);
+        Component live = music == null ? Component.translatable("config.relaylyrics.offline")
+                : Component.literal(music.spotifyAccountStatus());
+        int color = music != null && music.spotifyAccountConnected() ? 0xFF73E49A : 0xFFE7D5A9;
+        context.text(font, font.plainSubstrByWidth(live.getString(), panelWidth), left, 36, color);
+        if (!notice.getString().isBlank()) context.text(font,
+                font.plainSubstrByWidth(notice.getString(), panelWidth), left, 48, 0xFFBFC9D9);
+        context.enableScissor(left, bodyTop, left + panelWidth, bodyBottom);
+        for (Label label : labels) drawWrapped(context, label.text, bodyTop + label.y - scroll, label.color);
+        int noticeY = drawWrapped(context, live, bodyTop + statusY - scroll, color);
+        if (!notice.getString().isBlank()) drawWrapped(context, notice, noticeY + 6, 0xFFBFC9D9);
+        context.disableScissor();
+        if (contentHeight > bodyBottom - bodyTop) {
+            int available = bodyBottom - bodyTop;
+            int thumb = Math.max(12, available * available / contentHeight);
+            int y = bodyTop + scroll * (available - thumb) / Math.max(1, contentHeight - available);
+            context.fill(left + panelWidth + 4, bodyTop, left + panelWidth + 6, bodyBottom, 0x404C586B);
+            context.fill(left + panelWidth + 4, y, left + panelWidth + 6, y + thumb, 0xFF8797AD);
+        }
     }
-
-    private void drawCentered(GuiGraphicsExtractor context, Component text, int y, int color) {
-        context.text(font, text, (width - font.width(text)) / 2, y, color);
+    private int drawWrapped(GuiGraphicsExtractor context, Component text, int y, int color) {
+        for (var line : font.split(text, panelWidth)) {
+            context.text(font, line, left, y, color); y += 12;
+        }
+        return y;
     }
-
+    void verifyLayoutForProbe() {
+        for (PositionedWidget control : controls) {
+            if (control.widget.visible && (control.widget.getY() < bodyTop
+                    || control.widget.getY() + control.widget.getHeight() > bodyBottom))
+                throw new IllegalStateException("Spotify setup control outside viewport");
+        }
+        for (Label label : labels) {
+            if (label.text.getString().startsWith("config."))
+                throw new IllegalStateException("Untranslated Spotify setup label: " + label.text.getString());
+        }
+    }
+    private record Label(Component text, int y, int color) { }
+    private record PositionedWidget(AbstractWidget widget, int y) { }
     @Override public boolean isPauseScreen() { return false; }
     @Override public void onClose() { Minecraft.getInstance().gui.setScreen(parent); }
 }

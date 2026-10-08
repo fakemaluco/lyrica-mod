@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "116",
+  "name": "Lyrica YouTube Music Bridge",
+  "version": "0.2.0",
+  "description": "Connects your open YouTube Music tab to Lyrica in Minecraft over localhost.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://music.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

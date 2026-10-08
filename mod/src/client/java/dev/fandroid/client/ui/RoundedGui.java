@@ -289,13 +289,11 @@ public final class RoundedGui {
 
     private static void drawNineSlice(DrawContext context, BorderTexture border,
                                       int x, int y, int width, int height) {
-        int cap = border.cap();
-        if (width < cap * 2 || height < cap * 2) {
-            outline(context, x, y, width, height, Math.min(cap - 1, Math.min(width, height) / 2),
-                    0xFFFFFFFF);
-            return;
-        }
-        int sampleCap = cap * BORDER_SUPERSAMPLE;
+        int cap = Math.min(border.cap(), Math.min(width, height) / 2);
+        if (cap <= 0) return;
+        // Compress the corner source for narrow capsules instead of falling back
+        // to the pixel-stepped outline used by the retro renderer.
+        int sampleCap = border.cap() * BORDER_SUPERSAMPLE;
         int sampleMiddle = border.textureSize() - sampleCap * 2;
         int middleWidth = width - cap * 2;
         int middleHeight = height - cap * 2;

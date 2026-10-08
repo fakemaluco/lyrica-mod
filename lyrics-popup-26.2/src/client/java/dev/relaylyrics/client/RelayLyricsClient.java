@@ -19,6 +19,8 @@ public final class RelayLyricsClient implements ClientModInitializer {
     private static boolean disabledByRelay;
     private static boolean meshProbeArmed;
     private static int meshProbeTicks;
+    private static boolean effectsProbeArmed;
+    private static int effectsProbeTicks;
 
     public static ClientPreferences preferences() {
         if (preferences == null) preferences = ClientPreferences.load();
@@ -41,7 +43,8 @@ public final class RelayLyricsClient implements ClientModInitializer {
         CompatibilityManager.initialize();
 
         overlay = new LyricsOverlay(preferences());
-        if (!Boolean.getBoolean("lyrica.worldMeshSelfTest")) music = new MusicService(overlay, preferences());
+        if (!Boolean.getBoolean("lyrica.worldMeshSelfTest") && !Boolean.getBoolean("lyrica.effectsSelfTest") && !Boolean.getBoolean("lyrica.configSelfTest"))
+            music = new MusicService(overlay, preferences());
         GoogleFontManager.restore(preferences().getGoogleFontFamily(),
                 preferences().getLyricsFontWeight().cssWeight(), overlay::fontChanged);
         InventoryLyricsInteraction.register();
@@ -58,7 +61,18 @@ public final class RelayLyricsClient implements ClientModInitializer {
                 });
         if (Boolean.getBoolean("lyrica.worldMeshSelfTest"))
             ClientLifecycleEvents.CLIENT_STARTED.register(client -> meshProbeArmed = true);
+        if (Boolean.getBoolean("lyrica.effectsSelfTest"))
+            ClientLifecycleEvents.CLIENT_STARTED.register(client -> effectsProbeArmed = true);
+        if (Boolean.getBoolean("lyrica.configSelfTest"))
+            ClientLifecycleEvents.CLIENT_STARTED.register(client -> effectsProbeArmed = true);
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (effectsProbeArmed && client.gui.overlay() == null && ++effectsProbeTicks >= 10) {
+                effectsProbeArmed = false;
+                client.options.guiScale().set(1);
+                client.resizeGui();
+                if (Boolean.getBoolean("lyrica.configSelfTest")) dev.relaylyrics.client.ui.LyricsConfigProbe.start();
+                else client.gui.setScreen(new dev.relaylyrics.client.ui.LyricsEffectsProbe());
+            }
             if (meshProbeArmed && client.gui.overlay() == null && ++meshProbeTicks >= 10) {
                 meshProbeArmed = false;
                 try {

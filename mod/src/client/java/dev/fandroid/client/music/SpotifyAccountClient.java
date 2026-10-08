@@ -33,10 +33,13 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -48,20 +51,34 @@ public final class SpotifyAccountClient implements AutoCloseable {
     private final ClientPreferences preferences;
     private final Consumer<PlaybackSnapshot> snapshots;
     private final BooleanSupplier automaticAccountAllowed;
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-    private final Path tokenFile = FabricLoader.getInstance().getConfigDir()
-            .resolve("fandroid/spotify-account.json");
+    private final HttpClient http;
+    private final Path tokenFile;
+    private final Object pollLock = new Object();
+    private final Object pollWake = new Object();
+    private final Object authorizationLock = new Object();
+    private final AtomicLong playbackRevision = new AtomicLong();
+    private final AtomicLong likedRevision = new AtomicLong();
+    private final AtomicInteger pendingCommands = new AtomicInteger();
+    private volatile boolean refreshRequested;
+    private volatile long nextPollAllowedMillis;
+    private volatile long lastPlaybackResponseNanos;
     private volatile boolean closed;
     private volatile String accessToken = "";
     private volatile String refreshToken = "";
     private volatile long expiresAtMillis;
     private volatile PlaybackSnapshot latest = PlaybackSnapshot.unavailable();
     private volatile String status = "Not connected";
+    private volatile String matchStatus = "Not searched";
+    private volatile long credentialGeneration;
     private volatile HttpServer callbackServer;
-    private volatile String verifier;
-    private volatile String oauthState;
     private volatile String likedUri = "";
     private volatile boolean liked;
+    private final Map<String, List<String>> matchCache = Collections.synchronizedMap(
+            new LinkedHashMap<>() {
+                @Override protected boolean removeEldestEntry(Map.Entry<String, List<String>> eldest) {
+                    return size() > 128;
+                }
+            });
 
     public SpotifyAccountClient(ClientPreferences preferences, Consumer<PlaybackSnapshot> snapshots) {
         this(preferences, snapshots, () -> true);
@@ -69,16 +86,31 @@ public final class SpotifyAccountClient implements AutoCloseable {
 
     public SpotifyAccountClient(ClientPreferences preferences, Consumer<PlaybackSnapshot> snapshots,
                                 BooleanSupplier automaticAccountAllowed) {
+        this(preferences, snapshots, automaticAccountAllowed,
+                HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
+                FabricLoader.getInstance().getConfigDir().resolve("fandroid/spotify-account.json"), true);
+    }
+
+    SpotifyAccountClient(ClientPreferences preferences, Consumer<PlaybackSnapshot> snapshots,
+                         BooleanSupplier automaticAccountAllowed, HttpClient http, Path tokenFile,
+                         boolean startPolling) {
         this.preferences = preferences;
         this.snapshots = snapshots;
         this.automaticAccountAllowed = automaticAccountAllowed;
+        this.http = http;
+        this.tokenFile = tokenFile;
         loadTokens();
-        Thread.ofVirtual().name("relay-spotify-account").start(this::pollLoop);
+        if (startPolling) Thread.ofVirtual().name("relay-spotify-account").start(this::pollLoop);
     }
 
     public boolean connected() { return !refreshToken.isBlank() || !accessToken.isBlank(); }
     public String status() { return status; }
-    public boolean hasActivePlayback() { return meaningful(latest); }
+    public String matchStatus() { return matchStatus; }
+    public long credentialGeneration() { return credentialGeneration; }
+    public boolean hasActivePlayback() {
+        return meaningful(latest) && lastPlaybackResponseNanos != 0
+                && System.nanoTime() - lastPlaybackResponseNanos < 8_000_000_000L;
+    }
     public boolean shouldOverrideBridge() {
         return shouldUseAccountSource() && hasActivePlayback();
     }
@@ -92,43 +124,110 @@ public final class SpotifyAccountClient implements AutoCloseable {
         return preferredSource(preferences.getMusicSource(), automaticAccountAllowed.getAsBoolean());
     }
 
-    /** Resolves metadata supplied by Windows Media to a conservative Spotify track match. */
+    /** Resolves metadata supplied by another music source to a Spotify track. */
     public String resolveTrackId(PlaybackSnapshot track) {
-        return resolveTrackId(track, true);
+        List<String> ids = resolveTrackIds(track);
+        return ids.isEmpty() ? null : ids.getFirst();
     }
 
-    private String resolveTrackId(PlaybackSnapshot track, boolean allowRefresh) {
+    public List<String> resolveTrackIds(PlaybackSnapshot track) {
+        return resolveTrackIds(track, true);
+    }
+
+    private List<String> resolveTrackIds(PlaybackSnapshot track, boolean allowRefresh) {
         String existing = SpicyLyricsApiClient.spotifyTrackId(track.spotifyUri());
-        if (existing != null) return existing;
-        if (!connected() || !meaningful(track)) return null;
+        if (existing != null) {
+            matchStatus = "Spotify track ID: " + existing;
+            return List.of(existing);
+        }
+        if (!meaningful(track)) return List.of();
+        String cacheKey = LyricsMatchScorer.canonicalKey(
+                cleanTitle(track.title(), track.artist()), cleanArtist(track.artist()), track.album())
+                + '\n' + Math.round(track.durationMillis() / 2_000.0);
+        List<String> cached = matchCache.get(cacheKey);
+        if (cached != null) {
+            matchStatus = "Spotify track ID: " + cached.getFirst();
+            return cached;
+        }
+        if (!connected()) {
+            matchStatus = "Connect Spotify for track matching";
+            return List.of();
+        }
         try {
             String token = validToken();
-            if (token == null) return null;
-            String query = "track:" + safeSearchTerm(track.title());
-            if (track.artist() != null && !track.artist().isBlank()) {
-                query += " artist:" + safeSearchTerm(track.artist());
+            if (token == null) {
+                matchStatus = "Spotify authorization expired";
+                return List.of();
             }
-            HttpRequest request = HttpRequest.newBuilder(URI.create(
-                            "https://api.spotify.com/v1/search?q=" + encode(query)
-                                    + "&type=track&limit=8"))
-                    .timeout(Duration.ofSeconds(10))
-                    .header("Authorization", "Bearer " + token).GET().build();
-            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 401 && allowRefresh && refresh()) {
-                return resolveTrackId(track, false);
+            matchStatus = "Searching Spotify catalog";
+            for (String query : searchQueries(track)) {
+                HttpRequest request = HttpRequest.newBuilder(URI.create(
+                                "https://api.spotify.com/v1/search?q=" + encode(query)
+                                        + "&type=track&limit=10"))
+                        .timeout(Duration.ofSeconds(10))
+                        .header("Authorization", "Bearer " + token).GET().build();
+                HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() == 401 && allowRefresh && refresh()) {
+                    return resolveTrackIds(track, false);
+                }
+                if (response.statusCode() != 200) {
+                    matchStatus = "Spotify search HTTP " + response.statusCode();
+                    if (response.statusCode() == 400) continue;
+                    return List.of();
+                }
+                JsonNode items = ProtocolCodec.mapper().readTree(response.body()).path("tracks").path("items");
+                List<String> ids = bestTrackIds(track, items);
+                if (!ids.isEmpty()) {
+                    matchCache.put(cacheKey, ids);
+                    matchStatus = "Spotify track ID: " + ids.getFirst();
+                    return ids;
+                }
             }
-            if (response.statusCode() != 200) return null;
-            JsonNode items = ProtocolCodec.mapper().readTree(response.body()).path("tracks").path("items");
-            return bestTrackId(track, items);
+            matchStatus = "No matching Spotify track";
+            return List.of();
         } catch (Exception error) {
-            FanDroidMod.LOGGER.debug("Could not resolve Spotify track ID from media metadata: {}",
+            matchStatus = "Spotify track search failed";
+            FanDroidMod.LOGGER.warn("Could not resolve Spotify track ID from media metadata: {}",
                     error.toString());
-            return null;
+            return List.of();
         }
     }
 
+    static List<String> searchQueries(PlaybackSnapshot track) {
+        String title = cleanTitle(track.title(), track.artist());
+        String artist = cleanArtist(track.artist());
+        if (title.isBlank()) return List.of();
+        List<String> queries = new ArrayList<>();
+        if (!artist.isBlank()) queries.add("track:" + title + " artist:" + firstArtist(artist));
+        if (!artist.isBlank()) queries.add(title + " " + firstArtist(artist));
+        queries.add(title);
+        return queries.stream().distinct().toList();
+    }
+
+    private static String cleanTitle(String value, String artist) {
+        String result = safeSearchTerm(value);
+        String prefix = safeSearchTerm(firstArtist(cleanArtist(artist)));
+        if (!prefix.isBlank() && result.regionMatches(true, 0, prefix + " - ", 0, prefix.length() + 3)) {
+            result = result.substring(prefix.length() + 3);
+        }
+        return result.replaceFirst("(?i)\\s*[-–|]?\\s*[\\[(]?(?:official\\s+)?(?:music\\s+video|lyric\\s+video|official\\s+video|official\\s+audio|visualizer)[\\])]?$", "").strip();
+    }
+
+    private static String cleanArtist(String value) {
+        return safeSearchTerm(value).replaceFirst("(?i)\\s*[-–]\\s*(?:topic|vevo)$", "").strip();
+    }
+
+    private static String firstArtist(String value) {
+        return value.replaceFirst("(?i)\\s*(?:,|;|&|\\bfeat\\.?|\\bft\\.?)\\s+.*$", "").strip();
+    }
+
     static String bestTrackId(PlaybackSnapshot track, JsonNode items) {
-        if (track == null || items == null || !items.isArray()) return null;
+        List<String> ids = bestTrackIds(track, items);
+        return ids.isEmpty() ? null : ids.getFirst();
+    }
+
+    static List<String> bestTrackIds(PlaybackSnapshot track, JsonNode items) {
+        if (track == null || items == null || !items.isArray()) return List.of();
         List<SearchCandidate> matches = new ArrayList<>();
         for (JsonNode item : items) {
             String id = item.path("id").asText("");
@@ -138,7 +237,8 @@ public final class SpotifyAccountClient implements AutoCloseable {
                 String name = artist.path("name").asText("");
                 if (!name.isBlank()) artists.add(name);
             });
-            double metadata = LyricsMatchScorer.score(track.title(), track.artist(), track.album(),
+            double metadata = LyricsMatchScorer.score(cleanTitle(track.title(), track.artist()),
+                    cleanArtist(track.artist()), track.album(),
                     item.path("name").asText(""), String.join(", ", artists),
                     item.path("album").path("name").asText(""));
             if (metadata < .78) continue;
@@ -153,15 +253,17 @@ public final class SpotifyAccountClient implements AutoCloseable {
             matches.add(new SearchCandidate(id, score, signature));
         }
         matches.sort(Comparator.comparingDouble(SearchCandidate::score).reversed());
-        if (matches.isEmpty() || matches.getFirst().score() < .86) return null;
+        if (matches.isEmpty() || matches.getFirst().score() < .86) return List.of();
         SearchCandidate best = matches.getFirst();
         for (int index = 1; index < matches.size(); index++) {
             SearchCandidate other = matches.get(index);
             if (other.signature().equals(best.signature())) continue;
-            if (best.score() - other.score() < .018) return null;
+            if (best.score() - other.score() < .018) return List.of();
             break;
         }
-        return best.id();
+        return matches.stream().filter(candidate -> candidate.signature().equals(best.signature())
+                        && candidate.score() >= best.score() - .04)
+                .map(SearchCandidate::id).distinct().limit(3).toList();
     }
 
     private record SearchCandidate(String id, double score, String signature) { }
@@ -193,16 +295,16 @@ public final class SpotifyAccountClient implements AutoCloseable {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 stopCallbackServer();
-                verifier = randomUrlToken(64);
-                oauthState = randomUrlToken(24);
+                String verifier = randomUrlToken(64);
+                String oauthState = randomUrlToken(24);
                 String challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(
                         MessageDigest.getInstance("SHA-256").digest(verifier.getBytes(StandardCharsets.US_ASCII)));
                 HttpServer server = HttpServer.create(new InetSocketAddress(
-                        InetAddress.getLoopbackAddress(), 43871), 0);
-                server.createContext("/callback", this::oauthCallback);
+                        InetAddress.getByName("127.0.0.1"), 43871), 0);
+                server.createContext("/callback", exchange -> oauthCallback(exchange, server, oauthState, verifier, id));
                 server.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
                 server.start();
-                callbackServer = server;
+                synchronized (authorizationLock) { callbackServer = server; }
                 URI link = URI.create("https://accounts.spotify.com/authorize?" + form(Map.of(
                         "client_id", id,
                         "response_type", "code",
@@ -212,7 +314,16 @@ public final class SpotifyAccountClient implements AutoCloseable {
                         "code_challenge", challenge,
                         "state", oauthState)));
                 status = "Waiting for Spotify authorization";
-                if (Desktop.isDesktopSupported()) Desktop.getDesktop().browse(link);
+                // A valid OAuth link remains usable when Java cannot launch this system's browser.
+                // The connection screen offers copying and reopening it.
+                try {
+                    if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                        Desktop.getDesktop().browse(link);
+                    }
+                } catch (Exception browserError) {
+                    FanDroidMod.LOGGER.debug("Spotify authorization link is ready; browser launch failed: {}",
+                            browserError.toString());
+                }
                 return link;
             } catch (Exception error) {
                 status = "Could not start Spotify authorization";
@@ -222,15 +333,25 @@ public final class SpotifyAccountClient implements AutoCloseable {
     }
 
     public void disconnect() {
+        playbackRevision.incrementAndGet();
+        likedRevision.incrementAndGet();
+        stopCallbackServer();
         accessToken = "";
         refreshToken = "";
         expiresAtMillis = 0;
         latest = PlaybackSnapshot.unavailable();
+        lastPlaybackResponseNanos = 0;
+        likedUri = "";
+        liked = false;
+        nextPollAllowedMillis = 0;
         status = "Not connected";
         try { Files.deleteIfExists(tokenFile); } catch (Exception ignored) { }
     }
 
     public CompletableFuture<Void> command(MusicCommand command) {
+        pendingCommands.incrementAndGet();
+        playbackRevision.incrementAndGet();
+        if (command.action() == MusicAction.TOGGLE_HEART) likedRevision.incrementAndGet();
         return CompletableFuture.runAsync(() -> {
             try {
                 String token = validToken();
@@ -257,6 +378,17 @@ public final class SpotifyAccountClient implements AutoCloseable {
                 } else if (action == MusicAction.TOGGLE_HEART && latest.spotifyUri() != null) {
                     method = latest.liked() ? "DELETE" : "PUT";
                     endpoint = "/me/library?uris=" + encode(latest.spotifyUri());
+                } else if (action == MusicAction.TOGGLE_SHUFFLE) {
+                    method = "PUT";
+                    endpoint = "/me/player/shuffle?state=" + !latest.shuffled();
+                } else if (action == MusicAction.CYCLE_REPEAT) {
+                    method = "PUT";
+                    String repeat = switch (latest.repeatMode()) {
+                        case "context" -> "track";
+                        case "track" -> "off";
+                        default -> "context";
+                    };
+                    endpoint = "/me/player/repeat?state=" + repeat;
                 } else {
                     throw new IllegalArgumentException("Unsupported Spotify account command: " + action);
                 }
@@ -271,34 +403,70 @@ public final class SpotifyAccountClient implements AutoCloseable {
                     liked = !latest.liked();
                     likedUri = latest.spotifyUri() == null ? "" : latest.spotifyUri();
                 }
-                poll();
             } catch (Exception error) {
                 status = "Spotify command failed";
                 throw new IllegalStateException(error);
+            } finally {
+                playbackRevision.incrementAndGet();
+                pendingCommands.decrementAndGet();
+                requestPlaybackRefresh();
             }
         });
     }
 
+    public void requestPlaybackRefresh() {
+        synchronized (pollWake) {
+            refreshRequested = true;
+            pollWake.notifyAll();
+        }
+    }
+
     private void pollLoop() {
         while (!closed) {
+            refreshRequested = false;
+            long waitMillis = latest.playing() ? 1_000 : 2_000;
             try {
                 if (shouldUseAccountSource() && connected()) poll();
-                Thread.sleep(500);
+            } catch (Exception error) {
+                status = "Spotify temporarily unavailable";
+                waitMillis = 3_000;
+            }
+            try {
+                synchronized (pollWake) {
+                    if (!closed && !refreshRequested) pollWake.wait(waitMillis);
+                }
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 return;
-            } catch (Exception error) {
-                status = "Spotify temporarily unavailable";
             }
         }
     }
 
-    private void poll() throws Exception {
+    void poll() throws Exception {
+        synchronized (pollLock) {
+            pollPlayback();
+        }
+    }
+
+    private void pollPlayback() throws Exception {
+        if (closed || System.currentTimeMillis() < nextPollAllowedMillis) return;
         String token = validToken();
         if (token == null) return;
+        long revision = playbackRevision.get();
         HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.spotify.com/v1/me/player"))
                 .timeout(Duration.ofSeconds(10)).header("Authorization", "Bearer " + token).GET().build();
+        long sentNanos = System.nanoTime();
         HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+        long receivedNanos = System.nanoTime();
+        Instant observedAt = playbackObservedAt(Instant.now(), sentNanos, receivedNanos);
+        // Do not let a request started before a seek/pause overwrite its immediate local feedback.
+        if (revision != playbackRevision.get() || pendingCommands.get() > 0 || closed) return;
+        if (response.statusCode() == 429) {
+            long retryMillis = retryAfterMillis(response.headers().firstValue("Retry-After").orElse(""));
+            nextPollAllowedMillis = System.currentTimeMillis() + retryMillis;
+            status = "Spotify rate limited — retrying automatically";
+            return;
+        }
         if (response.statusCode() == 204) {
             accept(PlaybackSnapshot.unavailable());
             status = "Connected — no active Spotify device";
@@ -312,6 +480,35 @@ public final class SpotifyAccountClient implements AutoCloseable {
             accept(PlaybackSnapshot.unavailable());
             return;
         }
+        String uri = item.path("uri").asText(null);
+        if (uri != null && !uri.equals(likedUri)) {
+            likedUri = uri;
+            liked = false;
+            refreshLiked(token, uri, likedRevision.incrementAndGet());
+        }
+        // Publish playback before artwork/library requests. Those must never delay the lyric clock.
+        accept(playbackSnapshot(root, liked, observedAt));
+        status = "Spotify account connected";
+    }
+
+    static Instant playbackObservedAt(Instant receivedAt, long sentNanos, long receivedNanos) {
+        // Spotify's `timestamp` is the last state change, not when `progress_ms` was sampled.
+        // The request midpoint is a bounded estimate that does not depend on server/client clock skew.
+        long halfRoundTrip = Math.clamp((receivedNanos - sentNanos) / 2, 0, 2_000_000_000L);
+        return receivedAt.minusNanos(halfRoundTrip);
+    }
+
+    static long retryAfterMillis(String seconds) {
+        try {
+            double value = Double.parseDouble(seconds);
+            return Double.isFinite(value) ? (long) Math.clamp(value * 1_000, 1_000, 3_600_000) : 5_000;
+        } catch (NumberFormatException ignored) {
+            return 5_000;
+        }
+    }
+
+    static PlaybackSnapshot playbackSnapshot(JsonNode root, boolean liked, Instant observedAt) {
+        JsonNode item = root.path("item");
         List<String> artists = new ArrayList<>();
         item.path("artists").forEach(node -> {
             String name = node.path("name").asText("");
@@ -324,10 +521,6 @@ public final class SpotifyAccountClient implements AutoCloseable {
         }
         JsonNode actions = root.path("actions");
         String uri = item.path("uri").asText(null);
-        if (uri != null && !uri.equals(likedUri)) {
-            liked = checkLiked(token, uri);
-            likedUri = uri;
-        }
         boolean playing = root.path("is_playing").asBoolean(false);
         MusicCapabilities capabilities = new MusicCapabilities(
                 playing ? !actions.path("pausing").asBoolean(false)
@@ -335,19 +528,30 @@ public final class SpotifyAccountClient implements AutoCloseable {
                 !actions.path("skipping_prev").asBoolean(false),
                 !actions.path("skipping_next").asBoolean(false),
                 !actions.path("seeking").asBoolean(false), true, true, true, true, true);
-        accept(new PlaybackSnapshot(item.path("name").asText("Nothing playing"),
+        return new PlaybackSnapshot(item.path("name").asText("Nothing playing"),
                 String.join(", ", artists), album.path("name").asText(""), artwork,
                 uri, root.path("device").path("name").asText(null),
                 root.path("progress_ms").asLong(0), item.path("duration_ms").asLong(0),
                 playing,
                 root.path("device").path("volume_percent").asDouble(0) / 100.0,
                 root.path("shuffle_state").asBoolean(false), root.path("repeat_state").asText("off"),
-                liked, 0, 0, 0, 0.5, new double[0], Instant.now(), capabilities));
-        status = "Spotify account connected";
+                liked, 0, 0, 0, 0.5, new double[0], observedAt, capabilities);
+    }
+
+    private void refreshLiked(String token, String uri, long revision) {
+        Thread.ofVirtual().name("relay-spotify-library").start(() -> {
+            try {
+                boolean result = checkLiked(token, uri);
+                if (!closed && revision == likedRevision.get() && uri.equals(likedUri)) liked = result;
+            } catch (Exception ignored) {
+                // Library status is optional; a failed request must not stop playback or lyric lookup.
+            }
+        });
     }
 
     private void accept(PlaybackSnapshot value) {
         latest = value;
+        lastPlaybackResponseNanos = System.nanoTime();
         // An empty Web API poll must not erase a valid Windows Media fallback.
         if (shouldUseAccountSource() && meaningful(value)) {
             snapshots.accept(value);
@@ -364,21 +568,23 @@ public final class SpotifyAccountClient implements AutoCloseable {
         return values.isArray() && !values.isEmpty() && values.get(0).asBoolean(false);
     }
 
-    private void oauthCallback(HttpExchange exchange) {
+    private void oauthCallback(HttpExchange exchange, HttpServer server, String oauthState,
+                               String verifier, String clientId) {
         String responseText;
         int responseCode = 200;
         try {
             Map<String, String> query = query(exchange.getRequestURI().getRawQuery());
+            if (callbackServer != server) throw new SecurityException("Authorization was replaced or cancelled");
             if (!oauthState.equals(query.get("state"))) throw new SecurityException("OAuth state mismatch");
             String code = query.get("code");
             if (code == null || code.isBlank()) throw new IllegalStateException(query.getOrDefault("error", "missing code"));
-            exchangeCode(code);
-            preferences.setMusicSource(MusicSource.SPOTIFY_ACCOUNT);
-            preferences.save();
+            exchangeCode(code, server, verifier, clientId);
+            // Authorization also serves metadata matching for YouTube Music and
+            // Windows Media. Never replace the source the player selected.
             responseText = "<h2>Relay conectado ao Spotify.</h2><p>Você já pode voltar ao Minecraft.</p>";
         } catch (Exception error) {
             responseCode = 400;
-            status = "Spotify authorization failed";
+            if (callbackServer == server) status = "Spotify authorization failed";
             responseText = "<h2>Não foi possível conectar o Relay.</h2><p>Volte ao Minecraft e tente novamente.</p>";
         }
         try {
@@ -390,19 +596,30 @@ public final class SpotifyAccountClient implements AutoCloseable {
             exchange.close();
         } catch (Exception ignored) { }
         CompletableFuture.delayedExecutor(1, java.util.concurrent.TimeUnit.SECONDS)
-                .execute(this::stopCallbackServer);
+                .execute(() -> {
+                    synchronized (authorizationLock) {
+                        if (callbackServer == server) callbackServer = null;
+                    }
+                    // Retire this attempt only. A newer connection may already own the callback port.
+                    server.stop(0);
+                });
     }
 
-    private void exchangeCode(String code) throws Exception {
+    private void exchangeCode(String code, HttpServer server, String verifier, String clientId) throws Exception {
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("grant_type", "authorization_code");
         fields.put("code", code);
         fields.put("redirect_uri", REDIRECT_URI);
-        fields.put("client_id", preferences.getSpotifyClientId());
+        fields.put("client_id", clientId);
         fields.put("code_verifier", verifier);
-        applyTokenResponse(tokenRequest(fields), true);
-        status = "Spotify account connected";
-        poll();
+        JsonNode response = tokenRequest(fields);
+        synchronized (authorizationLock) {
+            if (callbackServer != server || closed) throw new SecurityException("Authorization was cancelled");
+            applyTokenResponse(response, true);
+            credentialGeneration++;
+            status = "Spotify account connected";
+        }
+        requestPlaybackRefresh();
     }
 
     private synchronized String validToken() throws Exception {
@@ -467,8 +684,11 @@ public final class SpotifyAccountClient implements AutoCloseable {
     }
 
     private void stopCallbackServer() {
-        HttpServer server = callbackServer;
-        callbackServer = null;
+        HttpServer server;
+        synchronized (authorizationLock) {
+            server = callbackServer;
+            callbackServer = null;
+        }
         if (server != null) server.stop(0);
     }
 
@@ -501,6 +721,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
     @Override
     public void close() {
         closed = true;
+        requestPlaybackRefresh();
         stopCallbackServer();
     }
 }

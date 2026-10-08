@@ -79,6 +79,7 @@
   "settings.fandroid.cover_shadow": "Cover shadow",
   "settings.fandroid.modern": "Modern mode",
   "config.fandroid.allow_gui_overlap": "Allow popup over GUI",
+  "config.fandroid.resize_grip": "Show resize handle",
   "settings.fandroid.music_source": "Playback source",
   "settings.fandroid.music_source.automatic": "Automatic",
   "settings.fandroid.music_source.windows_media": "Windows Media",
@@ -86,6 +87,8 @@
   "settings.fandroid.music_source.spicetify_bridge": "Spicetify Bridge",
   "settings.fandroid.music_source.youtube_music": "YouTube Music",
   "settings.fandroid.spotify_account": "Configure Spotify account",
+  "settings.fandroid.youtube_bridge": "Connect YouTube Music",
+  "settings.fandroid.youtube_track_match": "Spotify track ID",
   "config.fandroid.spotify.title": "Connect Spotify account",
   "config.fandroid.spotify.client_id": "Spotify developer application client ID",
   "config.fandroid.spotify.connect": "Connect",
@@ -141,6 +144,7 @@
   "settings.fandroid.global_service": "Global service",
   "settings.fandroid.pair_code": "Pairing code",
   "settings.fandroid.connection_hint": "Global chat and media control operate independently. Local features remain available offline.",
+  "settings.fandroid.youtube_hint": "Open the folder, load it as an unpacked browser extension, then visit music.youtube.com. It connects locally without your Google password.",
   "settings.fandroid.read_receipts": "Send read receipts",
   "settings.fandroid.device": "This device",
   "settings.fandroid.privacy_hint": "History remains local to this device. Relay preserves existing encryption and settings.",
@@ -256,19 +260,47 @@
   "clock.fandroid.start": "START",
   "clock.fandroid.pause": "PAUSE",
   "clock.fandroid.reset": "RESET",
-  "music.fandroid.choose_import_short": "CHOOSE IMPORTED LYRICS"
-  ,"music.fandroid.nothing_playing": "Nothing playing"
-  ,"music.fandroid.status_start": "Start playback to find lyrics"
-  ,"music.fandroid.status_dj": "Spotify DJ voice segment • no lyrics"
-  ,"music.fandroid.status_finding": "Finding lyrics…"
-  ,"music.fandroid.status_choose_import": "Choose an imported TTML match"
-  ,"music.fandroid.status_loading": "Loading lyrics…"
-  ,"music.fandroid.status_ready": "Lyrics ready"
-  ,"music.fandroid.status_not_found": "No synced lyrics found"
-  ,"lyrics.fandroid.no_synced": "No synced lyrics found"
-  ,"lyrics.fandroid.finding": "Finding synced lyrics…"
-  ,"lyrics.fandroid.synced": "SYNCED LYRICS"
-  ,"lyrics.fandroid.searching": "SEARCHING"
-  ,"lyrics.fandroid.not_found": "NOT FOUND"
-  ,"lyrics.fandroid.dj_talking": "Spotify DJ is talking. Lyrics return with the next song."
+  "music.fandroid.choose_import_short": "CHOOSE IMPORTED LYRICS",
+  "music.fandroid.nothing_playing": "Nothing playing",
+  "music.fandroid.status_start": "Start playback to find lyrics",
+  "music.fandroid.status_dj": "Spotify DJ voice segment • no lyrics",
+  "music.fandroid.status_finding": "Finding lyrics…",
+  "music.fandroid.status_choose_import": "Choose an imported TTML match",
+  "music.fandroid.status_loading": "Loading lyrics…",
+  "music.fandroid.status_ready": "Lyrics ready",
+  "music.fandroid.status_not_found": "No synced lyrics found",
+  "lyrics.fandroid.no_synced": "No synced lyrics found",
+  "lyrics.fandroid.finding": "Finding synced lyrics…",
+  "lyrics.fandroid.synced": "SYNCED LYRICS",
+  "lyrics.fandroid.searching": "SEARCHING",
+  "lyrics.fandroid.not_found": "NOT FOUND",
+  "lyrics.fandroid.dj_talking": "Spotify DJ is talking. Lyrics return with the next song.",
+  "config.fandroid.spotify.setup.intro": "Connect your Spotify account to read playback and match tracks for Spicy Lyrics. Your playback source stays unchanged.",
+  "config.fandroid.spotify.setup.application": "1. Open Spotify for Developers, create or select your application and copy its Client ID.",
+  "config.fandroid.spotify.setup.dashboard": "Open Spotify Developer dashboard",
+  "config.fandroid.spotify.setup.redirect": "2. In your application's settings, add this exact Redirect URI. Click to copy:",
+  "config.fandroid.spotify.setup.redirect_copied": "Redirect URI copied. Save it in your Spotify Developer application settings.",
+  "config.fandroid.spotify.setup.client": "3. Paste the Client ID below, then connect. No Client Secret is needed.",
+  "config.fandroid.spotify.setup.reopen": "Reopen authorization link",
+  "config.fandroid.spotify.setup.browser_hint": "Approve access in your browser, then return here. The link is also copied so you can paste it into another browser. If Spotify rejects the request, check the Redirect URI and the application's allowed users.",
+  "config.fandroid.spotify.setup.link_copied": "Browser link copied to clipboard.",
+  "config.fandroid.youtube.setup.title": "Connect YouTube Music",
+  "config.fandroid.youtube.setup.intro": "Use the bundled Chrome / Edge companion to connect your YouTube Music tab. It sends playback locally and does not request your Google password.",
+  "config.fandroid.youtube.setup.install": "1. Prepare the companion folder. Its path is copied automatically.",
+  "config.fandroid.youtube.setup.prepare": "Prepare and open folder",
+  "config.fandroid.youtube.setup.copy_folder": "Copy folder path",
+  "config.fandroid.youtube.setup.extensions": "2. Copy the page address for your browser, paste it into the address bar and open it:",
+  "config.fandroid.youtube.setup.chrome": "Copy Chrome address",
+  "config.fandroid.youtube.setup.edge": "Copy Edge address",
+  "config.fandroid.youtube.setup.load": "Enable Developer mode, choose Load unpacked and select the prepared folder. Updating an existing installation? Click Reload on its extension card.",
+  "config.fandroid.youtube.setup.play": "3. Open YouTube Music and play a song. Reload the tab if it was already open. Keep Minecraft running. Automatic mode also detects the companion.",
+  "config.fandroid.youtube.setup.open_music": "Open YouTube Music",
+  "config.fandroid.youtube.setup.use_source": "Use this source",
+  "config.fandroid.youtube.setup.pairing": "Pairing is automatic in this companion. If a compatible client asks for a code, copy the current code below.",
+  "config.fandroid.youtube.setup.copy_code": "Copy pairing code",
+  "config.fandroid.youtube.setup.spicy": "Optional: connect Spotify below so Spicy Lyrics can search for a matching Spotify track ID. This does not change your YouTube Music source.",
+  "config.fandroid.youtube.setup.folder_ready": "Companion ready. Folder path copied.",
+  "config.fandroid.youtube.setup.copied": "Copied to clipboard.",
+  "config.fandroid.youtube.setup.ready": "YouTube Music companion connected",
+  "config.fandroid.youtube.setup.waiting": "Waiting for the YouTube Music companion…"
 }

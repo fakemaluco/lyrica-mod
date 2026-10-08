@@ -50,6 +50,9 @@ public final class LyricsAdvancedScreen extends FanDroidScreenBase {
         option(left, y + 96, columnWidth, "config.fandroid.transition",
                 () -> enumValue("config.fandroid.transition.", preferences.getLyricsTransitionSpeed().name()),
                 () -> preferences.setLyricsTransitionSpeed(preferences.getLyricsTransitionSpeed().next()));
+        option(left, y + 120, columnWidth, "config.fandroid.resize_grip",
+                () -> toggleValue(preferences.isLyricsResizeGrip()),
+                () -> preferences.setLyricsResizeGrip(!preferences.isLyricsResizeGrip()));
 
         option(right, y, columnWidth, "config.fandroid.click_seek",
                 () -> toggleValue(preferences.isLyricsClickSeek()),

@@ -32,6 +32,7 @@ public final class MediaBridgeConnector implements MusicConnector {
     private volatile String pairingCode;
     private volatile int pairingPort;
     private volatile boolean spicetifyConnected;
+    private volatile boolean youtubeConnected;
     private volatile int extensionProtocolVersion;
     private volatile String extensionVersion = "";
     private volatile boolean extensionArtwork;
@@ -115,6 +116,10 @@ public final class MediaBridgeConnector implements MusicConnector {
                     }
                     continue;
                 }
+                if (node.path("type").asText().equals("youtube_status")) {
+                    youtubeConnected = node.path("youtubeConnected").asBoolean(false);
+                    continue;
+                }
                 if (node.path("type").asText().equals("spicetify_client")) {
                     var client = node.path("client");
                     extensionProtocolVersion = client.path("protocolVersion").asInt(0);
@@ -170,6 +175,7 @@ public final class MediaBridgeConnector implements MusicConnector {
         } finally {
             bridgeAlive = false;
             spicetifyConnected = false;
+            youtubeConnected = false;
         }
     }
 
@@ -190,6 +196,7 @@ public final class MediaBridgeConnector implements MusicConnector {
     public String pairingCode() { return pairingCode; }
     public int pairingPort() { return pairingPort; }
     public boolean spicetifyConnected() { return spicetifyConnected; }
+    public boolean youtubeConnected() { return youtubeConnected; }
     public int extensionProtocolVersion() { return extensionProtocolVersion; }
     public String extensionVersion() { return extensionVersion; }
     public boolean extensionOutdated() { return spicetifyConnected && extensionProtocolVersion < 2; }

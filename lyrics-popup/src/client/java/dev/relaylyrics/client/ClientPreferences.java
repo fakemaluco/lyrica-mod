@@ -83,6 +83,7 @@ public final class ClientPreferences {
     private int lyricsAnimationFrameRate;
     private boolean lyricsLoadingSkeleton;
     private boolean lyricsBorder = true;
+    private boolean lyricsResizeGrip;
     private boolean inventoryPopup = true;
     private boolean inventoryNowPlaying = true;
     private boolean modernMode;
@@ -437,6 +438,8 @@ public final class ClientPreferences {
     public void setLyricsLoadingSkeleton(boolean value) { lyricsLoadingSkeleton = value; }
     public boolean isLyricsBorder() { return lyricsBorder; }
     public void setLyricsBorder(boolean value) { lyricsBorder = value; }
+    public boolean isLyricsResizeGrip() { return lyricsResizeGrip; }
+    public void setLyricsResizeGrip(boolean value) { lyricsResizeGrip = value; }
     public boolean isInventoryPopup() { return inventoryPopup; }
     public void setInventoryPopup(boolean value) { inventoryPopup = value; }
     public boolean isInventoryNowPlaying() { return inventoryNowPlaying; }

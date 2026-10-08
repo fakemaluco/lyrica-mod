@@ -22,6 +22,7 @@ public final class MusicPlaybackClock {
     private long durationMillis;
     private boolean playing;
     private String trackKey = "";
+    private long lastRawPosition = -1;
     private boolean initialized;
 
     public MusicPlaybackClock() {
@@ -41,10 +42,13 @@ public final class MusicPlaybackClock {
         long now = nanoTime.getAsLong();
         advance(now);
         String nextKey = key(snapshot);
+        long rawPosition = Math.max(0, snapshot.positionMillis());
         double observed = observedPosition(snapshot);
-        boolean discontinuity = !initialized || !Objects.equals(trackKey, nextKey)
-                || Math.abs(observed - positionMillis) >= SNAP_THRESHOLD_MILLIS;
+        boolean sameTrack = initialized && Objects.equals(trackKey, nextKey);
         boolean playbackStateChanged = initialized && playing != snapshot.playing();
+        boolean repeatedPosition = sameTrack && rawPosition == lastRawPosition;
+        boolean discontinuity = !initialized || !Objects.equals(trackKey, nextKey)
+                || (!repeatedPosition && Math.abs(observed - positionMillis) >= SNAP_THRESHOLD_MILLIS);
         durationMillis = Math.max(0, snapshot.durationMillis());
         playing = snapshot.playing();
         trackKey = nextKey;
@@ -52,7 +56,11 @@ public final class MusicPlaybackClock {
             positionMillis = observed;
             pendingCorrection = 0;
         } else if (playbackStateChanged) {
-            positionMillis = observed;
+            if (!sameTrack || rawPosition != lastRawPosition) positionMillis = observed;
+            pendingCorrection = 0;
+        } else if (repeatedPosition) {
+            // Windows can publish a fresh timestamp with an unchanged position for seconds.
+            // That sample contains no timing information, so keep the local clock running.
             pendingCorrection = 0;
         } else {
             double error = observed - positionMillis;
@@ -60,6 +68,7 @@ public final class MusicPlaybackClock {
         }
         positionMillis = clamp(positionMillis);
         lastNanos = now;
+        lastRawPosition = rawPosition;
         initialized = true;
     }
 
@@ -80,7 +89,9 @@ public final class MusicPlaybackClock {
             lastNanos = now;
             return;
         }
-        double delta = Math.clamp((now - lastNanos) / 1_000_000_000.0, 0, 2.0);
+        // Resource reloads and a stalled render thread must not discard elapsed music time.
+        // The duration clamp below already prevents running beyond the end of the track.
+        double delta = Math.max(0, (now - lastNanos) / 1_000_000_000.0);
         lastNanos = now;
         if (playing) positionMillis += delta * 1_000;
         if (Math.abs(pendingCorrection) > .05) {

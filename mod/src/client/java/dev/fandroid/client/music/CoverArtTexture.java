@@ -803,7 +803,9 @@ public final class CoverArtTexture implements AutoCloseable {
             String host = uri.getHost().toLowerCase(Locale.ROOT);
             return host.equals("i.scdn.co") || host.endsWith(".scdn.co") || host.endsWith(".spotifycdn.com")
                     || host.equals("cdn.discordapp.com") || host.equals("media.discordapp.net")
-                    || host.equals("spicylyrics.org") || host.endsWith(".spicylyrics.org");
+                    || host.equals("spicylyrics.org") || host.endsWith(".spicylyrics.org")
+                    || host.equals("lh3.googleusercontent.com") || host.equals("i.ytimg.com")
+                    || host.equals("yt3.ggpht.com");
         } catch (IllegalArgumentException ignored) {
             return false;
         }
