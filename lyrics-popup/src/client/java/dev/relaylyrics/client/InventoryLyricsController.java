@@ -33,6 +33,7 @@ public final class InventoryLyricsController {
     private static final Set<Screen> REGISTERED = Collections.newSetFromMap(new WeakHashMap<>());
     private static final InventoryPopupTransition POPUP_TRANSITION = new InventoryPopupTransition();
     private static Screen activeScreen;
+    private static LyricsOverlay.PopupControl pressedUtility = LyricsOverlay.PopupControl.NONE;
     private static boolean selected;
     private static boolean dragging;
     private static boolean scrubbing;
@@ -88,6 +89,8 @@ public final class InventoryLyricsController {
             return false;
         }
         activeScreen = screen;
+        pressedUtility = LyricsOverlay.PopupControl.NONE;
+        if (RelayLyricsClient.overlay() != null) RelayLyricsClient.overlay().setPopupUtilityPressed(LyricsOverlay.PopupControl.NONE);
         selected = false;
         dragging = false;
         scrubbing = false;
@@ -154,10 +157,13 @@ public final class InventoryLyricsController {
                     && overlay.isPopupCoverInteractionActiveAt(mouseX, mouseY);
         }
         if (popupVisible) {
-            if (overlay != null && overlay.popupControlAt(mouseX, mouseY)
-                    == LyricsOverlay.PopupControl.SETTINGS) {
-                RelayLyricsClient.preferences().save();
-                MinecraftClient.getInstance().setScreen(new LyricsConfigScreen(screen));
+            if (overlay != null && overlay.isPopupResizeHandleAt(mouseX, mouseY) && overlay.mousePressed(mouseX, mouseY, button)) {
+                selected = true; dragging = true; return true;
+            }
+            LyricsOverlay.PopupControl utility = overlay == null ? LyricsOverlay.PopupControl.NONE : overlay.popupControlAt(mouseX, mouseY);
+            if (LyricsOverlay.isPopupUtilityControl(utility)) {
+                pressedUtility = utility;
+                overlay.setPopupUtilityPressed(utility);
                 return true;
             }
             OptionalDouble volume = overlay == null ? OptionalDouble.empty()
@@ -170,7 +176,10 @@ public final class InventoryLyricsController {
             }
             if (runPopupControl(overlay, mouseX, mouseY)) return true;
             if (overlay != null && overlay.beginPopupProgressScrub(mouseX, mouseY)) return true;
-            if (overlay != null && overlay.isPopupCoverInteractionActiveAt(mouseX, mouseY)) return true;
+            if (overlay != null && overlay.isPopupCoverInteractionActiveAt(mouseX, mouseY)) {
+                if (overlay.isSquareVideo() && overlay.mousePressed(mouseX, mouseY, button)) { selected = true; dragging = true; }
+                return true;
+            }
         }
         if (runNowPlayingControl(mouseX, mouseY)) return true;
         if (progressBarBounds != null && progressBarBounds.contains(mouseX, mouseY)) {
@@ -203,6 +212,20 @@ public final class InventoryLyricsController {
         if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             return popupVisible && overlay != null
                     && overlay.isPopupCoverInteractionActiveAt(mouseX, mouseY);
+        }
+        if (pressedUtility != LyricsOverlay.PopupControl.NONE) {
+            LyricsOverlay.PopupControl released = pressedUtility;
+            pressedUtility = LyricsOverlay.PopupControl.NONE;
+            if (overlay != null) {
+                overlay.setPopupUtilityPressed(LyricsOverlay.PopupControl.NONE);
+                if (popupVisible && overlay.popupControlAt(mouseX, mouseY) == released) {
+                    if (released == LyricsOverlay.PopupControl.SETTINGS) {
+                        RelayLyricsClient.preferences().save();
+                        MinecraftClient.getInstance().setScreen(new LyricsConfigScreen(screen));
+                    } else overlay.togglePopupUtility(released);
+                }
+            }
+            return true;
         }
         if (volumeScrubbing) {
             if (overlay != null) {
@@ -273,6 +296,8 @@ public final class InventoryLyricsController {
             POPUP_TRANSITION.setVisible(true, System.nanoTime(),
                     RelayLyricsClient.preferences().isLyricsAnimations());
             activeScreen = null;
+            pressedUtility = LyricsOverlay.PopupControl.NONE;
+            if (RelayLyricsClient.overlay() != null) RelayLyricsClient.overlay().setPopupUtilityPressed(LyricsOverlay.PopupControl.NONE);
             dragging = false;
             scrubbing = false;
             volumeScrubbing = false;
@@ -336,7 +361,7 @@ public final class InventoryLyricsController {
     /** Normal HUD pass, including the re-entry animation after an inventory closes. */
     public static void renderWorldHud(DrawContext context) {
         LyricsOverlay overlay = RelayLyricsClient.overlay();
-        if (overlay == null) return;
+        if (overlay == null || CompatibilityManager.jiAfkCinematicActive()) return;
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.currentScreen != null || !RelayLyricsClient.preferences().getLyricsRenderType()
                 .rendersWorld(client.options.playerListKey.isPressed())) return;
@@ -391,11 +416,7 @@ public final class InventoryLyricsController {
                                      boolean popupVisible) {
         LyricsOverlay overlay = RelayLyricsClient.overlay();
         PopupBounds popup = popupVisible ? popupBounds() : null;
-        boolean resizeHover = popupVisible && selected
-                && mouseX >= popup.x() + popup.width() - 12
-                && mouseX <= popup.x() + popup.width() + 10
-                && mouseY >= popup.y() + popup.height() - 12
-                && mouseY <= popup.y() + popup.height() + 10;
+        boolean resizeHover = popupVisible && overlay != null && overlay.isPopupResizeHandleAt(mouseX, mouseY);
         if (resizeHover) {
             PlatformCursor.request(context, PlatformCursor.Style.RESIZE);
             return;
@@ -728,7 +749,7 @@ public final class InventoryLyricsController {
             case TOGGLE_HEART -> MusicAction.TOGGLE_HEART;
             case NEXT -> MusicAction.NEXT;
             case CYCLE_REPEAT -> MusicAction.CYCLE_REPEAT;
-            case NONE, SETTINGS, TOGGLE_MUTE -> null;
+            case NONE, SETTINGS, TOGGLE_ROMANIZATION, TOGGLE_TRANSLATION, TOGGLE_MUTE -> null;
         };
         if (action == null) return false;
         RelayLyricsClient.music().command(action);
@@ -861,7 +882,7 @@ public final class InventoryLyricsController {
     private static PreferenceBounds snapshotPreferences() {
         ClientPreferences preferences = RelayLyricsClient.preferences();
         return new PreferenceBounds(preferences.getLyricsX(), preferences.getLyricsY(),
-                preferences.getLyricsWidth(), preferences.getLyricsHeight());
+                RelayLyricsClient.overlay().expandedPopupWidth(RelayLyricsClient.overlay().popupStoredWidth(), RelayLyricsClient.overlay().popupStoredHeight()), RelayLyricsClient.overlay().popupStoredHeight());
     }
 
     /** Makes the container plus EMI/REI sidebars solid obstacles during drag and resize. */
@@ -881,10 +902,16 @@ public final class InventoryLyricsController {
         MinecraftClient client = MinecraftClient.getInstance();
         int windowWidth = client.getWindow().getScaledWidth();
         int windowHeight = client.getWindow().getScaledHeight();
+        double scale = dev.relaylyrics.client.music.ResponsiveLyricsLayout.scale(windowWidth, windowHeight);
+        windowWidth = (int) Math.ceil(windowWidth / scale); windowHeight = (int) Math.ceil(windowHeight / scale);
+        area = new Rect((int) Math.floor(area.x() / scale), (int) Math.floor(area.y() / scale),
+                (int) Math.ceil(area.width() / scale), (int) Math.ceil(area.height() / scale));
         int x = preferences.getLyricsX();
         int y = preferences.getLyricsY();
-        int width = Math.min(preferences.getLyricsWidth(), windowWidth);
-        int height = Math.min(preferences.getLyricsHeight(), windowHeight);
+        int width = Math.min(RelayLyricsClient.overlay().expandedPopupWidth(RelayLyricsClient.overlay().popupStoredWidth(), RelayLyricsClient.overlay().popupStoredHeight()), windowWidth);
+        boolean squareVideo = RelayLyricsClient.overlay().isSquareVideo();
+        int extra = squareVideo ? 0 : Math.max(0, width - RelayLyricsClient.overlay().popupStoredWidth());
+        int height = Math.min(RelayLyricsClient.overlay().popupStoredHeight(), windowHeight);
         Rect expanded = area.expanded(5);
         GuiBounds obstacle = new GuiBounds(expanded.x(), expanded.y(), expanded.right(), expanded.bottom());
         boolean resizedOnly = x == previous.x && y == previous.y
@@ -894,8 +921,9 @@ public final class InventoryLyricsController {
         if (previous.x + previous.width <= obstacle.left && x + width > obstacle.left
                 && overlapsVertically) {
             int allowed = obstacle.left - x;
-            if (resizedOnly && allowed >= 160) {
-                preferences.setLyricsWidth(Math.min(width, allowed));
+            if (resizedOnly && allowed >= 96 + extra) {
+                if (squareVideo) RelayLyricsClient.overlay().setPopupStoredHeight(Math.min(height, allowed));
+                else RelayLyricsClient.overlay().setPopupStoredWidth(Math.min(width - extra, allowed - extra));
                 return;
             }
             preferences.setLyricsX(Math.clamp(obstacle.left - width, 0, Math.max(0, windowWidth - width)));
@@ -908,8 +936,8 @@ public final class InventoryLyricsController {
         if (previous.y + previous.height <= obstacle.top && y + height > obstacle.top
                 && overlapsHorizontally) {
             int allowed = obstacle.top - y;
-            if (resizedOnly && allowed >= 100) {
-                preferences.setLyricsHeight(Math.min(height, allowed));
+            if (resizedOnly && allowed >= 64) {
+                RelayLyricsClient.overlay().setPopupStoredHeight(Math.min(height, allowed));
                 return;
             }
             preferences.setLyricsY(Math.clamp(obstacle.top - height, 0, Math.max(0, windowHeight - height)));
@@ -923,15 +951,16 @@ public final class InventoryLyricsController {
 
         if (resizedOnly && previous.x + previous.width <= obstacle.left) {
             int allowed = obstacle.left - x;
-            if (allowed >= 160) {
-                preferences.setLyricsWidth(Math.min(width, allowed));
+            if (allowed >= 96 + extra) {
+                if (squareVideo) RelayLyricsClient.overlay().setPopupStoredHeight(Math.min(height, allowed));
+                else RelayLyricsClient.overlay().setPopupStoredWidth(Math.min(width - extra, allowed - extra));
                 return;
             }
         }
         if (resizedOnly && previous.y + previous.height <= obstacle.top) {
             int allowed = obstacle.top - y;
-            if (allowed >= 100) {
-                preferences.setLyricsHeight(Math.min(height, allowed));
+            if (allowed >= 64) {
+                RelayLyricsClient.overlay().setPopupStoredHeight(Math.min(height, allowed));
                 return;
             }
         }

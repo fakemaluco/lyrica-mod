@@ -7,6 +7,8 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 /** Minecraft 26.2 world-render submit adapter. */
 public final class WorldLyricsRenderHook {
     private WorldLyricsRenderHook() { }
+    public static net.minecraft.world.phys.Vec3 cameraPosition(net.minecraft.client.Minecraft client) { return client.gameRenderer.mainCamera().position(); }
+    public static net.minecraft.resources.Identifier defaultFont() { return net.minecraft.resources.Identifier.fromNamespaceAndPath("relaylyrics", "world"); }
     public static boolean gliding(net.minecraft.client.player.LocalPlayer player) { return player.isFallFlying(); }
 
     public static void register() {

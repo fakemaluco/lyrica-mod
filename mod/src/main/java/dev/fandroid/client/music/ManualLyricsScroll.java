@@ -19,7 +19,13 @@ public final class ManualLyricsScroll {
     }
 
     public double target(double synchronizedPosition, double minimum, double maximum, long nowNanos) {
-        if (active && nowNanos - lastInputNanos >= HOLD_NANOS) active = false;
+        return target(synchronizedPosition, minimum, maximum, nowNanos, true);
+    }
+
+    /** Untimed lyrics have no active line to return to, so the reader keeps their position. */
+    public double target(double synchronizedPosition, double minimum, double maximum,
+                         long nowNanos, boolean timed) {
+        if (timed && active && nowNanos - lastInputNanos >= HOLD_NANOS) active = false;
         if (!active) return synchronizedPosition;
         target = Math.clamp(target, Math.min(minimum, maximum), Math.max(minimum, maximum));
         return target;

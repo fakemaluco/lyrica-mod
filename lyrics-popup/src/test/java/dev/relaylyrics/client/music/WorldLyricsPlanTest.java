@@ -14,6 +14,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class WorldLyricsPlanTest {
     @Test
+    void untimedLyricsDoNotBecomeOverlappingWorldPhrases() {
+        var metadata = new LyricsMetadata(dev.relaylyrics.protocol.lyrics.LyricsSource.UNKNOWN,
+                dev.relaylyrics.protocol.lyrics.LyricsSyncMode.STATIC, "", "", "", "");
+        LyricsDocument untimed = new LyricsDocument(List.of(
+                new LyricVocalGroup(0, Long.MAX_VALUE, line(0, Long.MAX_VALUE, "plain lyrics"),
+                        List.of(), LyricAlignment.NORMAL)), metadata);
+        assertThat(WorldLyricsPlan.visibleLines(untimed, 1_000)).isEmpty();
+    }
+
+    @Test
     void keepsThePhraseTogetherButExposesTimedSyllablesAsEmphasisTokens() {
         LyricLine line = new LyricLine(1_000, 3_600, "안녕하세요 world", List.of(
                 new TimedWord(1_000, 1_450, "안"),

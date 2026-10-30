@@ -9,120 +9,256 @@ import dev.relaylyrics.client.LyricsSettingsCatalog.Kind;
 import dev.relaylyrics.client.MusicSource;
 import dev.relaylyrics.client.RelayLyricsClient;
 import dev.relaylyrics.client.music.MusicService;
+import dev.relaylyrics.client.music.PlatformTextures;
+import dev.relaylyrics.client.music.ResponsiveLyricsLayout;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.client.gui.widget.SliderWidget;
+import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.gui.tooltip.Tooltip;
 import net.minecraft.client.resource.language.I18n;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
+import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 
-/** Widget adapter for the version-independent settings catalog. */
+/** Native, keyboard-accessible adaptation of Spicy Lyrics' centered purple settings panel.
+ * Skin and proportions follow spicy-lyrics/settings-panel.css, not the vanilla game menu.
+ */
 public final class LyricsConfigScreen extends FanDroidScreenBase implements LyricsSettingsCatalog.Actions {
+    private static final Identifier UI_FONT = Identifier.of("relaylyrics", "settings");
+    private static final Identifier UI_BOLD = Identifier.of("relaylyrics", "settings_semibold");
+    private static final Identifier UI_COMPACT = Identifier.of("relaylyrics", "settings_compact");
+    private static final Identifier UI_COMPACT_BOLD = Identifier.of("relaylyrics", "settings_compact_semibold");
+    private static final int INK = 0xFFD9CAFF, MUTED = 0xFFB9AFD7, TERTIARY = 0xFF87779F;
+    private static final int FIELD = 0xF2342057, DEEP = 0xF523133E, HAIRLINE = 0x22D9CAFF;
     private final Screen parent;
     private final ClientPreferences preferences;
     private final LyricsSettingsCatalog catalog;
     private final List<Row> rows = new ArrayList<>();
+    private final List<PanelButton> navigation = new ArrayList<>();
     private Category category = Category.GENERAL;
-    private String expandedChoice = "";
-    private boolean confirmRestore, editing, dragging, resizing;
+    private String expandedChoice = "", searchQuery = "";
+    private boolean confirmRestore, editing, dragging, resizing, peeking, selectingSearch;
     private int dragX, dragY, editX, editY, editWidth, editHeight;
+    private boolean resizeSquareVideo;
+    private double resizeVideoAspect;
+    private int modalX, modalY, modalWidth, modalHeight, sidebarWidth, paneX, paneWidth;
     private int rowLeft, rowWidth, listTop, listBottom, totalHeight, scroll;
-    private boolean sidePreview, stacked;
-    private int previewX, previewWidth;
+    private boolean compactNavigation, stacked;
     private int saveDelay;
     private String notice = "";
+    private SearchField searchField;
+    private PanelButton peekButton;
+    private boolean probeSearch, drawingPanel;
+    private int viewportWidth, viewportHeight;
+    private double uiScale = 1;
+    @Override protected double inputScale() { return uiScale; }
+    private LyricsOverlay.PopupBounds previewBounds;
+    private final java.util.Map<String, ButtonMotion> buttonMotions = new LinkedHashMap<>();
+    private final SettingsMotion.Tween modalMotion = new SettingsMotion.Tween(0);
+    private final SettingsMotion.Tween paneMotion = new SettingsMotion.Tween(1);
+    private double modalAlpha = 1, paneAlpha = 1, paintAlpha = 1;
+    private long frameNanos;
+    private String pressedKey = "";
+    private boolean pointerHeld;
+    private static final class ButtonMotion {
+        final SettingsMotion.Tween hover = new SettingsMotion.Tween(0), press = new SettingsMotion.Tween(1);
+        final SettingsMotion.Tween toggle, expand;
+        final SettingsMotion.Tween glass = new SettingsMotion.Tween(0);
+        long pulseUntil;
+        ButtonMotion(boolean on, boolean expanded) {
+            toggle = new SettingsMotion.Tween(on ? 1 : 0);
+            expand = new SettingsMotion.Tween(expanded ? 1 : 0);
+        }
+    }
+    private long probeTime = Long.MIN_VALUE;
+    private int probeMouseX = -1, probeMouseY = -1;
+    private long now() { return probeTime == Long.MIN_VALUE ? System.nanoTime() : probeTime; }
+    private boolean motionEnabled() { return preferences.isLyricsAnimations(); }
+    private int ink(int color) { return SettingsMotion.opacity(color, paintAlpha); }
+    private int textInk(int color) {
+        int faded = ink(color);
+        // Legacy text treats alpha 0..3 as unspecified/opaque. Zero-opacity text is skipped.
+        return faded >>> 24 < 4 ? faded & 0xFFFFFF | 0x04000000 : faded;
+    }
+    // Minecraft TTF glyphs use a baseline seven pixels below the draw origin.
+    // Center Inter's visible cap/x-height rather than assuming vanilla's 9px font.
+    private int textY(double center, double scale) {
+        return (int) Math.round(center - (compactNavigation ? 4.25 : 2.75) * scale);
+    }
+    private void enterPane() { paneMotion.snap(0); }
+    private String motionKey(ButtonKind kind, Entry entry, String label) {
+        return kind + ":" + (entry == null ? "" : entry.key) + ":" + label;
+    }
+    private ButtonMotion motion(String key, Entry entry) {
+        return buttonMotions.computeIfAbsent(key, ignored -> new ButtonMotion(
+                entry != null && entry.kind == Kind.TOGGLE && entry.value.get().equals("@options.on"),
+                entry != null && entry.kind == Kind.GROUP && entry.value.get().contains("collapse")));
+    }
+    private void activate(String key, Entry entry, Runnable action) {
+        motion(key, entry).pulseUntil = now() + SettingsMotion.PRESS * 1_000_000L;
+        action.run();
+    }
 
     public LyricsConfigScreen(Screen parent) { this(parent, RelayLyricsClient.preferences()); }
     LyricsConfigScreen(Screen parent, ClientPreferences preferences) {
-        super(Text.translatable("screen.relaylyrics.config")); this.parent = parent;
+        super(Text.translatable("config.relaylyrics.settings.title")); this.parent = parent;
         this.preferences = preferences; this.catalog = new LyricsSettingsCatalog(preferences, this);
     }
     private void savePreferences() { if (preferences == RelayLyricsClient.preferences()) preferences.save(); }
-    @Override protected void init() { rebuild(); }
+    @Override protected void init() {
+        viewportWidth = width; viewportHeight = height;
+        uiScale = ResponsiveLyricsLayout.scale(viewportWidth, viewportHeight);
+        width = (int) Math.ceil(viewportWidth / uiScale); height = (int) Math.ceil(viewportHeight / uiScale);
+        rebuild();
+    }
 
     private void rebuild() {
-        clearChildren(); rows.clear();
-        if (category == Category.WORLD && !preferences.isWorldLyrics()) category = Category.GENERAL;
+        boolean keepSearchFocus = searchField != null && searchField.isFocused();
+        int searchCursor = searchField == null ? searchQuery.length() : searchField.getCursor();
+        clearChildren(); rows.clear(); navigation.clear(); searchField = null; peekButton = null;
+        modalWidth = Math.max(190, Math.min(940, (int) Math.floor(width * .94)));
+        modalHeight = Math.max(130, Math.min(700, (int) Math.floor(height * .88)));
+        modalX = (width - modalWidth) / 2; modalY = (height - modalHeight) / 2;
+        compactNavigation = modalWidth < 560;
+        sidebarWidth = compactNavigation ? 46 : modalWidth < 900 ? 184 : 216;
+        paneX = modalX + sidebarWidth; paneWidth = modalWidth - sidebarWidth;
+        rowLeft = paneX + (compactNavigation ? 14 : modalWidth < 900 ? 22 : 32);
+        rowWidth = modalX + modalWidth - (compactNavigation ? 14 : modalWidth < 900 ? 22 : 32) - rowLeft;
+        stacked = rowWidth < (compactNavigation ? 260 : 410);
+        listTop = modalY + (modalHeight < 250 ? 58 : 82);
+        listBottom = modalY + modalHeight - (notice.isEmpty() ? 20 : 52);
         if (confirmRestore) { buildRestoreConfirmation(); return; }
         if (editing) { buildEditor(); return; }
-        int fullWidth = Math.min(1120, width - 32);
-        int left = (width - fullWidth) / 2;
-        sidePreview = width >= 1080 && height >= 440 && category != Category.CONNECTION;
-        rowLeft = left;
-        rowWidth = fullWidth;
-        if (sidePreview) {
-            previewWidth = Math.min(350, rowWidth / 3);
-            rowWidth -= previewWidth + 20;
-            previewX = rowLeft + rowWidth + 20;
+
+        int navY = modalY + (compactNavigation ? 57 : 68);
+        if (!compactNavigation) {
+            searchField = addDrawableChild(new SearchField(modalX + 14, modalY + 17, sidebarWidth - 28, 34));
+        } else {
+            searchField = addDrawableChild(new SearchField(paneX + 14, modalY + 15, Math.max(40, paneWidth - 116), 28));
         }
-        stacked = rowWidth < 480;
+        searchField.setText(searchQuery);
+        searchField.setCursor(Math.clamp(searchCursor, 0, searchQuery.length()), false);
+        searchField.setChangedListener(value -> {
+            searchQuery = value; expandedChoice = ""; scroll = 0; rebuild();
+        });
+        if (keepSearchFocus) { setFocused(searchField); searchField.setFocused(true); }
         List<Category> categories = catalog.categories();
-        int columns = Math.min(categories.size(), Math.max(2, fullWidth / 112));
-        int tabWidth = (fullWidth - (columns - 1) * 4) / columns;
-        for (int i = 0; i < categories.size(); i++) {
-            Category candidate = categories.get(i);
-            var tab = button(Text.translatable(candidate.key), left + (i % columns) * (tabWidth + 4),
-                    33 + (i / columns) * 24, tabWidth, () -> changeCategory(candidate));
-            tab.active = candidate != category;
+        int navSpace = modalHeight - (navY - modalY) - 20 - Math.max(0, categories.size() - 1) * 4;
+        int navHeight = Math.min(34, Math.max(10, navSpace / Math.max(1, categories.size())));
+        for (Category candidate : categories) {
+            PanelButton tab = addPanelButton(Text.translatable(candidate.key), modalX + (compactNavigation ? 6 : 12), navY,
+                    sidebarWidth - (compactNavigation ? 12 : 24), navHeight,
+                    () -> changeCategory(candidate), ButtonKind.NAV, null);
+            tab.navigationCategory = candidate;
+            tab.selected = candidate == category && searchQuery.isBlank();
+            if (compactNavigation) tab.setTooltip(Tooltip.of(Text.translatable(candidate.key)));
+            navigation.add(tab); navY += navHeight + 4;
         }
-        listTop = 43 + ((categories.size() + columns - 1) / columns) * 24;
-        int noticeLines = notice.isEmpty() ? 1 : textRenderer.wrapLines(text(notice), width - 48).size();
-        listBottom = height - 48 - Math.max(0, noticeLines - 1) * 10;
+        int closeX = modalX + modalWidth - 48;
+        addPanelButton(Text.translatable("config.relaylyrics.settings.close"), closeX, modalY + 18, 30, 30, this::close, ButtonKind.CLOSE, null);
+        peekButton = addPanelButton(Text.translatable("config.relaylyrics.settings.peek"), closeX - 38, modalY + 18,
+                30, 30, () -> { }, ButtonKind.PEEK, null);
+        peekButton.setTooltip(Tooltip.of(Text.translatable("config.relaylyrics.settings.peek")));
+
+        List<Entry> entries;
+        var sections = new LinkedHashMap<String, Category>();
+        if (searchQuery.isBlank()) entries = catalog.entries(category);
+        else {
+            var matches = new LinkedHashMap<String, Entry>();
+            String[] query = normalize(searchQuery).split("\\s+");
+            for (Category source : categories) for (Entry entry : catalog.searchEntries(source)) {
+                if (entry.kind == Kind.GROUP) continue;
+                String haystack = normalize(I18n.translate(entry.key) + " " + description(entry) + " " + I18n.translate(source.key));
+                boolean found = true;
+                for (String word : query) if (!haystack.contains(word)) { found = false; break; }
+                if (found && !matches.containsKey(entry.key)) { matches.put(entry.key, entry); sections.put(entry.key, source); }
+            }
+            entries = List.copyOf(matches.values());
+        }
         int offset = 0;
-        for (Entry entry : catalog.entries(category)) {
-            int labelWidth = stacked ? rowWidth - 12 : rowWidth - controlWidth() - 22;
-            var labelLines = textRenderer.wrapLines(Text.translatable(entry.key), labelWidth);
-            int labelHeight = Math.max(9, labelLines.size() * 10);
-            int rowHeight = stacked ? labelHeight + 29 : Math.max(34, labelHeight + 12);
-            boolean hint = !stacked && I18n.hasTranslation(entry.key + ".hint") && labelLines.size() == 1;
+        for (Entry entry : entries) {
+            boolean toggle = entry.kind == Kind.TOGGLE;
+            int labelWidth = entry.kind == Kind.INFO ? rowWidth - 32 : entry.kind == Kind.GROUP ? rowWidth - 74
+                    : toggle ? rowWidth - 94 : stacked ? rowWidth - 32 : rowWidth - controlWidth() - 48;
+            labelWidth = Math.max(60, labelWidth);
+            int labelLines = textRenderer.wrapLines(ui(Text.translatable(entry.key)), labelWidth).size();
+            String detail = description(entry);
+            if (!searchQuery.isBlank()) detail = I18n.translate(sections.get(entry.key).key) + (detail.isBlank() ? "" : " · " + detail);
+            int detailLines = detail.isBlank() ? 0 : Math.min(3, textRenderer.wrapLines(ui(Text.literal(detail)), (int) (labelWidth / .9)).size());
+            int labelStep = compactNavigation ? 12 : 16, detailStep = compactNavigation ? 10 : 14;
+            int textHeight = Math.max(labelStep, labelLines * labelStep) + (detailLines == 0 ? 0 : (compactNavigation ? 3 : 4) + detailLines * detailStep);
+            if (entry.kind == Kind.INFO) textHeight += Math.min(3, Math.max(1, textRenderer.wrapLines(ui(text(entry.value.get())), rowWidth - 32).size())) * (compactNavigation ? 10 : 14) + 5;
+            boolean below = stacked && !toggle && entry.kind != Kind.GROUP && entry.kind != Kind.INFO;
+            int rowHeight = Math.max(compactNavigation ? 40 : entry.kind == Kind.GROUP ? 46 : 54,
+                    textHeight + (compactNavigation ? 18 : 26) + (below ? compactNavigation ? 32 : 36 : 0));
             boolean expanded = entry.kind == Kind.CHOICE && entry.key.equals(expandedChoice);
-            Row row = new Row(entry, offset, rowHeight, expanded ? entry.options.size() * 24 + 4 : 0, labelWidth, hint);
-            rows.add(row); createControl(row); offset += row.height + 4;
+            Row row = new Row(entry, offset, rowHeight, expanded ? entry.options.size() * 30 + 10 : 0,
+                    labelWidth, detail, below);
+            rows.add(row); createControl(row); offset += row.height + (entry.kind == Kind.GROUP ? 8 : 1);
         }
         totalHeight = offset;
         scroll = Math.clamp(scroll, 0, maxScroll());
         positionRows();
-        button(Text.translatable("gui.done"), left + fullWidth - 128, height - 28, 128, this::close);
     }
 
-    private int controlWidth() { return stacked ? rowWidth - 12 : Math.clamp(rowWidth * 43 / 100, 160, 280); }
-    private ButtonWidget button(Text text, int x, int y, int w, Runnable action) {
-        return addDrawableChild(ButtonWidget.builder(text, ignored -> action.run()).dimensions(x, y, w, 20).build());
+    private static String normalize(String text) {
+        return Normalizer.normalize(text.toLowerCase(Locale.ROOT), Normalizer.Form.NFD).replaceAll("\\p{M}", "");
+    }
+    private static String description(Entry entry) {
+        if (I18n.hasTranslation(entry.key + ".desc")) return net.minecraft.util.Language.getInstance().get(entry.key + ".desc");
+        return I18n.hasTranslation(entry.key + ".hint") ? net.minecraft.util.Language.getInstance().get(entry.key + ".hint") : "";
+    }
+    private int controlWidth() { return stacked ? Math.max(80, rowWidth - 32) : Math.clamp(rowWidth * 38 / 100, 120, 210); }
+    private PanelButton addPanelButton(Text message, int x, int y, int width, int height, Runnable action, ButtonKind kind, Entry entry) {
+        return addDrawableChild(new PanelButton(x, y, width, height, message, action, kind, entry));
+    }
+    private PanelButton button(Text message, int x, int y, int width, Runnable action) {
+        return addPanelButton(message, x, y, width, 28, action, ButtonKind.ACTION, null);
     }
     private void createControl(Row row) {
-        Entry e = row.entry;
-        int x = stacked ? rowLeft + 6 : rowLeft + rowWidth - controlWidth() - 6;
-        int w = controlWidth();
-        if (e.kind == Kind.SLIDER) {
-            row.add(button(Text.literal("−"), x, 0, 20, () -> setNumber(e, e.number.getAsDouble() - e.step, true)), 0);
-            row.add(addDrawableChild(new SettingSlider(x + 23, 0, w - 46, e)), 0);
-            row.add(button(Text.literal("+"), x + w - 20, 0, 20, () -> setNumber(e, e.number.getAsDouble() + e.step, true)), 0);
+        Entry entry = row.entry;
+        if (entry.kind == Kind.INFO) {
+            PanelButton info = addPanelButton(text(entry.value.get()), rowLeft + 12, 0, rowWidth - 24,
+                    Math.max(24, row.baseHeight - 16), () -> { }, ButtonKind.INFO, entry);
+            info.active = false;
+            info.setTooltip(Tooltip.of(text(entry.value.get())));
+            row.add(info, 4);
+            return;
+        }
+        int controlWidth = entry.kind == Kind.TOGGLE ? 42 : entry.kind == Kind.GROUP ? 26 : controlWidth();
+        int x = rowLeft + rowWidth - controlWidth - 16;
+        if (row.below) x = rowLeft + 16;
+        if (entry.kind == Kind.SLIDER) {
+            row.add(addPanelButton(Text.literal("−"), x, 0, 24, 28, () -> setNumber(entry, entry.number.getAsDouble() - entry.step, true), ButtonKind.ACTION, entry), 0);
+            row.add(addDrawableChild(new SettingSlider(x + 30, 0, controlWidth - 60, entry)), 0);
+            row.add(addPanelButton(Text.literal("+"), x + controlWidth - 24, 0, 24, 28, () -> setNumber(entry, entry.number.getAsDouble() + entry.step, true), ButtonKind.ACTION, entry), 0);
         } else {
-            ButtonWidget control = button(valueText(e), x, 0, w, () -> {
-                if (e.kind == Kind.CHOICE) openChoice(e);
-                else { e.activate.run(); changed(e, true); }
-            });
-            control.active = e.kind != Kind.INFO;
+            ButtonKind kind = entry.kind == Kind.TOGGLE ? ButtonKind.TOGGLE : entry.kind == Kind.GROUP ? ButtonKind.GROUP : ButtonKind.ACTION;
+            PanelButton control = addPanelButton(valueText(entry), x, 0, controlWidth, entry.kind == Kind.TOGGLE ? 24 : 28, () -> {
+                if (entry.kind == Kind.CHOICE) openChoice(entry);
+                else { if (entry.kind == Kind.GROUP) enterPane(); entry.activate.run(); changed(entry, true); }
+            }, kind, entry);
             row.add(control, 0);
         }
-        if (I18n.hasTranslation(e.key + ".desc"))
-            for (var widget : row.widgets) widget.setTooltip(Tooltip.of(Text.translatable(e.key + ".desc")));
-        if (e.key.equals(expandedChoice) && e.kind == Kind.CHOICE) {
-            for (int i = 0; i < e.options.size(); i++) {
-                int index = i;
-                Text label = text(e.options.get(i));
-                if (i == e.selected.getAsInt()) label = Text.literal("✓ ").append(label);
-                row.add(button(label, x, 0, w, () -> {
-                    expandedChoice = "";
-                    e.select.accept(index); changed(e, true); rebuild();
-                }), row.baseHeight + 4 + i * 24);
+        // The label and help are already visible beside each control; avoid duplicate vanilla tooltips.
+        if (entry.key.equals(expandedChoice) && entry.kind == Kind.CHOICE) {
+            for (int index = 0; index < entry.options.size(); index++) {
+                int choice = index;
+                PanelButton control = addPanelButton(text(entry.options.get(index)), x, 0, controlWidth, 28, () -> {
+                    expandedChoice = ""; entry.select.accept(choice); changed(entry, true); rebuild();
+                }, ButtonKind.OPTION, entry);
+                control.selected = index == entry.selected.getAsInt();
+                row.add(control, row.baseHeight + 5 + index * 30);
             }
         }
     }
@@ -134,69 +270,81 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         if (value == null || value.isBlank()) return Text.literal("—");
         return value.startsWith("@") ? Text.translatable(value.substring(1)) : Text.literal(value);
     }
+    private Text ui(Text value) { return PlatformTextStyles.withFont(value, compactNavigation ? UI_COMPACT : UI_FONT); }
+    private Text bold(Text value) { return PlatformTextStyles.withFont(value, compactNavigation ? UI_COMPACT_BOLD : UI_BOLD); }
     private void positionRows() {
         for (Row row : rows) {
             int top = listTop + row.offset - scroll;
-            int controlY = stacked ? row.baseHeight - 24 : (row.baseHeight - 20) / 2;
-            for (int i = 0; i < row.widgets.size(); i++) {
-                var widget = row.widgets.get(i);
-                int localY = row.widgetOffsets.get(i);
-                int y = top + (localY == 0 ? controlY : localY);
-                widget.setY(y); widget.visible = y >= listTop && y + widget.getHeight() <= listBottom;
+            for (int index = 0; index < row.widgets.size(); index++) {
+                ClickableWidget widget = row.widgets.get(index);
+                int localY = row.widgetOffsets.get(index);
+                int y = top + (localY == 0 ? row.below ? row.baseHeight - 40 : 13 : localY);
+                widget.setY(y);
+                widget.visible = y >= listTop && y + widget.getHeight() <= listBottom;
             }
         }
     }
     private int maxScroll() { return Math.max(0, totalHeight - (listBottom - listTop)); }
-    private void changeCategory(Category next) { category = next; scroll = 0; expandedChoice = ""; notice = ""; rebuild(); }
+    private void changeCategory(Category next) {
+        enterPane(); category = next; searchQuery = ""; scroll = 0; expandedChoice = ""; notice = ""; rebuild();
+    }
     private void openChoice(Entry entry) {
-        expandedChoice = entry.key.equals(expandedChoice) ? "" : entry.key;
+        enterPane(); expandedChoice = entry.key.equals(expandedChoice) ? "" : entry.key;
         rebuild();
-        // Keep the clicked control and the beginning of its options together.
-        for (Row row : rows) if (row.entry.key.equals(expandedChoice)) {
-            int wanted = row.offset + Math.min(row.height, (listBottom - listTop) / 2) - (listBottom - listTop);
-            scroll = Math.clamp(Math.max(scroll, wanted), 0, Math.min(row.offset, maxScroll()));
+        if (!expandedChoice.isEmpty()) {
+            for (Row row : rows) if (row.entry.key.equals(expandedChoice)) {
+                int wanted = row.offset + row.baseHeight + 34 - (listBottom - listTop);
+                scroll = Math.clamp(Math.max(scroll, wanted), 0, maxScroll()); positionRows(); break;
+            }
         }
-        positionRows();
     }
     private void buildRestoreConfirmation() {
-        int w = Math.min(440, width - 48), left = (width - w) / 2;
-        button(Text.translatable("config.relaylyrics.restore"), left, height - 58, w, () -> {
-            catalog.restore("all"); confirmRestore = false; scroll = 0; savePreferences(); rebuild();
-        });
-        button(Text.translatable("gui.cancel"), left, height - 28, w, () -> { confirmRestore = false; rebuild(); });
+        rowLeft = paneX + 28; rowWidth = Math.max(100, paneWidth - 56);
+        button(Text.translatable("gui.cancel"), rowLeft, modalY + modalHeight - 52, Math.max(60, (rowWidth - 8) / 2),
+                () -> { confirmRestore = false; rebuild(); });
+        button(Text.translatable("config.relaylyrics.restore"), rowLeft + (rowWidth + 8) / 2, modalY + modalHeight - 52,
+                Math.max(60, (rowWidth - 8) / 2), () -> { catalog.restore("all"); savePreferences(); confirmRestore = false; rebuild(); });
+        addPanelButton(Text.translatable("config.relaylyrics.settings.close"), modalX + modalWidth - 48, modalY + 18, 30, 30,
+                () -> { confirmRestore = false; rebuild(); }, ButtonKind.CLOSE, null);
+    }
+    @Override public boolean videoPopupProfile() {
+        var overlay = RelayLyricsClient.overlay();
+        return (resizing ? resizeVideoAspect : overlay == null ? 0 : overlay.popupVideoAspect()) > 0;
+    }
+    @Override public boolean squareVideoPopupProfile() {
+        var overlay = RelayLyricsClient.overlay();
+        return resizing ? resizeSquareVideo : overlay != null && overlay.isSquareVideo();
     }
     private void buildEditor() {
-        int left = Math.max(12, (width - 500) / 2);
-        button(Text.translatable("gui.back"), width - left - 128, height - 28, 128,
+        int left = Math.max(12, (width - Math.min(500, width - 24)) / 2);
+        button(Text.translatable("gui.done"), width - left - 100, height - 36, 100,
                 () -> { editing = false; rebuild(); });
-        if (editing) {
-            editWidth = Math.min(preferences.getLyricsWidth(), width - 24);
-            int top = height < 240 ? 30 : 52;
-            editHeight = Math.min(preferences.getLyricsHeight(), Math.max(100, height - top - 44));
-            editX = Math.clamp(preferences.getLyricsX(), 12, Math.max(12, width - editWidth - 12));
-            editY = Math.clamp(preferences.getLyricsY(), top, Math.max(top, height - editHeight - 44));
-            button(Text.translatable("config.relaylyrics.reset_layout"), left, height - 28, Math.min(180, width - left * 2 - 136),
-                    () -> { preferences.resetLayout(); rebuild(); }).setTooltip(Tooltip.of(Text.translatable("config.relaylyrics.adjust_layout.hint")));
-        }
+        editWidth = Math.min(preferences.getPopupWidth(videoPopupProfile(), squareVideoPopupProfile()), width - 24);
+        int top = height < 240 ? 30 : 52;
+        editHeight = Math.min(preferences.getPopupHeight(videoPopupProfile(), squareVideoPopupProfile()), Math.max(100, height - top - 54));
+        editX = Math.clamp(preferences.getLyricsX(), 12, Math.max(12, width - editSurfaceWidth() - 12));
+        editY = Math.clamp(preferences.getLyricsY(), top, Math.max(top, height - editHeight - 44));
+        button(Text.translatable("config.relaylyrics.reset_layout"), left, height - 36, Math.min(180, width - left * 2 - 112),
+                () -> { preferences.resetLayout(); rebuild(); });
     }
-    private void setNumber(Entry e, double number, boolean immediate) {
-        number = Math.clamp(number, e.min, e.max);
-        double snapped = e.min + Math.round((number - e.min) / e.step) * e.step;
-        e.setNumber.accept(Math.clamp(snapped, e.min, e.max)); changed(e, immediate);
-        for (Row row : rows) if (row.entry == e)
+    private void setNumber(Entry entry, double number, boolean immediate) {
+        double snapped = entry.min + Math.round((Math.clamp(number, entry.min, entry.max) - entry.min) / entry.step) * entry.step;
+        entry.setNumber.accept(Math.clamp(snapped, entry.min, entry.max)); changed(entry, immediate);
+        for (Row row : rows) if (row.entry == entry)
             for (var widget : row.widgets) if (widget instanceof SettingSlider slider) slider.refresh();
     }
-    private void changed(Entry e, boolean immediate) {
+    private void changed(Entry entry, boolean immediate) {
         if (immediate) { savePreferences(); saveDelay = 0; } else saveDelay = 10;
-        if (e.changesStructure) rebuild(); else refreshValues();
+        if (entry.changesStructure) rebuild(); else refreshValues();
     }
     private void refreshValues() {
         for (Row row : rows) {
-            if (row.entry.kind == Kind.SLIDER) continue;
-            var control = row.widgets.get(0);
-            Text next = valueText(row.entry);
-            if (!next.equals(control.getMessage())) control.setMessage(next);
-            if (row.entry.kind == Kind.INFO) control.setTooltip(Tooltip.of(text(row.entry.value.get())));
+            if (row.entry.kind == Kind.INFO) {
+                if (!row.widgets.isEmpty()) row.widgets.get(0).setTooltip(Tooltip.of(text(row.entry.value.get())));
+                continue;
+            }
+            if (row.entry.kind == Kind.SLIDER || row.widgets.isEmpty()) continue;
+            row.widgets.get(0).setMessage(valueText(row.entry));
         }
     }
     @Override public void tick() {
@@ -214,17 +362,26 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
                 fontChanged();
             }
             case "font_changed" -> fontChanged();
+            case "background_style" -> { if (RelayLyricsClient.music() != null) RelayLyricsClient.music().refreshBackgroundArtwork(); }
             case "layout" -> { editing = true; rebuild(); }
-            case "custom_effects", "custom_world" -> { category = Category.CUSTOM; scroll = 0; expandedChoice = ""; rebuild(); }
+            case "custom_effects" -> { category = Category.CUSTOM; scroll = 0; expandedChoice = ""; rebuild(); }
+            case "custom_world" -> {
+                category = Category.CUSTOM; scroll = 0; expandedChoice = ""; rebuild();
+                for (Row row : rows) if (row.entry.key.endsWith(".group.world")) {
+                    scroll = Math.clamp(row.offset, 0, maxScroll()); positionRows(); break;
+                }
+            }
             case "source" -> { if (music != null) music.syncMusicSource(); }
             case "spotify" -> { if (music != null) MinecraftClient.getInstance().setScreen(new SpotifyAccountScreen(this, preferences, music)); }
             case "youtube" -> MinecraftClient.getInstance().setScreen(new YouTubeMusicConnectionScreen(this, preferences, music));
             case "connection_setup" -> {
                 if (preferences.getMusicSource() == MusicSource.YOUTUBE_MUSIC) run("youtube");
-                else if (preferences.getMusicSource() == MusicSource.WINDOWS_MEDIA || preferences.getMusicSource() == MusicSource.SPICETIFY_BRIDGE) {
+                else if (preferences.getMusicSource() == MusicSource.AUTOMATIC || preferences.getMusicSource() == MusicSource.WINDOWS_MEDIA || preferences.getMusicSource() == MusicSource.SPICETIFY_BRIDGE) {
                     catalog.expand("connection_details"); notice = "@config.relaylyrics.connection.guide." + preferences.getMusicSource().name().toLowerCase(java.util.Locale.ROOT); rebuild();
                 } else run("spotify");
             }
+            case "motion_artwork" -> { if (music != null) music.refreshMotionArtwork(); }
+            case "lyrics_sources" -> { if (music != null) music.retryLyrics(); }
             case "retry" -> { if (music != null) { music.syncMusicSource(); music.retryLyrics(); } }
             case "audio" -> { if (music != null) music.reloadReactiveAudioOutput(); }
             case "restore_all" -> { confirmRestore = true; rebuild(); }
@@ -248,10 +405,9 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
                     : preferences.getMusicSource() == MusicSource.SPICETIFY_BRIDGE ? music.spicetifyConnected()
                     : music.bridgeAlive() || music.spotifyAccountConnected())
                     ? "@config.relaylyrics.connected" : "@config.relaylyrics.needs_setup";
-            case "method" -> music.spotifyPlaybackActive() ? "@config.relaylyrics.connection.method.account"
-                    : music.youtubeMusicConnected() ? "@config.relaylyrics.connection.method.youtube"
-                    : music.spicetifyConnected() ? "@config.relaylyrics.connection.method.spicetify"
-                    : "@config.relaylyrics.connection.method.bridge";
+            case "method" -> "@config.relaylyrics.connection.method." + music.playbackMethod();
+            case "sources" -> music.lyricsSourceDiagnostics();
+            case "motion_artwork" -> music.motionArtworkStatus();
             case "device" -> playback.deviceName();
             case "playback" -> playback.title() == null || playback.title().equals("Nothing playing")
                     ? "@config.relaylyrics.waiting_music" : playback.title() + " — " + playback.artist();
@@ -280,116 +436,244 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         }
     }
 
-    @Override public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        renderVanillaScreen(context, mouseX, mouseY, delta);
-        centered(context, title, width / 2, 14, 0xFFFFFFFF);
+
+    private void drawPopup(DrawContext context) {
+        var overlay = RelayLyricsClient.overlay();
+        if (overlay == null || !overlay.hasCurrentSong()) return;
+        var bounds = overlay.popupBoundsSnapshot(viewportWidth, viewportHeight);
+        previewBounds = bounds;
+        drawCurrentSong(context, ResponsiveLyricsLayout.design(bounds.x(), uiScale), ResponsiveLyricsLayout.design(bounds.y(), uiScale),
+                ResponsiveLyricsLayout.design(bounds.width(), uiScale), ResponsiveLyricsLayout.design(bounds.height(), uiScale));
+    }
+
+    /** Draw the plate before native widgets, including on versions where Screen renders its own background. */
+    @Override public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
+        // Newer Minecraft versions ask for the background before this screen's render pass.
+        // Compose the plate explicitly after the live preview and dim layer instead.
+        if (!drawingPanel || peeking || editing) return;
+        paintAlpha = modalAlpha;
+        if (paintAlpha <= 0) return;
+        for (int spread = 12; spread >= 3; spread -= 3)
+            RoundedGui.smoothFill(context, modalX - spread, modalY - spread / 2, modalWidth + spread * 2,
+                    modalHeight + spread, 16, ink(0x08000000));
+        RoundedGui.smoothGradient(context, modalX, modalY, modalWidth, modalHeight, 16, FIELD, DEEP, sidebarWidth, 0x6B23133E, paintAlpha);
+        context.fill(paneX, modalY, paneX + 1, modalY + modalHeight, ink(HAIRLINE));
+        RoundedGui.smoothOutline(context, modalX, modalY, modalWidth, modalHeight, 16, ink(0x28D9CAFF));
+        if (!compactNavigation && modalHeight > 220)
+            drawUi(context, Text.literal("Lyrica"), modalX + 22, modalY + modalHeight - 28, TERTIARY, .85, false);
+        if (!compactNavigation) {
+            paintAlpha = modalAlpha * paneAlpha;
+            if (paintAlpha <= 0) return;
+            drawUi(context, Text.translatable(searchQuery.isBlank() ? category.key : "config.relaylyrics.settings.search"),
+                    rowLeft, textY((modalY + listTop - 10) / 2.0, 1.65), INK, 1.65, true);
+        }
+        paintAlpha = modalAlpha;
+        context.fill(paneX + 1, listTop - 10, modalX + modalWidth - 1, listTop - 9, ink(0x14D9CAFF));
         if (confirmRestore) {
-            int w = Math.min(440, width - 48), y = 66;
-            for (var line : textRenderer.wrapLines(Text.translatable("config.relaylyrics.defaults.confirm"), w)) {
-                context.drawText(textRenderer, line, (width - w) / 2, y, 0xFFE4E8F0, false); y += 13;
+            int y = modalY + 92;
+            for (var line : textRenderer.wrapLines(ui(Text.translatable("config.relaylyrics.defaults.confirm")), Math.max(90, rowWidth))) {
+                drawOrdered(context, line, rowLeft, y, INK, 1); y += 18;
             }
             return;
         }
-        if (editing) {
-            drawCurrentSong(context, editX, editY, editWidth, editHeight);
-            drawBorder(context, editX - 1, editY - 1, editWidth + 2, editHeight + 2, 0xFF95B8FF);
-            context.fill(editX + editWidth - 12, editY + editHeight - 12, editX + editWidth, editY + editHeight, 0xFF95B8FF);
-            if (height < 240) return;
-            int lineY = height - 46;
-            var hints = textRenderer.wrapLines(Text.translatable("config.relaylyrics.adjust_layout.hint"), width - 32);
-            lineY -= Math.max(0, hints.size() - 1) * 10;
-            for (var hint : hints) {
-                context.drawText(textRenderer, hint, (width - textRenderer.getWidth(hint)) / 2, lineY, 0xFFBEC9DA, false); lineY += 10;
-            }
-            return;
-        }
-        context.enableScissor(rowLeft, listTop, rowLeft + rowWidth, listBottom);
-        for (Row row : rows) {
+        paintAlpha = modalAlpha * paneAlpha;
+        GuiTransform.enableScissor(context, rowLeft, listTop, rowLeft + rowWidth, listBottom);
+        for (int index = 0; index < rows.size(); index++) {
+            if (paintAlpha <= 0) break;
+            Row row = rows.get(index);
             int top = listTop + row.offset - scroll;
             if (top + row.height < listTop || top > listBottom) continue;
+            if (row.entry.kind != Kind.GROUP) {
+                RoundedGui.smoothFill(context, rowLeft, top, rowWidth, row.height, 10, ink(0x14D9CAFF));
+            }
+            int y = top + (compactNavigation ? 10 : 13);
+            for (var line : textRenderer.wrapLines(ui(Text.translatable(row.entry.key)), row.labelWidth)) {
+                drawOrdered(context, line, rowLeft + 16, y, row.entry.kind == Kind.GROUP ? MUTED : INK, 1); y += compactNavigation ? 12 : 16;
+            }
+            if (!row.detail.isBlank()) {
+                int count = 0; y += compactNavigation ? 3 : 4;
+                for (var line : textRenderer.wrapLines(ui(Text.literal(row.detail)), (int) (row.labelWidth / .9))) {
+                    drawOrdered(context, line, rowLeft + 16, y, MUTED, .9); y += compactNavigation ? 10 : 14;
+                    if (++count == 3) break;
+                }
+            }
+            if (row.entry.kind == Kind.INFO) {
+                y += 5; int count = 0;
+                for (var line : textRenderer.wrapLines(ui(text(row.entry.value.get())), rowWidth - 32)) {
+                    drawOrdered(context, line, rowLeft + 16, y, MUTED, .9); y += compactNavigation ? 10 : 14;
+                    if (++count == 3) break;
+                }
+            }
             if (row.entry.key.equals(expandedChoice)) {
-                int x = stacked ? rowLeft + 3 : rowLeft + rowWidth - controlWidth() - 10;
-                context.fill(x, top + row.baseHeight + 3, x + 2, top + row.height, 0xFF95B8FF);
-            }
-            context.fill(rowLeft + 6, top + row.height + 1, rowLeft + rowWidth - 6, top + row.height + 2, 0x225F6B80);
-            int y = stacked ? top + 2 : top + 7;
-            for (var line : textRenderer.wrapLines(Text.translatable(row.entry.key), row.labelWidth)) {
-                context.drawText(textRenderer, line, rowLeft + 6, y, row.entry.kind == Kind.GROUP ? 0xFF95B8FF : 0xFFE2E6ED, false); y += 10;
-            }
-            if (row.hint) {
-                String hint = I18n.translate(row.entry.key + ".hint");
-                context.drawText(textRenderer, textRenderer.trimToWidth(hint, row.labelWidth), rowLeft + 6, y + 2, 0xFF8E9EB6, false);
+                int x = row.below ? rowLeft + 16 : rowLeft + rowWidth - controlWidth() - 16;
+                RoundedGui.smoothFill(context, x - 3, top + row.baseHeight, controlWidth() + 6,
+                        row.height - row.baseHeight, 9, ink(0xFF2A1B46));
             }
         }
+        if (rows.isEmpty()) drawUi(context, Text.translatable("config.relaylyrics.settings.empty"), rowLeft + 16, listTop + 22, MUTED, 1, false);
         context.disableScissor();
+        paintAlpha = modalAlpha;
         if (maxScroll() > 0) {
-            int track = listBottom - listTop, thumb = Math.max(16, track * track / totalHeight);
+            int track = listBottom - listTop, thumb = Math.max(18, track * track / totalHeight);
             int y = listTop + (track - thumb) * scroll / maxScroll();
-            context.fill(rowLeft + rowWidth + 3, listTop, rowLeft + rowWidth + 5, listBottom, 0x554D586C);
-            context.fill(rowLeft + rowWidth + 3, y, rowLeft + rowWidth + 5, y + thumb, 0xFF95B8FF);
-        }
-        if (sidePreview) {
-            centered(context, Text.translatable("config.relaylyrics.current_song"), previewX + previewWidth / 2, listTop + 2, 0xFFBEC9DA);
-            drawCurrentSong(context, previewX, listTop + 23, previewWidth, Math.min(270, height - listTop - 85));
+            RoundedGui.smoothFill(context, rowLeft + rowWidth + 7, y, 3, thumb, 1, ink(0x60D9CAFF));
         }
         if (!notice.isEmpty()) {
-            var message = textRenderer.wrapLines(text(notice), width - 48);
-            int y = height - 38 - Math.max(0, message.size() - 1) * 10;
-            for (var line : message) { context.drawText(textRenderer, line, (width - textRenderer.getWidth(line)) / 2, y, 0xFF95B8FF, false); y += 10; }
+            GuiTransform.enableScissor(context, rowLeft, listBottom + 5, modalX + modalWidth - 15, modalY + modalHeight - 6);
+            int y = listBottom + 10;
+            for (var line : textRenderer.wrapLines(ui(text(notice)), rowWidth)) {
+                drawOrdered(context, line, rowLeft, y, MUTED, .85); y += 13;
+            }
+            context.disableScissor();
         }
     }
-    private void centered(DrawContext context, Text text, int x, int y, int color) {
-        context.drawText(textRenderer, text, x - textRenderer.getWidth(text) / 2, y, color, false);
+    @Override public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        mouseX = (int) Math.round(pointerX(mouseX)); mouseY = (int) Math.round(pointerY(mouseY));
+        GuiTransform.push(context); GuiTransform.scale(context, (float) uiScale, (float) uiScale);
+        double oldDensity = PlatformTextures.beginUiScale(uiScale);
+        try {
+            frameNanos = now();
+            if (probeMouseX >= 0) { mouseX = probeMouseX; mouseY = probeMouseY; }
+            modalAlpha = modalMotion.to(1, SettingsMotion.MODAL, SettingsMotion.Curve.OUT, frameNanos, motionEnabled());
+            paneAlpha = paneMotion.to(1, SettingsMotion.PANE, SettingsMotion.Curve.OUT, frameNanos, motionEnabled());
+            if (!editing) drawPopup(context);
+            GuiTransform.nextLayer(context);
+            context.fill(0, 0, width, height, SettingsMotion.opacity(0x73000000, peeking ? 0 : modalAlpha));
+            GuiTransform.nextLayer(context);
+            drawingPanel = true;
+            try { renderBackground(context, mouseX, mouseY, delta); } finally { drawingPanel = false; }
+            GuiTransform.nextLayer(context);
+            renderVanillaScreen(context, mouseX, mouseY, delta);
+            paintAlpha = 1;
+            if (peeking) return;
+            if (editing) {
+                drawCurrentSong(context, editX, editY, editSurfaceWidth(), editHeight);
+                drawBorder(context, editX - 1, editY - 1, editSurfaceWidth() + 2, editHeight + 2, 0xFFD9CAFF);
+                context.fill(editX + editSurfaceWidth() - 12, editY + editHeight - 12, editX + editSurfaceWidth(), editY + editHeight, ink(0xFFD9CAFF));
+                if (height >= 240) {
+                    var lines = textRenderer.wrapLines(ui(Text.translatable("config.relaylyrics.adjust_layout.hint")), width - 40);
+                    int y = height - 56 - lines.size() * 13;
+                    for (var line : lines) { context.drawText(textRenderer, line, 20, y, textInk(INK), false); y += 13; }
+                }
+            }
+        } finally {
+            try { GuiTransform.finishUiDraw(context, mouseX, mouseY, delta); }
+            finally { PlatformTextures.endUiScale(oldDensity); GuiTransform.pop(context); }
+        }
     }
-    private static void drawBorder(DrawContext context, int x, int y, int w, int h, int color) {
-        context.fill(x, y, x + w, y + 1, color); context.fill(x, y + h - 1, x + w, y + h, color);
-        context.fill(x, y, x + 1, y + h, color); context.fill(x + w - 1, y, x + w, y + h, color);
+    private void drawUi(DrawContext context, Text value, int x, int y, int color, double scale, boolean strong) {
+        if (paintAlpha <= 0) return;
+        SettingsTypography.draw(context, value.getString(), x, y, textRenderer.getWidth(strong ? bold(value) : ui(value)) * scale,
+                strong, compactNavigation, scale, ink(color));
+    }
+    private void drawOrdered(DrawContext context, net.minecraft.text.OrderedText value, int x, int y, int color, double scale) {
+        if (paintAlpha <= 0) return;
+        StringBuilder text = new StringBuilder(); value.accept((index, style, cp) -> { text.appendCodePoint(cp); return true; });
+        SettingsTypography.draw(context, text.toString(), x, y, textRenderer.getWidth(value) * scale, false, compactNavigation, scale, ink(color));
+    }
+    private void centered(DrawContext context, Text value, int x, int y, int color) {
+        if (paintAlpha <= 0) return;
+        Text styled = ui(value); context.drawText(textRenderer, styled, x - textRenderer.getWidth(styled) / 2, y, textInk(color), false);
+    }
+    private void drawBorder(DrawContext context, int x, int y, int w, int h, int color) {
+        context.fill(x, y, x + w, y + 1, ink(color)); context.fill(x, y + h - 1, x + w, y + h, ink(color));
+        context.fill(x, y, x + 1, y + h, ink(color)); context.fill(x + w - 1, y, x + w, y + h, ink(color));
     }
 
     @Override protected boolean handleMouseScrolled(double x, double y, double horizontal, double vertical) {
-        if (vertical == 0) return false;
+        if (peeking || vertical == 0) return false;
         if (editing || x < rowLeft || x > rowLeft + rowWidth + 10 || y < listTop || y > listBottom) return false;
         scroll = Math.clamp(scroll + (vertical > 0 ? -40 : 40), 0, maxScroll()); setFocused(null); positionRows(); return true;
     }
     @Override protected boolean handleKeyPressed(int key, int scanCode, int modifiers) {
+        if (!editing && !confirmRestore && key == GLFW.GLFW_KEY_F && (modifiers & (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SUPER)) != 0 && searchField != null) {
+            setFocused(searchField); searchField.setFocused(true); return true;
+        }
+        if (key == GLFW.GLFW_KEY_ESCAPE && !searchQuery.isBlank() && expandedChoice.isEmpty() && !confirmRestore && !editing) {
+            searchQuery = ""; scroll = 0; rebuild(); return true;
+        }
         if (key == GLFW.GLFW_KEY_ESCAPE && (!expandedChoice.isEmpty() || confirmRestore || editing)) {
             expandedChoice = ""; confirmRestore = false; editing = false; rebuild(); return true;
         }
         if (editing && key >= GLFW.GLFW_KEY_RIGHT && key <= GLFW.GLFW_KEY_UP) {
             int dx = key == GLFW.GLFW_KEY_RIGHT ? 1 : key == GLFW.GLFW_KEY_LEFT ? -1 : 0;
             int dy = key == GLFW.GLFW_KEY_DOWN ? 1 : key == GLFW.GLFW_KEY_UP ? -1 : 0;
-            if ((modifiers & GLFW.GLFW_MOD_SHIFT) != 0) { editWidth += dx; editHeight += dy; }
+            if ((modifiers & GLFW.GLFW_MOD_SHIFT) != 0) {
+                var overlay = RelayLyricsClient.overlay();
+                if (overlay != null && overlay.isSquareVideo()) editHeight += dx + dy;
+                else { editWidth += dx; editHeight += dy; }
+            }
             else { editX += dx; editY += dy; }
             persistEdit(); return true;
         }
+        if (searchField != null && searchField.isFocused() && key != GLFW.GLFW_KEY_ESCAPE) return false;
         if (!editing && (key == GLFW.GLFW_KEY_PAGE_UP || key == GLFW.GLFW_KEY_PAGE_DOWN)) {
             scroll = Math.clamp(scroll + (key == GLFW.GLFW_KEY_PAGE_UP ? -120 : 120), 0, maxScroll()); setFocused(null); positionRows(); return true;
         }
         return false;
     }
     @Override protected boolean handleMouseClicked(double x, double y, int button) {
-        if (!editing || button != 0 || x < editX || y < editY || x > editX + editWidth || y > editY + editHeight) return false;
-        resizing = x > editX + editWidth - 18 && y > editY + editHeight - 18;
+        if (!editing && button == 0) {
+            pointerHeld = true;
+            pressedKey = "";
+            for (var child : children()) if (child instanceof PanelButton control && control.active && control.visible && control.isMouseOver(x, y)) {
+                pressedKey = control.key; break;
+            }
+        }
+        if (!editing && button == 0 && searchField != null && searchField.isMouseOver(x, y)) {
+            setFocused(searchField); searchField.setFocused(true); selectingSearch = true;
+            searchField.setCursor(searchField.cursorAt(x), false);
+            return true;
+        }
+        if (!editing && button == 0 && peekButton != null && peekButton.isMouseOver(x, y)) {
+            peeking = true; return true;
+        }
+        if (!editing && !confirmRestore && button == 0 && (x < modalX || x >= modalX + modalWidth || y < modalY || y >= modalY + modalHeight)) {
+            close(); return true;
+        }
+        if (!editing || button != 0 || x < editX || y < editY || x > editX + editSurfaceWidth() || y > editY + editHeight) return false;
+        resizing = x > editX + editSurfaceWidth() - 18 && y > editY + editHeight - 18;
+        if (resizing) { var overlay = RelayLyricsClient.overlay(); resizeSquareVideo = overlay != null && overlay.isSquareVideo(); resizeVideoAspect = overlay == null ? 0 : overlay.popupVideoAspect(); }
         dragging = !resizing; dragX = (int) x; dragY = (int) y; return true;
     }
     @Override protected boolean handleMouseDragged(double x, double y, int button, double dx, double dy) {
+        if (selectingSearch && searchField != null && button == 0) { searchField.setCursor(searchField.cursorAt(x), true); return true; }
         if (!editing || (!resizing && !dragging)) return false;
         int mx = (int) x, my = (int) y;
-        if (resizing) { editWidth += mx - dragX; editHeight += my - dragY; }
+        if (resizing) {
+            var overlay = RelayLyricsClient.overlay();
+            int dxMove = mx - dragX, dyMove = my - dragY;
+            int targetWidth = editSurfaceWidth() + dxMove, targetHeight = editHeight + dyMove;
+            if (resizeSquareVideo) targetWidth = targetHeight = editHeight + (Math.abs(dxMove) > Math.abs(dyMove) ? dxMove : dyMove);
+            if (overlay != null) {
+                var size = dev.relaylyrics.client.music.CanvasPopupLayout.resize(Math.min(targetWidth, width - editX - 12), Math.min(targetHeight, height - editY - 44), resizeVideoAspect, resizeSquareVideo, editWidth);
+                editWidth = size.width(); editHeight = size.height();
+            } else { editWidth += dxMove; editHeight += dyMove; }
+        }
         else { editX += mx - dragX; editY += my - dragY; }
         dragX = mx; dragY = my; persistEdit(); return true;
     }
+    private int editSurfaceWidth() {
+        var overlay = RelayLyricsClient.overlay();
+        if (resizing) return resizeSquareVideo ? editHeight : dev.relaylyrics.client.music.CanvasPopupLayout.expandedWidth(editWidth, editHeight, resizeVideoAspect);
+        return overlay == null ? editWidth : overlay.expandedPopupWidth(editWidth, editHeight);
+    }
     private void persistEdit() {
-        editWidth = Math.clamp(editWidth, 160, Math.min(900, width - 24));
+        var overlay = RelayLyricsClient.overlay();
+        if (resizing ? resizeSquareVideo : overlay != null && overlay.isSquareVideo()) editHeight = Math.min(editHeight, width - 24);
+        int extra = Math.max(0, editSurfaceWidth() - editWidth);
+        editWidth = Math.clamp(editWidth, 96, Math.min(900, Math.max(96, width - extra - 24)));
         int top = height < 240 ? 30 : 52;
-        editHeight = Math.clamp(editHeight, 100, Math.min(600, Math.max(100, height - top - 44)));
-        editX = Math.clamp(editX, 12, Math.max(12, width - editWidth - 12));
+        editHeight = Math.clamp(editHeight, 64, Math.min(600, Math.max(100, height - top - 44)));
+        editX = Math.clamp(editX, 12, Math.max(12, width - editSurfaceWidth() - 12));
         editY = Math.clamp(editY, top, Math.max(top, height - editHeight - 44));
         preferences.setLyricsX(editX); preferences.setLyricsY(editY);
-        preferences.setLyricsWidth(editWidth); preferences.setLyricsHeight(editHeight); saveDelay = 10;
+        preferences.setPopupWidth(videoPopupProfile(), squareVideoPopupProfile(), editWidth);
+        preferences.setPopupHeight(videoPopupProfile(), squareVideoPopupProfile(), editHeight); saveDelay = 10;
     }
     @Override protected boolean handleMouseReleased(double x, double y, int button) {
-        boolean handled = dragging || resizing; dragging = false; resizing = false;
+        if (button == 0) { pointerHeld = false; pressedKey = ""; }
+        boolean handled = dragging || resizing || peeking || selectingSearch; selectingSearch = false; peeking = false; dragging = false; resizing = false;
         if (saveDelay > 0) { savePreferences(); saveDelay = 0; } return handled;
     }
     /** Inventory input adapter compatibility; values have explicit minus buttons now. */
@@ -407,36 +691,107 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         try {
             LyricsConfigScreen screen = new LyricsConfigScreen(null);
             p.setWorldLyrics(false);
-            if (screen.catalog.categories().contains(Category.WORLD)) throw new IllegalStateException("World category shown while disabled");
-            screen.catalog.expand("experimental");
-            Entry toggle = screen.catalog.entries(Category.ADVANCED).stream().filter(e -> e.key.endsWith(".world_lyrics")).findFirst().orElseThrow();
+            if (!screen.catalog.categories().contains(Category.WORLD)) throw new IllegalStateException("World category must remain discoverable");
+            Entry toggle = screen.catalog.entries(Category.WORLD).stream().filter(e -> e.key.endsWith(".world_lyrics")).findFirst().orElseThrow();
             toggle.activate.run();
-            if (!screen.catalog.categories().contains(Category.WORLD)) throw new IllegalStateException("World category missing after activation");
+            if (screen.catalog.entries(Category.WORLD).size() != 8) throw new IllegalStateException("World page must have eight primary controls");
             toggle.activate.run();
-            if (screen.catalog.categories().contains(Category.WORLD)) throw new IllegalStateException("World category remains after deactivation");
+            if (screen.catalog.entries(Category.WORLD).size() != 1) throw new IllegalStateException("Disabled world controls remain visible");
         } finally { p.setWorldLyrics(original); }
     }
     /** Called only by the opt-in screenshot fixture, using disposable preferences. */
     void configureProbe(String stage) {
+        probeSearch = stage.equals("search");
+        searchQuery = probeSearch ? "Canvas" : "";
         category = switch (stage) {
-            case "appearance", "choices" -> Category.APPEARANCE;
+            case "appearance", "choices", "motion_artwork", "quality_choices" -> Category.APPEARANCE;
             case "connection" -> Category.CONNECTION;
+            case "sources", "sources_end", "source_priority", "priority_choices", "compact_priority" -> Category.SOURCES;
             case "advanced", "experimental" -> Category.ADVANCED;
             case "custom", "effects" -> Category.CUSTOM;
             case "world", "world_fixed" -> Category.WORLD;
             default -> Category.GENERAL;
         };
+        if (stage.equals("motion_artwork")) catalog.expand("motion_artwork");
+        if (stage.contains("priority")) catalog.expand("source_priority");
         if (stage.equals("experimental")) catalog.expand("experimental");
         if (stage.equals("effects")) catalog.expand("effects");
         if (stage.equals("world") || stage.equals("world_fixed")) {
             preferences.setWorldLyrics(true); preferences.setWorldLyricsAutomatic(!stage.equals("world_fixed"));
         }
-        editing = stage.equals("editor");
+        editing = stage.equals("editor") || stage.equals("compact_tiny") || java.util.Set.of("kawarp", "kawarp_later", "artist", "artist_fallback", "static", "paused").contains(stage);
         rebuild();
+        if (stage.equals("sources_end")) { scroll = maxScroll(); positionRows(); }
+        if (stage.equals("motion_artwork")) {
+            for (Row row : rows) if (row.entry.key.endsWith(".group.motion_artwork")) {
+                scroll = Math.clamp(row.offset, 0, maxScroll()); positionRows(); break;
+            }
+        }
+        if (stage.equals("priority_choices")) openChoice(catalog.entries(category).stream().filter(e -> e.kind == Kind.CHOICE).findFirst().orElseThrow());
+        if (stage.equals("quality_choices")) openChoice(catalog.entries(category).stream().filter(e -> e.key.endsWith(".background_preset")).findFirst().orElseThrow());
         if (stage.equals("choices")) openChoice(catalog.entries(category).stream().filter(e -> e.key.endsWith(".effects_preset")).findFirst().orElseThrow());
-        if (stage.equals("categories")) openChoice(catalog.entries(category).stream().filter(e -> e.kind == Kind.CHOICE).findFirst().orElseThrow());
+        if (stage.equals("categories") || stage.equals("compact_choices")) openChoice(catalog.entries(category).stream().filter(e -> e.kind == Kind.CHOICE).findFirst().orElseThrow());
+    }
+    void prepareInteractionProbe(String stage) {
+        if (!stage.startsWith("ui_")) return;
+        preferences.setLyricsAnimations(true);
+        probeTime = 1_000_000_000L;
+        modalMotion.snap(1); paneMotion.snap(1);
+        if (stage.startsWith("ui_open_")) {
+            modalMotion.snap(0);
+            modalMotion.to(1, SettingsMotion.MODAL, SettingsMotion.Curve.OUT, probeTime, true);
+            probeTime += Long.parseLong(stage.substring(8)) * 1_000_000L;
+            return;
+        }
+        if (stage.equals("ui_peek")) { peeking = true; return; }
+        if (stage.startsWith("ui_pane_")) {
+            changeCategory(Category.APPEARANCE);
+            paneMotion.to(1, SettingsMotion.PANE, SettingsMotion.Curve.OUT, probeTime, true);
+            probeTime += Long.parseLong(stage.substring(8)) * 1_000_000L;
+            return;
+        }
+        PanelButton target = rows.stream().flatMap(row -> row.widgets.stream())
+                .filter(widget -> widget instanceof PanelButton button && button.kind == ButtonKind.TOGGLE)
+                .map(widget -> (PanelButton) widget).findFirst().orElseThrow();
+        if (target.entry.value.get().equals("@options.on")) target.entry.activate.run();
+        target.motion.toggle.snap(0);
+        probeMouseX = target.getX() + target.getWidth() / 2;
+        probeMouseY = target.getY() + target.getHeight() / 2;
+        if (stage.startsWith("ui_toggle_")) {
+            target.invoke.run();
+            target.motion.toggle.to(1, SettingsMotion.TOGGLE, SettingsMotion.Curve.OUT, probeTime, true);
+            probeTime += Long.parseLong(stage.substring(10)) * 1_000_000L;
+            double state = target.motion.toggle.value(probeTime);
+            if (stage.equals("ui_toggle_40") && !(state > 0 && state < 1)) throw new IllegalStateException("Toggle skipped its intermediate frame");
+            if (stage.equals("ui_toggle_220") && state != 1) throw new IllegalStateException("Toggle did not settle");
+        } else if (stage.startsWith("ui_hover_")) {
+            target.motion.hover.to(1, SettingsMotion.FAST, SettingsMotion.Curve.STANDARD, probeTime, true);
+            probeTime += Long.parseLong(stage.substring(9)) * 1_000_000L;
+        } else if (stage.equals("ui_press_60")) {
+            pointerHeld = true; pressedKey = target.key;
+            target.motion.press.to(.97, SettingsMotion.PRESS, SettingsMotion.Curve.OUT, probeTime, true);
+            probeTime += 60_000_000L;
+            if (!(target.motion.press.value(probeTime) < 1)) throw new IllegalStateException("Press did not scale");
+        }
     }
     void verifyLayoutForProbe() {
+        var overlay = RelayLyricsClient.overlay();
+        if (!editing && overlay != null && overlay.hasCurrentSong() && previewBounds != null
+                && !previewBounds.equals(overlay.popupBoundsSnapshot(viewportWidth, viewportHeight)))
+            throw new IllegalStateException("Settings changed the live popup bounds");
+        if (probeSearch) {
+            String savedQuery = searchQuery;
+            boolean focusedBefore = searchField != null && searchField.isFocused();
+            if (!handleKeyPressed(GLFW.GLFW_KEY_F, 0, GLFW.GLFW_MOD_CONTROL) || searchField == null || !searchField.isFocused())
+                throw new IllegalStateException("Ctrl+F did not focus settings search");
+            if (!handleKeyPressed(GLFW.GLFW_KEY_ESCAPE, 0, 0) || !searchQuery.isEmpty())
+                throw new IllegalStateException("Escape did not clear settings search");
+            searchQuery = savedQuery; rebuild();
+            if (!focusedBefore) setFocused(null);
+        }
+        if (!editing && (modalX < 0 || modalY < 0 || modalX + modalWidth > width || modalY + modalHeight > height))
+            throw new IllegalStateException("Modal outside viewport");
+        if (!searchQuery.isBlank() && rows.isEmpty()) throw new IllegalStateException("Global settings search found no rows");
         for (Row row : rows) for (var widget : row.widgets) {
             if (!widget.visible) continue;
             if (widget.getX() < 0 || widget.getY() < listTop || widget.getX() + widget.getWidth() > width
@@ -445,6 +800,9 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         }
         if (maxScroll() > 0 && !editing) {
             int original = scroll;
+            mouseScrolled((rowLeft + rowWidth / 2.0) * uiScale, (listTop + 10) * uiScale, 0, original == maxScroll() ? 1 : -1);
+            if (scroll == original) throw new IllegalStateException("Scaled pointer missed settings scroll area");
+            scroll = original; positionRows();
             handleKeyPressed(GLFW.GLFW_KEY_PAGE_DOWN, 0, 0);
             if (scroll <= original && original < maxScroll()) throw new IllegalStateException("Page Down did not scroll settings");
             scroll = original; positionRows();
@@ -458,21 +816,192 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         }
     }
     private static final class Row {
-        final Entry entry; final int offset, baseHeight, height, labelWidth; final boolean hint;
+        final Entry entry; final int offset, baseHeight, height, labelWidth; final String detail; final boolean below;
         final List<ClickableWidget> widgets = new ArrayList<>();
         final List<Integer> widgetOffsets = new ArrayList<>();
-        Row(Entry entry, int offset, int baseHeight, int extensionHeight, int labelWidth, boolean hint) {
-            this.entry = entry; this.offset = offset; this.baseHeight = baseHeight; this.height = baseHeight + extensionHeight; this.labelWidth = labelWidth; this.hint = hint;
+        Row(Entry entry, int offset, int baseHeight, int extensionHeight, int labelWidth, String detail, boolean below) {
+            this.entry = entry; this.offset = offset; this.baseHeight = baseHeight; this.height = baseHeight + extensionHeight;
+            this.labelWidth = labelWidth; this.detail = detail; this.below = below;
         }
         void add(ClickableWidget widget, int offset) { widgets.add(widget); widgetOffsets.add(offset); }
     }
+    private enum ButtonKind { ACTION, NAV, CLOSE, PEEK, TOGGLE, GROUP, OPTION, INFO }
+    private final class PanelButton extends SettingsButtonBase {
+        private final ButtonKind kind;
+        private final Entry entry;
+        private Category navigationCategory;
+        private final String key;
+        private final ButtonMotion motion;
+        private final Runnable invoke;
+        private boolean selected;
+        private double glassEngagement;
+        PanelButton(int x, int y, int width, int height, net.minecraft.text.Text label, Runnable action, ButtonKind kind, Entry entry) {
+            super(x, y, width, height, ui(label), () -> activate(motionKey(kind, entry, kind == ButtonKind.OPTION || entry == null || entry.kind == Kind.SLIDER ? label.getString() : ""), entry, action));
+            this.kind = kind; this.entry = entry;
+            this.key = motionKey(kind, entry, kind == ButtonKind.OPTION || entry == null || entry.kind == Kind.SLIDER ? label.getString() : "");
+            this.motion = motion(key, entry);
+            this.invoke = () -> activate(key, entry, action);
+        }
+        @Override protected void drawSurface(DrawContext context, int mouseX, int mouseY, float delta) {
+            if (peeking || kind == ButtonKind.INFO) return;
+            paintAlpha = modalAlpha * (kind == ButtonKind.NAV || kind == ButtonKind.CLOSE || kind == ButtonKind.PEEK ? 1 : paneAlpha);
+            if (paintAlpha <= 0) return;
+            boolean over = isHovered() || isFocused();
+            double hover = motion.hover.to(over ? 1 : 0, SettingsMotion.FAST, SettingsMotion.Curve.STANDARD, frameNanos, motionEnabled());
+            boolean held = pointerHeld && key.equals(pressedKey) || frameNanos < motion.pulseUntil;
+            double pressedScale = kind == ButtonKind.NAV ? .98 : kind == ButtonKind.CLOSE || kind == ButtonKind.PEEK ? .94 : .97;
+            boolean glassCircle = kind == ButtonKind.CLOSE || kind == ButtonKind.PEEK;
+            double scale = motion.press.to(held ? pressedScale : 1, glassCircle ? 280 : SettingsMotion.PRESS,
+                    glassCircle ? SettingsMotion.Curve.GLASS : SettingsMotion.Curve.OUT, frameNanos, motionEnabled());
+            if (!motionEnabled()) scale = 1;
+            glassEngagement = motion.glass.to(over || held ? 1 : 0, 300, SettingsMotion.Curve.STANDARD, frameNanos, motionEnabled());
+            GuiTransform.push(context);
+            GuiTransform.translate(context, getX() + getWidth() / 2f, getY() + getHeight() / 2f);
+            GuiTransform.scale(context, (float) scale, (float) scale);
+            GuiTransform.translate(context, -getX() - getWidth() / 2f, -getY() - getHeight() / 2f);
+            try { paintButton(context, hover); } finally { GuiTransform.pop(context); paintAlpha = modalAlpha; }
+        }
+        private void paintButton(DrawContext context, double hover) {
+            int x = getX(), y = getY(), w = getWidth(), h = getHeight();
+            if (kind == ButtonKind.CLOSE) {
+                LiquidGlass.draw(context, x, y, w, h, h / 2, paintAlpha, glassEngagement);
+                if (isFocused()) RoundedGui.smoothOutline(context, x - 2, y - 2, w + 4, h + 4, h / 2 + 2, ink(0xB3D9CAFF));
+                cross(context, x + w / 2, y + h / 2, 5, INK); return;
+            }
+            if (kind == ButtonKind.PEEK) {
+                LiquidGlass.draw(context, x, y, w, h, h / 2, paintAlpha, glassEngagement);
+                if (isFocused()) RoundedGui.smoothOutline(context, x - 2, y - 2, w + 4, h + 4, h / 2 + 2, ink(0xB3D9CAFF));
+                SettingsTypography.icon(context, "eye", x + 5, y + 5, 20, ink(MUTED)); return;
+            }
+            if (kind == ButtonKind.TOGGLE) {
+                boolean on = entry.value.get().equals("@options.on");
+                double state = motion.toggle.to(on ? 1 : 0, SettingsMotion.TOGGLE, SettingsMotion.Curve.OUT, frameNanos, motionEnabled());
+                int track = SettingsMotion.mix(SettingsMotion.mix(0x6B000000, 0x80000000, hover),
+                        SettingsMotion.mix(0x6BFFFFFF, 0x85FFFFFF, hover), state);
+                RoundedGui.smoothFill(context, x, y, 42, 24, 12, ink(track));
+                RoundedGui.smoothOutline(context, x, y, 42, 24, 12, ink(SettingsMotion.mix(0x0FFFFFFF, 0x3DFFFFFF, state)));
+                int knob = x + 2 + (int) Math.round(18 * state);
+                RoundedGui.smoothFill(context, knob, y + 3, 20, 20, 10, ink(0x38000000));
+                RoundedGui.smoothFill(context, knob, y + 2, 20, 20, 10,
+                        ink(SettingsMotion.mix(SettingsMotion.mix(0xC7F5F5F5, 0xE6FFFFFF, hover), 0xFFFFFFFF, state)));
+                if (isFocused()) RoundedGui.smoothOutline(context, x - 2, y - 2, 46, 28, 14, ink(0xB3D9CAFF));
+                return;
+            }
+            if (kind == ButtonKind.GROUP) {
+                int cx = x + w / 2, cy = y + h / 2;
+                boolean expanded = entry.value.get().contains("collapse");
+                double rotation = motion.expand.to(expanded ? 1 : 0, SettingsMotion.FAST, SettingsMotion.Curve.OUT, frameNanos, motionEnabled());
+                SettingsTypography.icon(context, "chevron:" + (int) Math.round(rotation * 16), cx - 7, cy - 7, 14, ink(SettingsMotion.mix(MUTED, INK, hover)));
+                return;
+            }
+            int color = SettingsMotion.mix(selected ? 0x24D9CAFF : kind == ButtonKind.NAV ? 0x00D9CAFF : 0x14D9CAFF,
+                    selected ? 0x30D9CAFF : 0x29D9CAFF, hover);
+            if (kind == ButtonKind.NAV) {
+                if (color != 0) RoundedGui.smoothFill(context, x, y, w, h, 9, ink(color));
+            } else {
+                if (selected) RoundedGui.smoothFill(context, x, y, w, h, h / 2, ink(0x20D9CAFF));
+                LiquidGlass.draw(context, x, y, w, h, h / 2, paintAlpha * (active ? 1 : .45), glassEngagement);
+            }
+            if (isFocused()) RoundedGui.smoothOutline(context, x - 1, y - 1, w + 2, h + 2, 9, ink(0x9DD9CAFF));
+            if (kind == ButtonKind.NAV) {
+                drawCategoryIcon(context, navigationCategory, x + (compactNavigation ? w / 2 - 6 : 10), y + h / 2 - 6,
+                        selected ? INK : MUTED);
+                if (!compactNavigation) {
+                    String value = textRenderer.trimToWidth(ui(getMessage()), Math.max(20, w - 42)).getString();
+                    drawUi(context, net.minecraft.text.Text.literal(value), x + 34, textY(y + h / 2.0, .95), SettingsMotion.mix(selected ? INK : MUTED, INK, hover), .95, selected);
+                }
+            } else {
+                net.minecraft.text.Text label = ui(getMessage());
+                String value = textRenderer.trimToWidth(label, Math.max(20, w - 18)).getString();
+                net.minecraft.text.Text visible = ui(net.minecraft.text.Text.literal((kind == ButtonKind.OPTION && selected ? "✓ " : "") + value));
+                drawUi(context, visible, x + (w - textRenderer.getWidth(visible)) / 2,
+                        textY(y + h / 2.0, 1), active ? INK : MUTED, 1, false);
+            }
+        }
+    }
     private final class SettingSlider extends SliderWidget {
         private final Entry entry;
+        private final SettingsMotion.Tween thumb = new SettingsMotion.Tween(1);
         SettingSlider(int x, int y, int width, Entry entry) {
-            super(x, y, width, 20, text(entry.value.get()), (entry.number.getAsDouble() - entry.min) / (entry.max - entry.min)); this.entry = entry;
+            super(x, y, Math.max(24, width), 28, ui(text(entry.value.get())), (entry.number.getAsDouble() - entry.min) / (entry.max - entry.min)); this.entry = entry;
         }
-        @Override protected void updateMessage() { if (entry != null) setMessage(text(entry.value.get())); }
+        @Override protected void updateMessage() { if (entry != null) setMessage(ui(text(entry.value.get()))); }
         @Override protected void applyValue() { setNumber(entry, entry.min + value * (entry.max - entry.min), false); }
         void refresh() { value = (entry.number.getAsDouble() - entry.min) / (entry.max - entry.min); updateMessage(); }
+        @Override public void renderWidget(DrawContext context, int mouseX, int mouseY, float delta) {
+            if (peeking) return;
+            int x = getX(), y = getY(), w = getWidth();
+            Text label = ui(getMessage());
+            paintAlpha = modalAlpha * paneAlpha;
+            if (paintAlpha <= 0) return;
+            drawUi(context, label, x + (int) ((w - textRenderer.getWidth(label) * .8) / 2), textY(y + 6, .8), MUTED, .8, false);
+            RoundedGui.smoothFill(context, x + 4, y + 20, w - 8, 4, 2, ink(0x3BD9CAFF));
+            int knob = x + 4 + (int) Math.round((w - 8) * value);
+            RoundedGui.smoothFill(context, x + 4, y + 20, Math.max(1, knob - x - 4), 4, 2, ink(0xFFD9CAFF));
+            boolean over = isHovered() || isFocused();
+            double size = thumb.to(pointerHeld && over ? .92 : over ? 1.1 : 1, SettingsMotion.PRESS,
+                    SettingsMotion.Curve.EASE, frameNanos, motionEnabled());
+            int diameter = (int) Math.round(10 * size);
+            RoundedGui.smoothFill(context, knob - diameter / 2, y + 22 - diameter / 2, diameter, diameter, diameter / 2, ink(0xFFF1EDFE));
+            if (isFocused()) RoundedGui.smoothOutline(context, x - 2, y - 4, w + 4, 34, 8, ink(0x8FD9CAFF));
+        }
+    }
+    private final class SearchField extends TextFieldWidget {
+        private int visibleStart;
+        SearchField(int x, int y, int width, int height) {
+            super(textRenderer, x, y, width, height, Text.translatable("config.relaylyrics.settings.search"));
+            setMaxLength(96); setDrawsBackground(false);
+        }
+        @Override public void renderWidget(DrawContext context, int mouseX, int mouseY, float delta) {
+            if (peeking) return;
+            paintAlpha = modalAlpha;
+            if (paintAlpha <= 0) return;
+            int x = getX(), y = getY(), w = getWidth(), h = getHeight();
+            RoundedGui.smoothFill(context, x, y, w, h, 9, ink(0x3D000000));
+            RoundedGui.smoothOutline(context, x, y, w, h, 9, ink(isFocused() ? 0x6BD9CAFF : 0x1FD9CAFF));
+            SettingsTypography.icon(context, "search", x + 8, y + h / 2 - 8, 16, ink(MUTED));
+            int available = Math.max(20, (int) ((w - 40) / .9));
+            String input = getText();
+            int cursor = getCursor();
+            visibleStart = Math.clamp(visibleStart, 0, input.length());
+            if (cursor < visibleStart) visibleStart = cursor;
+            while (visibleStart < cursor && textRenderer.getWidth(ui(Text.literal(input.substring(visibleStart, cursor)))) > available) visibleStart++;
+            int end = visibleStart;
+            while (end < input.length() && textRenderer.getWidth(ui(Text.literal(input.substring(visibleStart, end + 1)))) <= available) end++;
+            String visible = input.substring(visibleStart, end);
+            Text shown = input.isEmpty() ? net.minecraft.text.Text.translatable("config.relaylyrics.settings.search") : net.minecraft.text.Text.literal(visible);
+            String trimmed = textRenderer.trimToWidth(ui(shown), available).getString();
+            String selected = getSelectedText();
+            if (!selected.isEmpty()) {
+                int selectionStart = input.startsWith(selected, cursor) ? cursor : cursor - selected.length();
+                int selectionEnd = selectionStart + selected.length();
+                int a = Math.clamp(selectionStart, visibleStart, end), b = Math.clamp(selectionEnd, visibleStart, end);
+                int left = x + 29 + (int) Math.round(textRenderer.getWidth(ui(net.minecraft.text.Text.literal(input.substring(visibleStart, a)))) * .9);
+                int right = x + 29 + (int) Math.round(textRenderer.getWidth(ui(net.minecraft.text.Text.literal(input.substring(visibleStart, b)))) * .9);
+                if (right > left) context.fill(left, y + h / 2 - 7, right, y + h / 2 + 7, ink(0x55D9CAFF));
+            }
+            drawUi(context, net.minecraft.text.Text.literal(trimmed), x + 29, textY(y + h / 2.0, .9), input.isEmpty() ? TERTIARY : INK, .9, false);
+            if (isFocused() && System.currentTimeMillis() / 500 % 2 == 0) {
+                int at = x + 29 + (int) Math.round(textRenderer.getWidth(ui(net.minecraft.text.Text.literal(input.substring(visibleStart, Math.clamp(cursor, visibleStart, end))))) * .9);
+                context.fill(at, y + h / 2 - 7, at + 1, y + h / 2 + 7, ink(INK));
+            }
+        }
+        int cursorAt(double mouseX) {
+            String value = getText();
+            int start = Math.clamp(visibleStart, 0, value.length());
+            double target = (mouseX - getX() - 29) / .9;
+            for (int index = start; index < value.length(); index++) {
+                int before = textRenderer.getWidth(ui(net.minecraft.text.Text.literal(value.substring(start, index))));
+                int after = textRenderer.getWidth(ui(net.minecraft.text.Text.literal(value.substring(start, index + 1))));
+                if (target < (before + after) / 2.0) return index;
+            }
+            return value.length();
+        }
+    }
+    private void drawCategoryIcon(DrawContext context, Category source, int x, int y, int color) {
+        if (source != null) SettingsTypography.icon(context, source.name(), x - 1, y - 1, 14, ink(color));
+    }
+    private void cross(DrawContext context, int x, int y, int radius, int color) {
+        SettingsTypography.icon(context, "close", x - radius - 2, y - radius - 2, radius * 2 + 4, ink(color));
     }
 }

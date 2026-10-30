@@ -8,7 +8,6 @@ import java.util.regex.Pattern;
 /** Measured wrapping and timed pages; independent of Minecraft and of the render frame rate. */
 public final class WorldLyricsLayout {
     private static final Pattern WORD = Pattern.compile("\\S+");
-    private static final int MAX_WORDS_PER_ROW = 3;
     private WorldLyricsLayout() { }
 
     public record Span(String text, WorldLyricsPlan.Token token, double x, double width,
@@ -42,16 +41,29 @@ public final class WorldLyricsLayout {
                 words.getLast().add(new Part(token.text(), token, 0, sourceWidth, sourceWidth));
             }
         }
-        Builder builder = new Builder(limit, measure.applyAsDouble(" "), rtl);
+        double space = Math.max(1, measure.applyAsDouble(" "));
+        // Balance measured words, rather than imposing an arbitrary number of words per row.
+        int count = words.size();
+        double[] widths = new double[count], cost = new double[count + 1];
+        int[] breaks = new int[count];
+        for (int i = 0; i < count; i++) widths[i] = words.get(i).stream().mapToDouble(Part::width).sum();
+        for (int i = count - 1; i >= 0; i--) {
+            cost[i] = Double.POSITIVE_INFINITY;
+            double width = 0;
+            for (int j = i; j < count; j++) {
+                width += widths[j] + (j == i ? 0 : space);
+                if (j > i && width > limit) break;
+                double slack = Math.max(0, limit - width);
+                double candidate = cost[j + 1] + slack * slack * (j + 1 == count ? .35 : 1);
+                if (j == i && count > 2) candidate += limit * limit * .35;
+                if (candidate < cost[i]) { cost[i] = candidate; breaks[i] = j + 1; }
+            }
+        }
+        Builder builder = new Builder(limit, space, rtl);
+        int nextBreak = count == 0 ? 0 : breaks[0];
         for (int index = 0; index < words.size(); index++) {
             List<Part> word = words.get(index);
-            double width = word.stream().mapToDouble(Part::width).sum();
-            int remaining = words.size() - index;
-            boolean keepLastWord = remaining == 1 && builder.wordCount == MAX_WORDS_PER_ROW - 1
-                    && builder.width + builder.space + width <= limit * 1.2;
-            if (!builder.spans.isEmpty() && (!keepLastWord && builder.width + builder.space + width > limit
-                    || builder.wordCount >= MAX_WORDS_PER_ROW
-                    || builder.wordCount == MAX_WORDS_PER_ROW - 1 && remaining == 2)) builder.finish();
+            if (index == nextBreak) { builder.finish(); nextBreak = breaks[index]; }
             boolean first = true;
             for (Part part : word) {
                 // A sung word is an indivisible unit, including timed syllables and connected scripts.
@@ -131,12 +143,11 @@ public final class WorldLyricsLayout {
     /** Distance-aware physical size; fit includes animation margins and never exceeds the measured surface. */
     public static double pixelScale(double rowWidth, int rows, double availableWidth, double availableHeight,
                                     double distance, double size, boolean backing, double lineHeight) {
-        double shortPhrase = LyricsAnimation.mix(1.40, 1, LyricsAnimation.smooth((rowWidth - 35) / 105));
-        double desired = .067 * size * shortPhrase * Math.clamp(distance / 6, .8, 43) * (backing ? .82 : 1);
+        double desired = .052 * size * Math.clamp(distance / 6, .35, 24);
         double margin = .5 * Math.clamp(distance / 6, .8, 43);
         double fitX = Math.max(.1, availableWidth - margin) / Math.max(1, (rowWidth + 6) * 1.16);
-        double fitY = Math.max(.1, availableHeight - margin) / Math.max(1, rows * lineHeight * 1.16);
-        return Math.min(desired, Math.min(fitX, fitY));
+        double fitY = Math.max(.1, availableHeight - margin) / Math.max(1, (backing ? Math.max(2, rows) : rows) * lineHeight * 1.16);
+        return Math.min(desired, Math.min(fitX, fitY)) * (backing ? .76 : 1);
     }
 
     public record WallRect(int left, int bottom, int right, int top) { }

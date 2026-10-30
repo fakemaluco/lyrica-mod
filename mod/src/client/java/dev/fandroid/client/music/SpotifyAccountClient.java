@@ -67,6 +67,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
     private volatile String refreshToken = "";
     private volatile long expiresAtMillis;
     private volatile PlaybackSnapshot latest = PlaybackSnapshot.unavailable();
+    private volatile boolean automaticPlaybackOwned;
     private volatile String status = "Not connected";
     private volatile String matchStatus = "Not searched";
     private volatile long credentialGeneration;
@@ -112,7 +113,12 @@ public final class SpotifyAccountClient implements AutoCloseable {
                 && System.nanoTime() - lastPlaybackResponseNanos < 8_000_000_000L;
     }
     public boolean shouldOverrideBridge() {
-        return shouldUseAccountSource() && hasActivePlayback();
+        return !closed && shouldUseAccountSource() && hasActivePlayback()
+                && (preferences.getMusicSource() == MusicSource.SPOTIFY_ACCOUNT || automaticPlaybackOwned);
+    }
+
+    static boolean playbackEligible(MusicSource source, PlaybackSnapshot snapshot) {
+        return meaningful(snapshot) && (source == MusicSource.SPOTIFY_ACCOUNT || snapshot.playing());
     }
 
     static boolean preferredSource(MusicSource source, boolean automaticAllowed) {
@@ -121,7 +127,10 @@ public final class SpotifyAccountClient implements AutoCloseable {
     }
 
     private boolean shouldUseAccountSource() {
-        return preferredSource(preferences.getMusicSource(), automaticAccountAllowed.getAsBoolean());
+        MusicSource source = preferences.getMusicSource();
+        boolean automaticAllowed = automaticAccountAllowed.getAsBoolean();
+        if (source != MusicSource.AUTOMATIC || !automaticAllowed) automaticPlaybackOwned = false;
+        return preferredSource(source, automaticAllowed);
     }
 
     /** Resolves metadata supplied by another music source to a Spotify track. */
@@ -340,6 +349,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
         refreshToken = "";
         expiresAtMillis = 0;
         latest = PlaybackSnapshot.unavailable();
+        automaticPlaybackOwned = false;
         lastPlaybackResponseNanos = 0;
         likedUri = "";
         liked = false;
@@ -549,12 +559,18 @@ public final class SpotifyAccountClient implements AutoCloseable {
         });
     }
 
-    private void accept(PlaybackSnapshot value) {
+    void accept(PlaybackSnapshot value) {
+        boolean wasOwned = automaticPlaybackOwned;
         latest = value;
         lastPlaybackResponseNanos = System.nanoTime();
         // An empty Web API poll must not erase a valid Windows Media fallback.
-        if (shouldUseAccountSource() && meaningful(value)) {
+        if (shouldUseAccountSource() && (playbackEligible(preferences.getMusicSource(), value)
+                || automaticPlaybackOwned && meaningful(value))) {
+            if (preferences.getMusicSource() == MusicSource.AUTOMATIC) automaticPlaybackOwned = true;
             snapshots.accept(value);
+        } else if (!meaningful(value)) {
+            automaticPlaybackOwned = false;
+            if (wasOwned && shouldUseAccountSource()) snapshots.accept(value);
         }
     }
 

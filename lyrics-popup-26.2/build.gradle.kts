@@ -44,12 +44,16 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
     dependsOn(":lyrics-popup-1.21.11:prepareStandaloneClientJava")
     from(rootProject.file("lyrics-popup/src/client/java")) {
         include("dev/relaylyrics/client/ClientPreferences.java")
+        include("dev/relaylyrics/client/WorldLyricsLightAdapter.java")
         include("dev/relaylyrics/client/LyricsSettingsCatalog.java")
         include("dev/relaylyrics/client/LyricsSettingsPresets.java")
         include("dev/relaylyrics/client/LyricsSettingsDemo.java")
         include("dev/relaylyrics/client/InventoryPopupTransition.java")
         include("dev/relaylyrics/client/RelayLyricsModMenu.java")
         include("dev/relaylyrics/client/ui/WorldGlyphMesh.java")
+        include("dev/relaylyrics/client/ui/SettingsMotion.java")
+        include("dev/relaylyrics/client/ui/SettingsTextRaster.java")
+        include("dev/relaylyrics/client/ui/SettingsIconRaster.java")
     }
     from(rootProject.file("lyrics-popup-1.21.11/build/generated/standaloneClientJava")) {
         include("dev/fandroid/protocol/**")
@@ -81,6 +85,9 @@ sourceSets.test {
 }
 
 dependencies {
+    compileOnly("dev.lambdaurora.lambdynamiclights:lambdynamiclights-api:4.12.4+26.2")
+    implementation(project(":lyrics-engine"))
+    include(project(":lyrics-engine"))
     minecraft("com.mojang:minecraft:26.2")
     implementation("net.fabricmc:fabric-loader:${property("loader_version")}")
     implementation("net.fabricmc.fabric-api:fabric-api:0.161.0+26.2")

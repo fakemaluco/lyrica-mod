@@ -1,0 +1,33 @@
+// Uses a disposable copy of a local save; never connects music services or saves user preferences.
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        if (name == 'runClient') {
+            systemProperty 'lyrica.worldExperienceSelfTest', 'true'
+            def compatibility = providers.gradleProperty('worldCompat').getOrElse('false') == 'true'
+            systemProperty 'lyrica.worldCompatibilitySelfTest', compatibility.toString()
+            def terrain = providers.gradleProperty('worldLights').getOrElse('false') == 'true'
+            systemProperty 'lyrica.worldTerrainLightSelfTest', terrain.toString()
+            systemProperty 'lyrica.worldProbeOutput', rootProject.layout.buildDirectory.dir(terrain && compatibility ? 'world-spatial-compat-light-qa' : terrain ? 'world-spatial-light-qa' : compatibility ? 'world-lyrics-compat-qa' : 'world-spatial-qa').get().asFile.absolutePath
+            def cinematic = providers.gradleProperty('worldCinematic').getOrElse('false') == 'true'
+            systemProperty 'lyrica.worldCinematicSelfTest', cinematic.toString()
+            if (cinematic) systemProperty 'lyrica.worldProbeOutput', rootProject.layout.buildDirectory.dir('world-cinematic-qa').get().asFile.absolutePath
+            def extraMods = []
+            if (cinematic) {
+                def gameVersion = project.name == 'lyrics-popup' ? '1.21.1' : project.name == 'lyrics-popup-1.21.11' ? '1.21.11' : '26.2'
+                def records = new groovy.json.JsonSlurper().parse(rootProject.file('build/ji-afk-061/versions.json'))
+                extraMods.add(records.find { it.minecraft == gameVersion }.file)
+            }
+            if (compatibility) {
+                def records = new groovy.json.JsonSlurper().parse(rootProject.file('build/world-compat/mods.json'))
+                extraMods.addAll(records.collect { it.file })
+            }
+            if (terrain) {
+                def gameVersion = project.name == 'lyrics-popup' ? '1.21.1' : project.name == 'lyrics-popup-1.21.11' ? '1.21.11' : '26.2'
+                def records = new groovy.json.JsonSlurper().parse(rootProject.file('build/world-light-060/versions.json'))
+                extraMods.add(records.find { it.minecraft == gameVersion }.file)
+            }
+            if (!extraMods.isEmpty()) systemProperty 'fabric.addMods', extraMods.join(File.pathSeparator)
+            args '--width', '1280', '--height', '720', '--quickPlaySingleplayer', 'LyricaWorldQA'
+        }
+    }
+}

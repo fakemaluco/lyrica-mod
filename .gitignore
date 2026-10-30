@@ -18,6 +18,7 @@ media-bridge/target/
 spicetify-extension/node_modules/
 spicetify-extension/dist/
 release-assets/
+artifacts/
 
 # Local state and credentials
 .env

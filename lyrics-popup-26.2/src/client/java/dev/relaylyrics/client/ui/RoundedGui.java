@@ -15,14 +15,18 @@ import net.minecraft.resources.Identifier;
 /** Version-neutral rounded geometry and true scissor bands for textured surfaces. */
 public final class RoundedGui {
     private static final int MAX_RADIUS = 16;
-    private static final int BORDER_SUPERSAMPLE = 4;
+    private static final int BORDER_SUPERSAMPLE = 8;
     private static final int MAX_BORDER_TEXTURES = 12;
     private static final AtomicInteger BORDER_GENERATION = new AtomicInteger();
     private static final Map<BorderKey, BorderTexture> BORDER_TEXTURES =
             new LinkedHashMap<>(8, .75F, true);
-    private static final Map<Integer, MaskTexture> FILL_TEXTURES =
+    private static final Map<ShapeKey, MaskTexture> FILL_TEXTURES =
             new LinkedHashMap<>(8, .75F, true);
     private static final List<List<RoundedClipBand>> CLIP_PLANS = createClipPlans();
+
+    private static final Map<GradientKey, GradientTexture> GRADIENTS = new LinkedHashMap<>(4, .75f, true);
+    private record GradientKey(int width, int height, int radius, int top, int bottom, int sidebarWidth, int sidebarColor, double density) { }
+    private record GradientTexture(Identifier id, int width, int height) { }
 
     private RoundedGui() { }
 
@@ -127,6 +131,51 @@ public final class RoundedGui {
                 () -> context.fillGradient(x, y, x + width, y + height, topColor, bottomColor));
     }
 
+    /** Pixel-accurate alpha corners; opacity is a tint, so an entrance never rebuilds the surface. */
+    public static void smoothGradient(GuiGraphicsExtractor context, int x, int y, int width, int height,
+                                      int radius, int topColor, int bottomColor, int sidebarWidth, int sidebarColor, double opacity) {
+        if (width <= 0 || height <= 0 || opacity <= 0) return;
+        double density = Math.min(PlatformTextures.guiScale(), Math.sqrt(4_000_000.0 / ((double) width * height)));
+        GradientKey key = new GradientKey(width, height, radius, topColor, bottomColor, sidebarWidth, sidebarColor, density);
+        GradientTexture gradient = GRADIENTS.get(key);
+        if (gradient == null) {
+            int rw = Math.max(1, (int) Math.ceil(width * density)), rh = Math.max(1, (int) Math.ceil(height * density));
+            DynamicTexture texture = PlatformTextures.empty("Smooth panel gradient", rw, rh);
+            NativeImage image = texture.getPixels();
+            double r = Math.min(radius * density, Math.min(rw, rh) / 2.0);
+            for (int py = 0; py < rh; py++) {
+                int color = blendArgb(topColor, bottomColor, py / (double) Math.max(1, rh - 1));
+                for (int px = 0; px < rw; px++) {
+                    int painted = px < sidebarWidth * density ? sourceOver(sidebarColor, color) : color;
+                    double coverage = 1;
+                    if ((px < r || px >= rw - r) && (py < r || py >= rh - r)) {
+                        double distance = roundedRectDistance(px + .5, py + .5, rw / 2.0, rh / 2.0, rw / 2.0, rh / 2.0, r);
+                        coverage = Math.clamp(.5 - distance, 0, 1);
+                    }
+                    int alpha = (int) Math.round((painted >>> 24) * coverage);
+                    PlatformTextures.setUiPixel(image, px, py, alpha << 24 | painted & 0xFFFFFF);
+                }
+            }
+            PlatformTextures.upload(texture);
+            Identifier id = PlatformTextures.register("settings_gradient_" + BORDER_GENERATION.incrementAndGet(), texture);
+            gradient = new GradientTexture(id, rw, rh); GRADIENTS.put(key, gradient);
+            while (GRADIENTS.size() > 4) {
+                var first = GRADIENTS.entrySet().iterator(); var old = first.next(); first.remove();
+                PlatformTextures.retireEffectMask(old.getValue().id());
+            }
+        }
+        PlatformTextures.draw(context, gradient.id(), x, y, width, height, 0, 0, gradient.width(), gradient.height(),
+                gradient.width(), gradient.height(), opacity, 1);
+    }
+
+    private static int sourceOver(int foreground, int background) {
+        double a = (foreground >>> 24) / 255.0, b = (background >>> 24) / 255.0 * (1 - a), total = a + b;
+        if (total == 0) return 0;
+        int color = (int) Math.round(total * 255) << 24;
+        for (int shift = 0; shift < 24; shift += 8) color |= (int) Math.round(((foreground >>> shift & 255) * a + (background >>> shift & 255) * b) / total) << shift;
+        return color;
+    }
+
     public static void outline(GuiGraphicsExtractor context, int x, int y, int width, int height,
                                int radius, int color) {
         if (width <= 1 || height <= 1) return;
@@ -164,13 +213,17 @@ public final class RoundedGui {
             outline(context, x, y, width, height, 0, outerColor);
             return;
         }
-        BorderTexture border = borderTexture(new BorderKey(r, outerColor, innerColor));
+        BorderTexture border = borderTexture(new BorderKey(r, outerColor, innerColor, PlatformTextures.guiScale()));
         drawNineSlice(context, border, x, y, width, height);
     }
 
     public static void smoothOutline(GuiGraphicsExtractor context, int x, int y, int width, int height,
                                      int radius, int color) {
-        smoothOutline(context, x, y, width, height, radius, color, color);
+        if (width <= 2 || height <= 2 || color >>> 24 == 0) return;
+        int r = radius(width, height, radius);
+        if (r == 0) { outline(context, x, y, width, height, 0, color); return; }
+        BorderTexture border = borderTexture(new BorderKey(r, 0xFFFFFFFF, 0xFFFFFFFF, PlatformTextures.guiScale()));
+        drawNineSliceTinted(context, border, x, y, width, height, color);
     }
 
     private static BorderTexture borderTexture(BorderKey key) {
@@ -187,15 +240,15 @@ public final class RoundedGui {
             NativeImage image = texture.getPixels();
             if (image == null) throw new IllegalStateException("smooth border texture has no image");
             renderBorder(image, textureSize, key.radius() * BORDER_SUPERSAMPLE,
-                    key.outerColor(), key.innerColor());
-            texture.upload();
+                    key.outerColor(), key.innerColor(), key.density());
+            PlatformTextures.upload(texture);
             BorderTexture created = new BorderTexture(id, texture, textureSize, cap);
             BORDER_TEXTURES.put(key, created);
             while (BORDER_TEXTURES.size() > MAX_BORDER_TEXTURES) {
                 BorderKey eldest = BORDER_TEXTURES.keySet().iterator().next();
                 BorderTexture discarded = BORDER_TEXTURES.remove(eldest);
                 if (discarded != null) {
-                    Minecraft.getInstance().getTextureManager().release(discarded.id());
+                    PlatformTextures.retireEffectMask(discarded.id());
                 }
             }
             return created;
@@ -204,14 +257,15 @@ public final class RoundedGui {
 
     private static MaskTexture fillTexture(int radius) {
         synchronized (FILL_TEXTURES) {
-            MaskTexture existing = FILL_TEXTURES.get(radius);
+            ShapeKey key = new ShapeKey(radius, PlatformTextures.guiScale());
+            MaskTexture existing = FILL_TEXTURES.get(key);
             if (existing != null) return existing;
             int cap = Math.max(1, radius);
             int logicalSize = cap * 2 + 2;
             int textureSize = logicalSize * BORDER_SUPERSAMPLE;
             DynamicTexture texture = PlatformTextures.empty(
                     "Relay smooth fill", textureSize, textureSize);
-            Identifier id = PlatformTextures.register("relay_smooth_fill_" + radius, texture);
+            Identifier id = PlatformTextures.register("relay_smooth_fill_" + radius + "_" + BORDER_GENERATION.incrementAndGet(), texture);
             NativeImage image = texture.getPixels();
             if (image == null) throw new IllegalStateException("smooth fill texture has no image");
             double half = textureSize / 2.0;
@@ -221,21 +275,25 @@ public final class RoundedGui {
                     double distance = roundedRectDistance(px + .5, py + .5,
                             half, half, half, half, scaledRadius);
                     int alpha = Math.clamp((int) Math.round(
-                            Math.clamp(.5 - distance, 0, 1) * 255), 0, 255);
+                            Math.clamp(.5 - distance * key.density() / BORDER_SUPERSAMPLE, 0, 1) * 255), 0, 255);
                     image.setPixelABGR(px, py, toAbgr(alpha << 24 | 0xFFFFFF));
                 }
             }
-            texture.upload();
+            PlatformTextures.upload(texture);
             MaskTexture created = new MaskTexture(id, texture, textureSize, cap);
-            FILL_TEXTURES.put(radius, created);
+            FILL_TEXTURES.put(key, created);
+            while (FILL_TEXTURES.size() > 32) {
+                var first = FILL_TEXTURES.entrySet().iterator(); var old = first.next(); first.remove();
+                PlatformTextures.retireEffectMask(old.getValue().id());
+            }
             return created;
         }
     }
 
     private static void renderBorder(NativeImage image, int size, double radius,
-                                     int outerColor, int innerColor) {
+                                     int outerColor, int innerColor, double density) {
         double half = size / 2.0;
-        double borderWidth = 1.65 * BORDER_SUPERSAMPLE;
+        double borderWidth = BORDER_SUPERSAMPLE;
         for (int py = 0; py < size; py++) {
             for (int px = 0; px < size; px++) {
                 double pointX = px + .5;
@@ -245,8 +303,8 @@ public final class RoundedGui {
                 double innerDistance = roundedRectDistance(pointX, pointY,
                         half, half, half - borderWidth, half - borderWidth,
                         Math.max(0, radius - borderWidth));
-                double outerCoverage = Math.clamp(.5 - outerDistance, 0, 1);
-                double innerCoverage = Math.clamp(.5 - innerDistance, 0, 1);
+                double outerCoverage = Math.clamp(.5 - outerDistance * density / BORDER_SUPERSAMPLE, 0, 1);
+                double innerCoverage = Math.clamp(.5 - innerDistance * density / BORDER_SUPERSAMPLE, 0, 1);
                 double coverage = Math.clamp(outerCoverage - innerCoverage, 0, 1);
                 if (coverage <= 0) {
                     image.setPixelABGR(px, py, 0);
@@ -313,6 +371,40 @@ public final class RoundedGui {
                 sampleCap + sampleMiddle, sampleCap + sampleMiddle, sampleCap, sampleCap);
     }
 
+    private static void drawNineSliceTinted(GuiGraphicsExtractor context, BorderTexture border,
+                                      int x, int y, int width, int height, int color) {
+        int cap = Math.min(border.cap(), Math.min(width, height) / 2);
+        if (cap <= 0) return;
+        // Compress the corner source for narrow capsules instead of falling back
+        // to the pixel-stepped outline used by the retro renderer.
+        int sampleCap = border.cap() * BORDER_SUPERSAMPLE;
+        int sampleMiddle = border.textureSize() - sampleCap * 2;
+        int middleWidth = width - cap * 2;
+        int middleHeight = height - cap * 2;
+        drawTintedPiece(context, border, x, y, cap, cap, 0, 0, sampleCap, sampleCap, color);
+        drawTintedPiece(context, border, x + cap, y, middleWidth, cap,
+                sampleCap, 0, sampleMiddle, sampleCap, color);
+        drawTintedPiece(context, border, x + width - cap, y, cap, cap,
+                sampleCap + sampleMiddle, 0, sampleCap, sampleCap, color);
+        drawTintedPiece(context, border, x, y + cap, cap, middleHeight,
+                0, sampleCap, sampleCap, sampleMiddle, color);
+        drawTintedPiece(context, border, x + width - cap, y + cap, cap, middleHeight,
+                sampleCap + sampleMiddle, sampleCap, sampleCap, sampleMiddle, color);
+        drawTintedPiece(context, border, x, y + height - cap, cap, cap,
+                0, sampleCap + sampleMiddle, sampleCap, sampleCap, color);
+        drawTintedPiece(context, border, x + cap, y + height - cap, middleWidth, cap,
+                sampleCap, sampleCap + sampleMiddle, sampleMiddle, sampleCap, color);
+        drawTintedPiece(context, border, x + width - cap, y + height - cap, cap, cap,
+                sampleCap + sampleMiddle, sampleCap + sampleMiddle, sampleCap, sampleCap, color);
+    }
+
+    private static void drawTintedPiece(GuiGraphicsExtractor context, BorderTexture border,
+            int x, int y, int width, int height, int sourceX, int sourceY, int sourceWidth, int sourceHeight, int color) {
+        if (width <= 0 || height <= 0) return;
+        PlatformTextures.drawTinted(context, border.id(), x, y, width, height, sourceX, sourceY,
+                sourceWidth, sourceHeight, border.textureSize(), border.textureSize(), color);
+    }
+
     private static void drawPiece(GuiGraphicsExtractor context, BorderTexture border,
                                   int x, int y, int width, int height,
                                   int sourceX, int sourceY, int sourceWidth, int sourceHeight) {
@@ -366,7 +458,7 @@ public final class RoundedGui {
     private static void band(GuiGraphicsExtractor context, int left, int top, int right, int bottom,
                              Runnable drawer) {
         if (right <= left || bottom <= top) return;
-        context.enableScissor(left, top, right, bottom);
+        GuiTransform.enableScissor(context, left, top, right, bottom);
         try {
             drawer.run();
         } finally {
@@ -384,7 +476,8 @@ public final class RoundedGui {
         return radius - (int) Math.floor(Math.sqrt(Math.max(0, radius * radius - dy * dy)));
     }
 
-    private record BorderKey(int radius, int outerColor, int innerColor) { }
+    private record BorderKey(int radius, int outerColor, int innerColor, double density) { }
+    private record ShapeKey(int radius, double density) { }
 
     private record BorderTexture(Identifier id, DynamicTexture texture,
                                  int textureSize, int cap) { }

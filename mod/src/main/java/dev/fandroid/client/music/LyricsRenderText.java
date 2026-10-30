@@ -75,7 +75,9 @@ public final class LyricsRenderText {
     }
 
     private static List<TimedWord> romanizedSourceWords(LyricLine line) {
-        List<TimedWord> source = sourceWords(line);
+        // Original-script spacing repair must not glue separately timed Japanese/
+        // Chinese words back together after converting them to Latin text.
+        List<TimedWord> source = line.words().size() > 1 ? line.words() : sourceWords(line);
         String suppliedLineRomanization = line.romanization() != null && !line.romanization().isBlank()
                 ? line.romanization() : null;
         String lineRomanization = suppliedOrGenerated(line.romanization(), line.text());
@@ -83,11 +85,16 @@ public final class LyricsRenderText {
                 suppliedOrGenerated(word.romanization(), word.text()) != null);
         if (hasFragmentRomanization) {
             List<TimedWord> romanized = new ArrayList<>(source.size());
+            String previous = "";
             for (TimedWord word : source) {
                 String generated = suppliedOrGenerated(word.romanization(), word.text());
                 String text = generated == null ? word.text() : generated;
+                // The romanized script can have spaces where the original has none.
+                // Keep those word boundaries independently from the original geometry.
+                boolean joined = word.joinPrevious() && !startsWithSpace(text) && !endsWithSpace(previous);
                 romanized.add(new TimedWord(word.startMillis(), word.endMillis(), text,
-                        word.joinPrevious(), generated));
+                        joined, generated));
+                previous = text;
             }
             List<TimedWord> timedRomanized = List.copyOf(romanized);
             // A locally generated whole-line value must never override a provider's per-fragment
@@ -98,23 +105,26 @@ public final class LyricsRenderText {
             List<String> displayedWords = textChunks(suppliedLineRomanization);
             List<TimedWord> boundaryAligned = alignRomanizedFragments(timedRomanized, displayedWords);
             if (!boundaryAligned.isEmpty()) return boundaryAligned;
-            List<VisualWord> fragmentWords = groupVisualWords(timedRomanized);
-            if (fragmentWords.size() == displayedWords.size()) {
-                boolean sameGeometry = true;
-                for (int index = 0; index < displayedWords.size(); index++) {
-                    if (!fragmentWords.get(index).text().equals(displayedWords.get(index))) {
-                        sameGeometry = false;
-                        break;
-                    }
-                }
-                if (sameGeometry) return timedRomanized;
+            if (source.stream().noneMatch(word -> word.romanization() != null && !word.romanization().isBlank())) {
+                // Prefer human/provider spelling over the local fallback when its words
+                // map one-to-one to the source, while retaining those word intervals.
+                List<TimedWord> lineAligned = alignLineWords(source, displayedWords);
+                if (!lineAligned.isEmpty()) return lineAligned;
             }
+            // Spelling, punctuation or a partial whole-line alternative may differ.
+            // Never discard real syllable timestamps to fit that alternative.
+            return timedRomanized;
         }
 
         if (lineRomanization == null) return source;
 
-        List<VisualWord> originalWords = groupVisualWords(source);
         List<String> romanizedWords = textChunks(lineRomanization);
+        List<TimedWord> aligned = alignLineWords(source, romanizedWords);
+        return aligned.isEmpty() ? splitTextByTiming(lineRomanization, line.startMillis(), line.endMillis()) : aligned;
+    }
+
+    private static List<TimedWord> alignLineWords(List<TimedWord> source, List<String> romanizedWords) {
+        List<VisualWord> originalWords = groupVisualWords(source);
         if (!originalWords.isEmpty() && romanizedWords.size() == originalWords.size()) {
             List<TimedWord> aligned = new ArrayList<>(romanizedWords.size());
             for (int index = 0; index < romanizedWords.size(); index++) {
@@ -124,11 +134,19 @@ public final class LyricsRenderText {
             }
             return List.copyOf(aligned);
         }
-        return splitTextByTiming(lineRomanization, line.startMillis(), line.endMillis());
+        return List.of();
     }
 
     private static String suppliedOrGenerated(String supplied, String original) {
         return supplied != null && !supplied.isBlank() ? supplied : LyricsRomanizer.romanize(original);
+    }
+
+    private static boolean startsWithSpace(String text) {
+        return !text.isEmpty() && Character.isWhitespace(text.codePointAt(0));
+    }
+
+    private static boolean endsWithSpace(String text) {
+        return !text.isEmpty() && Character.isWhitespace(text.codePointBefore(text.length()));
     }
 
     /**
@@ -151,6 +169,7 @@ public final class LyricsRenderText {
                 TimedWord fragment = fragments.get(fragmentIndex++);
                 String fragmentText = normalizeFragment(fragment.text());
                 if (fragmentText.isEmpty()) continue;
+                if (!wordFragments.isEmpty() && !fragment.joinPrevious()) return List.of();
                 combined.append(fragmentText);
                 wordFragments.add(fragment);
                 if (!target.startsWith(combined.toString())) return List.of();
@@ -213,7 +232,7 @@ public final class LyricsRenderText {
     }
 
     private static List<TimedWord> sourceWords(LyricLine line) {
-        String firstWord = line.words().isEmpty() ? "" : normalizeVisible(line.words().getFirst().text());
+        String firstWord = line.words().isEmpty() ? "" : normalizeFragment(line.words().getFirst().text());
         boolean singleLineToken = line.words().size() == 1
                 && firstWord.codePoints().anyMatch(Character::isWhitespace);
         if (!line.words().isEmpty() && !singleLineToken) {

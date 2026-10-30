@@ -7,9 +7,72 @@ import net.fabricmc.loader.api.FabricLoader;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.ArrayList;
+import dev.relaylyrics.client.music.MultiSourceLyricsClient;
 
 /** Preferences owned by the standalone popup. It never reads or rewrites fandroid.json. */
 public final class ClientPreferences {
+    private dev.relaylyrics.client.music.WorldLyricsExperience.Style worldLyricsStyle;
+    private dev.relaylyrics.client.music.WorldLyricsExperience.RenderMode worldLyricsRenderMode;
+    private boolean worldLyricsSmoothFont = true;
+    public boolean isWorldLyricsSmoothFont() { return worldLyricsSmoothFont; }
+    public void setWorldLyricsSmoothFont(boolean value) { worldLyricsSmoothFont = value; }
+    private dev.relaylyrics.client.music.WorldLyricsSpace.Position worldLyricsPosition;
+    private boolean worldLyricsTerrainLight = true;
+    private int worldLyricsLuminance = 14;
+    public dev.relaylyrics.client.music.WorldLyricsSpace.Position getWorldLyricsPosition() { return worldLyricsPosition == null ? dev.relaylyrics.client.music.WorldLyricsSpace.Position.ADAPTIVE : worldLyricsPosition; }
+    public void setWorldLyricsPosition(dev.relaylyrics.client.music.WorldLyricsSpace.Position value) { worldLyricsPosition=value; }
+    public boolean isWorldLyricsTerrainLight() { return worldLyricsTerrainLight; }
+    public void setWorldLyricsTerrainLight(boolean value) { worldLyricsTerrainLight=value; }
+    public int getWorldLyricsLuminance() { return Math.clamp(worldLyricsLuminance,0,15); }
+    public void setWorldLyricsLuminance(int value) { worldLyricsLuminance=Math.clamp(value,0,15); }
+    private boolean worldLyricsGlow;
+    private int worldLyricsAccent = 0xC7B7FF;
+    public dev.relaylyrics.client.music.WorldLyricsExperience.Style getWorldLyricsStyle() {
+        return worldLyricsStyle == null ? dev.relaylyrics.client.music.WorldLyricsExperience.Style.SPICY : worldLyricsStyle;
+    }
+    public void setWorldLyricsStyle(dev.relaylyrics.client.music.WorldLyricsExperience.Style value) { worldLyricsStyle = value; }
+    public dev.relaylyrics.client.music.WorldLyricsExperience.RenderMode getWorldLyricsRenderMode() {
+        return worldLyricsRenderMode == null ? dev.relaylyrics.client.music.WorldLyricsExperience.RenderMode.AUTO : worldLyricsRenderMode;
+    }
+    public void setWorldLyricsRenderMode(dev.relaylyrics.client.music.WorldLyricsExperience.RenderMode value) { worldLyricsRenderMode = value; }
+    public boolean isWorldLyricsGlow() { return worldLyricsGlow; }
+    public void setWorldLyricsGlow(boolean value) { worldLyricsGlow = value; }
+    public int getWorldLyricsAccent() { return worldLyricsAccent & 0xFFFFFF; }
+    public void setWorldLyricsAccent(int value) { worldLyricsAccent = value & 0xFFFFFF; }
+
+    private boolean spotifyCanvas = true;
+    private boolean animatedCovers = true;
+    private boolean canvasBackground;
+    private boolean pauseMotionWithMusic = true;
+
+    private boolean preferSpicyLyrics = true;
+    public boolean isPreferSpicyLyrics() { return preferSpicyLyrics; }
+    public void setPreferSpicyLyrics(boolean value) { preferSpicyLyrics = value; }
+    private java.util.List<String> lyricsSourceOrder;
+    public java.util.List<String> getLyricsSourceOrder() {
+        var all = dev.relaylyrics.client.music.MultiSourceLyricsClient.defaultOrder();
+        var ordered = new java.util.LinkedHashSet<String>();
+        if (lyricsSourceOrder != null) for (String id : lyricsSourceOrder) if (id != null && all.contains(id)) ordered.add(id);
+        ordered.addAll(all); return java.util.List.copyOf(ordered);
+    }
+    public void setLyricsSourceOrder(java.util.List<String> value) { lyricsSourceOrder = value == null ? null : value.stream().filter(java.util.Objects::nonNull).toList(); }
+    public void moveLyricsSource(String id, int index) {
+        var order = new java.util.ArrayList<>(getLyricsSourceOrder());
+        if (!order.remove(id)) return;
+        order.add(Math.clamp(index, 0, order.size()), id); lyricsSourceOrder = java.util.List.copyOf(order);
+    }
+
+    public boolean isSpotifyCanvas() { return spotifyCanvas; }
+    public void setSpotifyCanvas(boolean value) { spotifyCanvas = value; }
+    public boolean isAnimatedCovers() { return animatedCovers; }
+    public void setAnimatedCovers(boolean value) { animatedCovers = value; }
+    public boolean isCanvasBackground() { return canvasBackground; }
+    public void setCanvasBackground(boolean value) { canvasBackground = value; }
+    public boolean isPauseMotionWithMusic() { return pauseMotionWithMusic; }
+    public void setPauseMotionWithMusic(boolean value) { pauseMotionWithMusic = value; }
+
     private boolean lyricsVisible = true;
     private boolean lyricsPinned = true;
     private boolean lyricsAllowGuiOverlap;
@@ -35,7 +98,15 @@ public final class ClientPreferences {
     private int lyricsY = 24;
     private int lyricsWidth = 420;
     private int lyricsHeight = 260;
+    // Zero migrates lazily from the existing dimensions, without overwriting them.
+    @com.fasterxml.jackson.annotation.JsonProperty
+    private int lyricsVideoWidth;
+    @com.fasterxml.jackson.annotation.JsonProperty
+    private int lyricsVideoHeight;
+    @com.fasterxml.jackson.annotation.JsonProperty
+    private int lyricsSquareVideoSize;
     private boolean lyricsDynamicBackground = true;
+    private boolean lyricsArtistBackground;
     private int lyricsBackgroundSpeed = 1;
     private int lyricsBackgroundOpacity = 100;
     private int lyricsBlurStrength = 2;
@@ -82,14 +153,29 @@ public final class ClientPreferences {
     private boolean lyricsAnimations = true;
     private int lyricsAnimationFrameRate;
     private boolean lyricsLoadingSkeleton;
-    private boolean lyricsBorder = true;
+    private boolean lyricsBorder;
     private boolean lyricsResizeGrip;
     private boolean inventoryPopup = true;
     private boolean inventoryNowPlaying = true;
-    private boolean modernMode;
+    private boolean modernMode = true;
     private MusicSource musicSource = MusicSource.AUTOMATIC;
     private LyricsRenderType lyricsRenderType = LyricsRenderType.NON_INTRUSIVE;
     private String spotifyClientId = "";
+    private List<String> lyricsSources;
+
+    public List<String> getLyricsSources() {
+        return lyricsSources == null ? MultiSourceLyricsClient.defaultSources() : List.copyOf(lyricsSources);
+    }
+    public void setLyricsSources(List<String> values) {
+        lyricsSources = values == null ? null : values.stream().filter(java.util.Objects::nonNull).distinct().toList();
+    }
+    public boolean isLyricsSourceEnabled(String id) { return getLyricsSources().contains(id); }
+    public void setLyricsSourceEnabled(String id, boolean enabled) {
+        var values = new ArrayList<>(getLyricsSources());
+        if (enabled && !values.contains(id)) values.add(id);
+        if (!enabled) values.remove(id);
+        setLyricsSources(values);
+    }
 
     public static ClientPreferences load() {
         Path file = file();
@@ -104,6 +190,7 @@ public final class ClientPreferences {
     }
 
     public void save() {
+        if (Boolean.getBoolean("lyrica.worldExperienceSelfTest")) return;
         Path file = file();
         try {
             Files.createDirectories(file.getParent());
@@ -122,6 +209,7 @@ public final class ClientPreferences {
         lyricsY = 24;
         lyricsWidth = 420;
         lyricsHeight = 260;
+        lyricsVideoWidth = lyricsVideoHeight = lyricsSquareVideoSize = 0;
     }
 
     public boolean isLyricsVisible() { return lyricsVisible; }
@@ -203,10 +291,30 @@ public final class ClientPreferences {
     public void setLyricsX(int value) { lyricsX = value; }
     public int getLyricsY() { return lyricsY; }
     public void setLyricsY(int value) { lyricsY = value; }
-    public int getLyricsWidth() { return Math.clamp(lyricsWidth, 160, 900); }
-    public void setLyricsWidth(int value) { lyricsWidth = Math.clamp(value, 160, 900); }
-    public int getLyricsHeight() { return Math.clamp(lyricsHeight, 100, 600); }
-    public void setLyricsHeight(int value) { lyricsHeight = Math.clamp(value, 100, 600); }
+    public int getPopupWidth(boolean video, boolean square) {
+        return square ? getPopupHeight(video, true) : video && lyricsVideoWidth > 0
+                ? Math.clamp(lyricsVideoWidth, 96, 900) : getLyricsWidth();
+    }
+    public int getPopupHeight(boolean video, boolean square) {
+        int saved = square ? lyricsSquareVideoSize : video ? lyricsVideoHeight : 0;
+        return saved > 0 ? Math.clamp(saved, 64, 600) : getLyricsHeight();
+    }
+    public void setPopupWidth(boolean video, boolean square, int value) {
+        if (square) lyricsSquareVideoSize = Math.clamp(value, 64, 600);
+        else if (video) lyricsVideoWidth = Math.clamp(value, 96, 900);
+        else setLyricsWidth(value);
+    }
+    public void setPopupHeight(boolean video, boolean square, int value) {
+        if (square) lyricsSquareVideoSize = Math.clamp(value, 64, 600);
+        else if (video) lyricsVideoHeight = Math.clamp(value, 64, 600);
+        else setLyricsHeight(value);
+    }
+    public int getLyricsWidth() { return Math.clamp(lyricsWidth, 96, 900); }
+    public void setLyricsWidth(int value) { lyricsWidth = Math.clamp(value, 96, 900); }
+    public int getLyricsHeight() { return Math.clamp(lyricsHeight, 64, 600); }
+    public void setLyricsHeight(int value) { lyricsHeight = Math.clamp(value, 64, 600); }
+    public boolean isLyricsArtistBackground() { return lyricsArtistBackground; }
+    public void setLyricsArtistBackground(boolean value) { lyricsArtistBackground = value; }
     public boolean isLyricsDynamicBackground() { return lyricsDynamicBackground; }
     public void setLyricsDynamicBackground(boolean value) { lyricsDynamicBackground = value; }
     public int getLyricsBackgroundSpeed() { return Math.clamp(lyricsBackgroundSpeed, 0, 3); }

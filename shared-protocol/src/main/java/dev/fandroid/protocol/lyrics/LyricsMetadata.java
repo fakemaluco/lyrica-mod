@@ -66,7 +66,7 @@ public record LyricsMetadata(
         return switch (source) {
             case SPICY_TTML, SPICY_CACHE -> "Spicy Lyrics";
             case IMPORTED -> "Imported TTML";
-            case UNKNOWN -> "";
+            case UNKNOWN, REMOTE -> "";
         };
     }
 

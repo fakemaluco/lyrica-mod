@@ -26,6 +26,119 @@ public final class LyricsAnimation {
 
     private LyricsAnimation() { }
 
+    /** Spicy Lyrics Mobile's normal renderer: natural splines and damped, interruptible springs.
+     * Reference: spicylyrics/mobile LyricsAnimator.kt (AGPL-3.0), normal mode.
+     * Elevation is positive upward, in em; the letter renderer doubles its vertical travel.
+     */
+    public static double spicyScaleTarget(double progress, boolean letter) {
+        return naturalThreePoint(progress, .7, .95, letter ? 1.175 : 1.0505, 1);
+    }
+
+    public static double spicyElevationTarget(double progress, boolean letter) {
+        return -naturalThreePoint(progress, .9, .01, letter ? -1.0 / 56 : -1.0 / 60, 0)
+                * (letter ? 2 : 1);
+    }
+
+    /** Three-knot natural cubic spline (zero second derivative at either endpoint). */
+    private static double naturalThreePoint(double progress, double knot,
+                                            double first, double middle, double last) {
+        double t = Math.clamp(progress, 0, 1);
+        double secondDerivative = 3 * ((last - middle) / (1 - knot) - (middle - first) / knot);
+        double left = t <= knot ? 0 : knot;
+        double right = t <= knot ? knot : 1;
+        double firstValue = t <= knot ? first : middle;
+        double lastValue = t <= knot ? middle : last;
+        double firstCurvature = t <= knot ? 0 : secondDerivative;
+        double lastCurvature = t <= knot ? secondDerivative : 0;
+        double width = right - left;
+        double a = (right - t) / width, b = (t - left) / width;
+        return a * firstValue + b * lastValue
+                + ((a * a * a - a) * firstCurvature + (b * b * b - b) * lastCurvature)
+                * width * width / 6;
+    }
+
+    /** Shared word/letter pose, stepped once per frame and used by both text and halo passes. */
+    public static final class ElementMotion {
+        private final boolean letter;
+        private final SpringValue scale = new SpringValue(.95, .88, .64);
+        private final SpringValue elevation = new SpringValue(-.01, 1.45, .4);
+        private final SpringValue glow = new SpringValue(0, 1.18, .56);
+
+        public ElementMotion(boolean letter) {
+            this.letter = letter;
+            elevation.snap(spicyElevationTarget(0, letter));
+        }
+
+        public void update(double progress, boolean animated, double delta) {
+            if (!animated) {
+                scale.snap(1); elevation.snap(0); glow.snap(0);
+                return;
+            }
+            scale.setGoal(spicyScaleTarget(progress, letter));
+            elevation.setGoal(spicyElevationTarget(progress, letter));
+            glow.setGoal(spicyGlowTarget(progress));
+            double step = Math.clamp(delta, 0, .05);
+            scale.step(step); elevation.step(step); glow.step(step);
+        }
+
+        /** A seek starts from the pose at the new time, without carrying the old syllable's velocity. */
+        public void reset(double progress, boolean animated) {
+            scale.snap(animated ? spicyScaleTarget(progress, letter) : 1);
+            elevation.snap(animated ? spicyElevationTarget(progress, letter) : 0);
+            glow.snap(0);
+        }
+
+        public double scale() { return scale.position(); }
+        public double elevation() { return elevation.position(); }
+        public double glow() { return glow.position(); }
+    }
+
+    /** Spicy Mobile's Apple-style scroll trail: following lines move 50ms apart, up to four rows.
+     * Samples the same camera movement rather than restarting a tween on every line change.
+     */
+    public static final class ScrollTrail {
+        private static final int CAPACITY = 64;
+        private static final long STEP_NANOS = 50_000_000L;
+        private final long[] times = new long[CAPACITY];
+        private final double[] positions = new double[CAPACITY];
+        private int head, count, reference, direction = 1;
+        private long now;
+        private double current;
+
+        public void record(long timeNanos, double position, int focusedLine, boolean snap) {
+            if (snap) { head = count = 0; }
+            if (count > 0 && Math.abs(position - current) > .01)
+                direction = position > current ? 1 : -1;
+            now = timeNanos;
+            current = position;
+            reference = Math.max(0, focusedLine);
+            times[head] = timeNanos;
+            positions[head] = position;
+            head = (head + 1) % CAPACITY;
+            count = Math.min(CAPACITY, count + 1);
+        }
+
+        /** Extra downward offset because this row still follows an earlier camera sample. */
+        public double offset(int lineIndex) {
+            int steps = Math.clamp(direction > 0 ? lineIndex - reference : reference - lineIndex, 0, 4);
+            return current - at(now - steps * STEP_NANOS);
+        }
+
+        private double at(long time) {
+            int newer = (head - 1 + CAPACITY) % CAPACITY;
+            if (count == 0 || time >= times[newer]) return current;
+            for (int i = 1; i < count; i++) {
+                int older = (newer - 1 + CAPACITY) % CAPACITY;
+                if (time >= times[older]) {
+                    double fraction = (time - times[older]) / (double) Math.max(1, times[newer] - times[older]);
+                    return mix(positions[older], positions[newer], fraction);
+                }
+                newer = older;
+            }
+            return positions[newer];
+        }
+    }
+
     /**
      * The shared visual hierarchy for lyric groups. It deliberately depends only
      * on the absolute distance from the focused group: past and future lines use

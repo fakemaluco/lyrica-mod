@@ -9,6 +9,8 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.Identifier;
+import dev.lyrica.engine.VideoLoop;
+
 import javax.imageio.ImageIO;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -47,6 +49,8 @@ public final class CoverArtTexture implements AutoCloseable {
     private final AtomicLong generation = new AtomicLong();
     private final long textureInstanceId = TEXTURE_INSTANCE_GENERATION.incrementAndGet();
     private final FluidBackdrop fluidBackdrop = new FluidBackdrop();
+    private final GlassLens[] glassLenses = {new GlassLens(), new GlassLens(), new GlassLens(), new GlassLens(), new GlassLens()};
+    private volatile CoverArtTexture artistArtwork;
     private final EnumMap<Fallback, TextureState> fallbackTextures = new EnumMap<>(Fallback.class);
     private volatile String requestedUrl;
     private volatile TextureState texture;
@@ -60,10 +64,131 @@ public final class CoverArtTexture implements AutoCloseable {
     private final ArrayList<CachedRoundedCover> roundedCovers = new ArrayList<>();
     private long roundedCacheBytes;
 
-    public CoverArtTexture() {
+    private final MotionSurface canvasSurface = new MotionSurface("canvas");
+    private final MotionSurface animatedSurface = new MotionSurface("album_video");
+    private volatile boolean canvasOnCover, animatedCoverEnabled, canvasBackdrop;
+    private volatile boolean pauseMotionWithMusic = true, motionPlaying = true;
+    private volatile String visibleMotionKind = "static";
+
+    /** Called from lookup/snapshot threads. Native decoding is asynchronous; GPU work stays in draw. */
+    public void configureMotion(String canvasUrl, String animatedCoverUrl, boolean useCanvasOnCover,
+                                boolean useAnimatedCover, boolean useCanvasBackdrop, boolean pauseWithMusic) {
+        canvasOnCover = useCanvasOnCover;
+        animatedCoverEnabled = useAnimatedCover;
+        canvasBackdrop = useCanvasBackdrop;
+        pauseMotionWithMusic = pauseWithMusic;
+        canvasSurface.setUrl(useCanvasOnCover || useCanvasBackdrop ? canvasUrl : null);
+        animatedSurface.setUrl(useAnimatedCover ? animatedCoverUrl : null);
+        setMotionPlaying(motionPlaying);
+    }
+
+    public void setMotionPlaying(boolean playing) {
+        motionPlaying = playing;
+        canvasSurface.video.setPlaying(playing, pauseMotionWithMusic);
+        animatedSurface.video.setPlaying(playing, pauseMotionWithMusic);
+    }
+
+    public void clearMotion() {
+        canvasSurface.setUrl(null);
+        animatedSurface.setUrl(null);
+        visibleMotionKind = "static";
+    }
+
+    public String motionStatus() {
+        if (canvasSurface.url != null && !canvasSurface.video.failed()) return "Canvas: " + canvasSurface.video.status();
+        if (animatedSurface.url != null) return "Animated cover: " + animatedSurface.video.status();
+        return canvasSurface.video.failed() ? "Canvas unavailable; static cover" : "Static cover";
+    }
+    public String motionKind() { return visibleMotionKind; }
+    public boolean canvasFailed() { return canvasSurface.url != null && canvasSurface.video.failed(); }
+    public boolean animatedCoverFailed() { return animatedSurface.url != null && animatedSurface.video.failed(); }
+    public boolean motionReady() { return !visibleMotionKind.equals("static"); }
+
+    /** Full-height, softly blurred video fading into the lyrics background. */
+    public boolean drawCanvasSurface(GuiGraphicsExtractor context, int x, int y, int width, int height, int radius) {
+        TextureState current = motionCoverTexture();
+        if (current == null) return false;
+        MotionSurface owner = canvasSurface.owns(current) ? canvasSurface : animatedSurface.owns(current) ? animatedSurface : null;
+        return owner != null && owner.drawRounded(context, current, x, y, width, height, radius, .82, .94, true);
+    }
+
+    /** A small frosted copy of the exact cover region under a floating utility button. */
+    public void drawGlassLens(GuiGraphicsExtractor context, int coverX, int coverY, int coverWidth, int coverHeight,
+                              int x, int y, int width, int height, int radius, double opacity, double brightness, int slot) {
+        if (opacity <= .001 || width < 1 || height < 1 || coverWidth < 1 || coverHeight < 1) return;
+        TextureState original = motionCoverTexture();
+        if (original == null) return;
+        MotionSurface owner = canvasSurface.owns(original) ? canvasSurface : animatedSurface.owns(original) ? animatedSurface : null;
+        TextureState blurred = owner == null ? null : owner.sample(true);
+        glassLenses[Math.clamp(slot, 0, glassLenses.length - 1)].draw(context, original, blurred, owner == null ? 0 : owner.uploadedSequence,
+                coverX, coverY, coverWidth, coverHeight, x, y, width, height, radius, opacity, brightness);
+    }
+
+    /** Read decoded dimensions without allocating or uploading a GPU texture. */
+    public double motionCoverAspectRatio() {
+        for (int index = 0; index < 2; index++) {
+            MotionSurface surface = index == 0 ? canvasSurface : animatedSurface;
+            if (surface == canvasSurface ? !canvasOnCover : !animatedCoverEnabled) continue;
+            if (surface.url == null || surface.video.failed()) continue;
+            surface.video.touchVisible();
+            var frame = surface.video.latest();
+            if (frame != null) return frame.width() / (double) frame.height();
+        }
+        return 0;
+    }
+    public long motionFrameSequence() {
+        return switch (visibleMotionKind) {
+            case "canvas" -> canvasSurface.uploadedSequence;
+            case "animated" -> animatedSurface.uploadedSequence;
+            default -> 0;
+        };
+    }
+
+    private TextureState motionCoverTexture() {
+        if (canvasOnCover) {
+            TextureState motion = canvasSurface.sample(false);
+            if (motion != null) { visibleMotionKind = "canvas"; return motion; }
+        }
+        if (animatedCoverEnabled) {
+            TextureState motion = animatedSurface.sample(false);
+            if (motion != null) { visibleMotionKind = "animated"; return motion; }
+        }
+        visibleMotionKind = "static";
+        return displayedTexture();
+    }
+
+    private boolean isMotionTexture(TextureState state) {
+        return canvasSurface.owns(state) || animatedSurface.owns(state);
+    }
+
+
+    public CoverArtTexture() { this(true); }
+    private CoverArtTexture(boolean withFallbacks) {
+        if (!withFallbacks) return;
         loadFallback(Fallback.CONNECT_ACCOUNT, "please_connect.png");
         loadFallback(Fallback.SONG_NOT_FOUND, "song_not_found.png");
         loadFallback(Fallback.ERROR, "cover_error.png");
+    }
+
+    public boolean artistReady() {
+        CoverArtTexture artist = artistArtwork;
+        return artist != null && artist.texture != null;
+    }
+    public void configureArtist(String url) {
+        if (closed) return;
+        if (url == null) { if (artistArtwork != null) artistArtwork.update(null); return; }
+        if (artistArtwork == null) artistArtwork = new CoverArtTexture(false);
+        artistArtwork.update(url);
+    }
+    public boolean drawArtistBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
+                                      double opacity, int radius) {
+        CoverArtTexture artist = artistArtwork;
+        TextureState photo = artist == null ? null : artist.texture;
+        if (photo == null) photo = displayedTexture();
+        if (photo == null) return false;
+        drawRoundedCover(context, photo, x, y, width, height, radius, opacity, .55);
+        RoundedGui.smoothFill(context, x, y, width, height, radius, (int) Math.round(75 * opacity) << 24 | 0x080A10);
+        return true;
     }
 
     public void setFallback(Fallback value) {
@@ -93,7 +218,7 @@ public final class CoverArtTexture implements AutoCloseable {
     }
 
     public boolean draw(GuiGraphicsExtractor context, int x, int y, int width, int height) {
-        TextureState value = displayedTexture();
+        TextureState value = motionCoverTexture();
         if (value == null) return false;
         try {
             drawCover(context, value, x, y, width, height);
@@ -106,7 +231,7 @@ public final class CoverArtTexture implements AutoCloseable {
     /** Draws the cover through the same runtime-supersampled rounded clip as the border. */
     public boolean draw(GuiGraphicsExtractor context, int x, int y, int width, int height,
                         int cornerRadius) {
-        TextureState value = displayedTexture();
+        TextureState value = motionCoverTexture();
         if (value == null || width <= 0 || height <= 0) return false;
         try {
             return drawRoundedCover(context, value, x, y, width, height, cornerRadius, 1, 1);
@@ -124,9 +249,9 @@ public final class CoverArtTexture implements AutoCloseable {
     public boolean drawTransition(GuiGraphicsExtractor context, int x, int y, int width, int height,
                                   int cornerRadius) {
         try {
-            TextureState current = displayedTexture();
+            TextureState current = motionCoverTexture();
             if (current == null || width <= 0 || height <= 0) return false;
-            TextureState previous = texture == null ? null : previousTexture;
+            TextureState previous = texture == null || current != texture ? null : previousTexture;
             long started = coverTransitionStartedNanos;
             if (previous == null || started == 0) {
                 return drawRoundedCover(context, current, x, y, width, height, cornerRadius, 1, 1);
@@ -229,7 +354,19 @@ public final class CoverArtTexture implements AutoCloseable {
     public boolean drawBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
                                 int blurStrength, double speedMultiplier, double opacity,
                                 int cornerRadius, BackdropFx fx) {
-        TextureState value = displayedTexture();
+        TextureState canvas = canvasBackdrop ? canvasSurface.sample(true) : null;
+        if (canvas != null) {
+            if (CompatibilityManager.needsExplicitGuiFlush()) PlatformTextures.flush(context);
+            RoundedGui.scissor(context, x, y, width, height, () -> {
+                drawRoundedCover(context, canvas, x, y, width, height, cornerRadius, Math.clamp(opacity, 0, 1), .55);
+                int veil = Math.clamp((int) Math.round(120 * opacity), 0, 255);
+                if (cornerRadius > 0) RoundedGui.smoothFill(context, x, y, width, height, cornerRadius, veil << 24 | 0x080A10);
+                else context.fill(x, y, x + width, y + height, veil << 24 | 0x080A10);
+            });
+            return true;
+        }
+        TextureState animated = animatedCoverEnabled ? animatedSurface.sample(false) : null;
+        TextureState value = animated != null ? animated : displayedTexture();
         if (value == null) return false;
         int strength = Math.clamp(blurStrength, 0, 3);
         double backgroundOpacity = Math.clamp(opacity, 0, 1);
@@ -239,7 +376,7 @@ public final class CoverArtTexture implements AutoCloseable {
                 if (System.nanoTime() < enhancedBackdropRetryNanos) {
                     throw new IllegalStateException("fluid backdrop cooling down");
                 }
-                fluidBackdrop.draw(context, x, y, width, height, value.palette(), speedMultiplier,
+                fluidBackdrop.draw(context, x, y, width, height, value, strength, speedMultiplier,
                         backgroundOpacity, cornerRadius, fx);
                 enhancedBackdropRetryNanos = 0;
             } catch (RuntimeException enhancedFailure) {
@@ -304,6 +441,8 @@ public final class CoverArtTexture implements AutoCloseable {
             drawCover(context, state, x, y, width, height, opacity, brightness);
             return true;
         }
+        MotionSurface motion = canvasSurface.owns(state) ? canvasSurface : animatedSurface.owns(state) ? animatedSurface : null;
+        if (motion != null) return motion.drawRounded(context, state, x, y, width, height, cornerRadius, opacity, brightness);
         if (!PlatformTextures.supportsRoundedCoverComposite()) {
             // 1.21.11 corrupts freshly uploaded CPU composites on some render stacks.
             // Clip the original high-quality artwork instead, preserving rounded corners
@@ -443,6 +582,7 @@ public final class CoverArtTexture implements AutoCloseable {
                 throw new IOException("empty or oversized artwork response");
             }
             if (!Files.exists(file)) Files.write(file, bytes);
+            bytes = dev.lyrica.engine.ArtworkImageDecoder.normalize(bytes);
             status = "DECODING ARTWORK";
             scheduleDecode(bytes, expectedGeneration, cached, url, 0);
         } catch (Exception error) {
@@ -818,13 +958,228 @@ public final class CoverArtTexture implements AutoCloseable {
     @Override
     public void close() {
         closed = true;
+        canvasSurface.video.close();
+        animatedSurface.video.close();
         generation.incrementAndGet();
         Minecraft.getInstance().execute(() -> {
             destroyTexture();
+            canvasSurface.destroyGpu();
+            animatedSurface.destroyGpu();
             fallbackTextures.values().forEach(CoverArtTexture::destroy);
             fallbackTextures.clear();
             fluidBackdrop.close();
+            for (GlassLens lens : glassLenses) lens.close();
+            if (artistArtwork != null) { artistArtwork.close(); artistArtwork = null; }
         });
+    }
+
+
+    /** One small lens per utility slot. Reuses the video's ambient blur and only uploads new frames. */
+    private final class GlassLens implements AutoCloseable {
+        private DynamicTexture target;
+        private Identifier id, sourceId, staticSource;
+        private int[] staticBlur, indices;
+        private byte[] coverage;
+        private int rw, rh, lastWidth, lastHeight, lastRadius;
+        private double lastU, lastV, lastUw, lastVh;
+        private long sequence = Long.MIN_VALUE;
+
+        void draw(GuiGraphicsExtractor context, TextureState original, TextureState blurred, long frame,
+                  int cx, int cy, int cw, int ch, int x, int y, int width, int height, int radius,
+                  double opacity, double brightness) {
+            final int size = 64;
+            if (blurred == null && !original.id().equals(staticSource)) {
+                int[] pixels = new int[size * size];
+                for (int py = 0; py < size; py++) for (int px = 0; px < size; px++)
+                    pixels[py * size + px] = PlatformTextures.colorArgb(original.image(),
+                            Math.min(original.width() - 1, px * original.width() / size),
+                            Math.min(original.height() - 1, py * original.height() / size));
+                staticBlur = GlassButtonRaster.frost(pixels, size, size); staticSource = original.id();
+            }
+            double ratio = original.width() / (double) original.height(), aspect = cw / (double) ch;
+            double cropW = ratio > aspect ? aspect / ratio : 1, cropH = ratio < aspect ? ratio / aspect : 1;
+            double u = (1 - cropW) / 2 + (x - cx) / (double) cw * cropW;
+            double v = (1 - cropH) / 2 + (y - cy) / (double) ch * cropH;
+            double uw = width / (double) cw * cropW, vh = height / (double) ch * cropH;
+            int pw = Math.clamp((int) Math.ceil(width * PlatformTextures.guiScale()), 1, 1024);
+            int ph = Math.clamp((int) Math.ceil(height * PlatformTextures.guiScale()), 1, 512);
+            boolean geometry = target == null || pw != rw || ph != rh || width != lastWidth || height != lastHeight
+                    || radius != lastRadius || u != lastU || v != lastV || uw != lastUw || vh != lastVh;
+            if (geometry) {
+                if (target == null || pw != rw || ph != rh) {
+                    if (id != null) PlatformTextures.retireEffectMask(id);
+                    target = PlatformTextures.empty("Frosted glass lens", pw, ph);
+                    id = PlatformTextures.register("glass_lens_" + textureInstanceId + "_" + TEXTURE_INSTANCE_GENERATION.incrementAndGet(), target);
+                }
+                rw = pw; rh = ph; lastWidth = width; lastHeight = height; lastRadius = radius;
+                lastU = u; lastV = v; lastUw = uw; lastVh = vh;
+                indices = new int[rw * rh]; coverage = new byte[indices.length];
+                for (int py = 0; py < rh; py++) for (int px = 0; px < rw; px++) {
+                    int sx = Math.clamp((int) ((u + (px + .5) / rw * uw) * size), 0, size - 1);
+                    int sy = Math.clamp((int) ((v + (py + .5) / rh * vh) * size), 0, size - 1);
+                    indices[py * rw + px] = sy * size + sx;
+                    coverage[py * rw + px] = (byte) Math.round(255 * GlassButtonRaster.coverage(
+                            (px + .5) * width / rw, (py + .5) * height / rh, width, height, radius, rw / (double) width));
+                }
+            }
+            if (geometry || frame != sequence || !original.id().equals(sourceId)) {
+                NativeImage output = target.getPixels();
+                for (int py = 0; py < rh; py++) for (int px = 0; px < rw; px++) {
+                    int index = py * rw + px, sample = indices[index];
+                    int color = blurred == null ? staticBlur[sample]
+                            : PlatformTextures.colorArgb(blurred.image(), sample % size, sample / size);
+                    PlatformTextures.setUiPixel(output, px, py, (coverage[index] & 255) << 24 | color & 0xFFFFFF);
+                }
+                PlatformTextures.upload(target); sequence = frame; sourceId = original.id();
+            }
+            PlatformTextures.draw(context, id, x, y, width, height, 0, 0, rw, rh, rw, rh, opacity, brightness);
+        }
+        @Override public void close() {
+            if (id != null) PlatformTextures.retireEffectMask(id);
+            target = null; id = null; sourceId = null; staticSource = null; staticBlur = null; indices = null; coverage = null;
+        }
+    }
+
+    /** Reuses two GPU textures per stream (full frame + small blurred ambient frame).
+     * Animated textures bypass the static rounded-composite cache entirely.
+     */
+    private final class MotionSurface {
+        private final String name;
+        private final VideoLoop video = new VideoLoop(Boolean.getBoolean("lyrica.motionSelfTest"));
+        private volatile String url;
+        private volatile long sourceVersion;
+        private long gpuVersion = -1, uploadedSequence, ambientSequence, lastPaletteNanos;
+        private DynamicTexture videoTexture, ambientTexture;
+        private TextureState state, ambient;
+        private VideoLoop.PixelFrame pixels;
+        private PaletteData palette;
+
+        private final java.util.LinkedHashMap<VideoShape, RoundedFrame> rounded = new java.util.LinkedHashMap<>(8, .75f, true);
+        private record VideoShape(boolean ambient, int width, int height, int radius, double density, boolean canvasSurface) { }
+        private final class RoundedFrame {
+            final RoundedVideoRaster plan;
+            final DynamicTexture texture;
+            final Identifier id;
+            final int[] output;
+            long sequence = -1;
+            RoundedFrame(VideoShape key, int sourceWidth, int sourceHeight) {
+                plan = new RoundedVideoRaster(sourceWidth, sourceHeight, key.width(), key.height(), key.radius(), key.density(), key.canvasSurface());
+                output = new int[plan.width() * plan.height()];
+                texture = PlatformTextures.empty("Rounded Canvas", plan.width(), plan.height());
+                id = PlatformTextures.register("rounded_motion_" + textureInstanceId + "_" + name + "_" + TEXTURE_INSTANCE_GENERATION.incrementAndGet(), texture);
+            }
+        }
+        synchronized boolean drawRounded(GuiGraphicsExtractor context, TextureState source, int x, int y, int width, int height,
+                                          int radius, double opacity, double brightness) {
+            return drawRounded(context, source, x, y, width, height, radius, opacity, brightness, false);
+        }
+        synchronized boolean drawRounded(GuiGraphicsExtractor context, TextureState source, int x, int y, int width, int height,
+                                          int radius, double opacity, double brightness, boolean canvasSurface) {
+            boolean blurred = ambient != null && source.id().equals(ambient.id());
+            VideoShape key = new VideoShape(blurred, width, height, radius, PlatformTextures.guiScale(), canvasSurface);
+            RoundedFrame frame = rounded.get(key);
+            if (frame == null) { frame = new RoundedFrame(key, source.width(), source.height()); rounded.put(key, frame); }
+            if (frame.sequence != uploadedSequence) {
+                int[] data;
+                if (!blurred && pixels != null) data = pixels.argb();
+                else {
+                    data = new int[source.width() * source.height()];
+                    for (int py = 0; py < source.height(); py++) for (int px = 0; px < source.width(); px++)
+                        data[py * source.width() + px] = PlatformTextures.colorArgb(source.image(), px, py);
+                }
+                frame.plan.render(data, frame.output);
+                NativeImage image = frame.texture.getPixels();
+                for (int py = 0; py < frame.plan.height(); py++) for (int px = 0; px < frame.plan.width(); px++)
+                    PlatformTextures.setColorArgb(image, px, py, frame.output[py * frame.plan.width() + px]);
+                PlatformTextures.upload(frame.texture); frame.sequence = uploadedSequence;
+            }
+            PlatformTextures.draw(context, frame.id, x, y, width, height, 0, 0, frame.plan.width(), frame.plan.height(),
+                    frame.plan.width(), frame.plan.height(), opacity, brightness);
+            while (rounded.size() > 6) { var it = rounded.entrySet().iterator(); var old = it.next(); it.remove(); PlatformTextures.retireEffectMask(old.getValue().id); }
+            return true;
+        }
+        MotionSurface(String name) { this.name = name; }
+        synchronized void setUrl(String next) {
+            if (java.util.Objects.equals(url, next)) return;
+            url = next;
+            sourceVersion++;
+            video.setSource(next);
+            visibleMotionKind = "static";
+        }
+        boolean owns(TextureState value) {
+            return value != null && (state != null && value.id().equals(state.id())
+                    || ambient != null && value.id().equals(ambient.id()));
+        }
+        synchronized TextureState sample(boolean ambientWanted) {
+            if (closed) return null;
+            long expected = sourceVersion;
+            if (gpuVersion != expected) { destroyGpu(); gpuVersion = expected; }
+            if (url == null) return null;
+            video.touchVisible();
+            VideoLoop.PixelFrame latest = video.latest();
+            if (latest == null || expected != sourceVersion) return null;
+            if (latest.sequence() != uploadedSequence) {
+                if (state == null || state.width() != latest.width() || state.height() != latest.height()) {
+                    destroyGpu(); gpuVersion = expected;
+                    NativeImage image = new NativeImage(latest.width(), latest.height(), true);
+                    videoTexture = PlatformTextures.fromImage("Lyrica " + name, image);
+                    Identifier id = PlatformTextures.register("fandroid_motion_" + textureInstanceId + "_" + name + "_" + expected, videoTexture);
+                    state = new TextureState(id, image, latest.width(), latest.height(), 0xFF26334A, new int[]{0xFF26334A,0xFF3B2D47,0xFF172833});
+                }
+                NativeImage image = state.image();
+                for (int y = 0; y < latest.height(); y++) for (int x = 0; x < latest.width(); x++)
+                    PlatformTextures.setColorArgb(image, x, y, latest.argb()[y * latest.width() + x]);
+                PlatformTextures.upload(videoTexture);
+                if (palette == null || System.nanoTime() - lastPaletteNanos > 100_000_000L) {
+                    palette = extractPalette(image); lastPaletteNanos = System.nanoTime();
+                }
+                state = new TextureState(state.id(), image, latest.width(), latest.height(), palette.accent(), palette.colors());
+                pixels = latest;
+                uploadedSequence = latest.sequence();
+            }
+            if (!ambientWanted) return state;
+            if (ambientSequence != uploadedSequence && pixels != null) updateAmbient(expected);
+            return ambient;
+        }
+        private void updateAmbient(long expected) {
+            final int size = 64;
+            if (ambient == null) {
+                NativeImage image = new NativeImage(size, size, true);
+                ambientTexture = PlatformTextures.fromImage("Lyrica ambient " + name, image);
+                Identifier id = PlatformTextures.register("fandroid_motion_ambient_" + textureInstanceId + "_" + name + "_" + expected, ambientTexture);
+                ambient = new TextureState(id, image, size, size, state.accent(), state.palette());
+            }
+            int[] colors = new int[size * size];
+            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+                colors[y * size + x] = pixels.argb()[Math.min(pixels.height() - 1, y * pixels.height() / size) * pixels.width()
+                        + Math.min(pixels.width() - 1, x * pixels.width() / size)];
+            for (int pass = 0; pass < 3; pass++) {
+                int[] blurred = new int[colors.length];
+                for (int y = 0; y < size; y++) for (int x = 0; x < size; x++) {
+                    int r = 0, g = 0, b = 0, count = 0;
+                    for (int d = -4; d <= 4; d++) {
+                        int xx = (pass & 1) == 0 ? Math.clamp(x + d, 0, size - 1) : x;
+                        int yy = (pass & 1) == 0 ? y : Math.clamp(y + d, 0, size - 1);
+                        int color = colors[yy * size + xx];
+                        r += color >>> 16 & 255; g += color >>> 8 & 255; b += color & 255; count++;
+                    }
+                    blurred[y * size + x] = 0xFF000000 | r / count << 16 | g / count << 8 | b / count;
+                }
+                colors = blurred;
+            }
+            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+                PlatformTextures.setColorArgb(ambient.image(), x, y, colors[y * size + x]);
+            PlatformTextures.upload(ambientTexture);
+            ambientSequence = uploadedSequence;
+        }
+        void destroyGpu() {
+            for (RoundedFrame frame : rounded.values()) PlatformTextures.retireEffectMask(frame.id);
+            rounded.clear();
+            if (state != null) destroy(state);
+            if (ambient != null) destroy(ambient);
+            state = null; ambient = null; videoTexture = null; ambientTexture = null;
+            pixels = null; palette = null; uploadedSequence = 0; ambientSequence = 0;
+        }
     }
 
     public enum Fallback {
@@ -968,64 +1323,81 @@ public final class CoverArtTexture implements AutoCloseable {
     private static final AtomicLong COVER_GENERATION = new AtomicLong();
 
     private static final class FluidBackdrop implements AutoCloseable {
-        private static final int SIZE = 96;
-        private static final int MAX_COMPOSITE = 1024;
-        private static final long FRAME_NANOS = 33_333_333L;
+        private static final int SIZE = KawarpRaster.SIZE, MAX_COMPOSITE = 1024;
         private static final AtomicLong COMPOSITE_GENERATION = new AtomicLong();
-        private static final double MAX_HUE_SHIFT = 80.0;
-        private static final double AUTO_HUE_RATE = 150.0;
-        private NativeImage fieldImage;
         private DynamicTexture composite;
-        private Identifier compositeId;
-        private int compositeWidth;
-        private int compositeHeight;
-        private int compositeRadius = -1;
-        private long lastFrame;
-        private long lastMotionFrame;
-        private final double[] animated = new double[18];
-        private final double[] centersX = new double[6];
-        private final double[] centersY = new double[6];
-        private final double[] radiiX = new double[6];
-        private final double[] radiiY = new double[6];
-        private final double[] radiusXSquared = new double[6];
-        private final double[] radiusYSquared = new double[6];
-        private final double[] lobeXSquared = new double[6];
-        private final double[] lobeYSquared = new double[6];
-        private final double[] lobeOffsetX = new double[6];
-        private final double[] lobeOffsetY = new double[6];
+        private Identifier compositeId, sourceId;
+        private int compositeWidth, compositeHeight, compositeRadius = -1, preparedBlur = -1;
         private BackdropSamplingPlan samplingPlan;
-        private int animatedColors;
-        private boolean initialized;
-        private double motionTime;
-        private double hueShift;
-        private double bloomGlow;
-        private double centroidSmooth = .5;
+        private long lastFrame, lastSource, transitionStarted;
+        private double motionTime, currentSpeed, hueShift, bloomGlow;
+        private float[] current, previous;
+        private final int[] frame = new int[SIZE * SIZE];
 
-        private void draw(GuiGraphicsExtractor context, int x, int y, int width, int height, int[] palette,
-                          double speedMultiplier, double opacity, int cornerRadius,
-            BackdropFx fx) {
-            ensureField();
+        private void draw(GuiGraphicsExtractor context, int x, int y, int width, int height, TextureState source, int blurStrength,
+                          double speedMultiplier, double opacity, int cornerRadius, BackdropFx fx) {
+            speedMultiplier = Double.isFinite(speedMultiplier) ? Math.clamp(speedMultiplier, 0, 8) : 0;
             long now = System.nanoTime();
-            boolean animate = lastFrame == 0 || now - lastFrame >= FRAME_NANOS
-                    || width != compositeWidth || height != compositeHeight;
+            boolean changed = sourceId == null || !sourceId.equals(source.id()) || preparedBlur != blurStrength;
+            boolean animatedSource = source.id().getPath().contains("motion");
+            if (changed || animatedSource && now - lastSource >= 200_000_000L) {
+                if (changed && current != null) {
+                    double blend = Math.clamp((now - transitionStarted) / 1_000_000_000.0, 0, 1);
+                    if (previous != null && blend < 1) {
+                        for (int i = 0; i < current.length; i++) current[i] = (float) (previous[i] + (current[i] - previous[i]) * blend);
+                    }
+                    previous = current; transitionStarted = now;
+                }
+                current = prepare(source, switch (blurStrength) { case 0 -> 1; case 1 -> 4; case 3 -> 12; default -> 8; });
+                preparedBlur = blurStrength;
+                sourceId = source.id(); lastSource = now;
+            }
+            boolean animate = changed || lastFrame == 0 || now - lastFrame >= 33_333_333L;
             if (animate) {
-                double aspect = height <= 0 ? 1 : Math.clamp(width / (double) height, .55, 2.2);
-                updateField(palette, now, Math.clamp(speedMultiplier, 0.0, 8.0), aspect, fx);
+                double delta = lastFrame == 0 ? 0 : Math.clamp((now - lastFrame) / 1_000_000_000.0, 0, .1);
+                if (speedMultiplier <= 0) currentSpeed = 0;
+                else currentSpeed += (speedMultiplier - currentSpeed) * (1 - Math.exp(-delta * 3.0776));
+                motionTime += delta * currentSpeed;
+                double blend = previous == null ? 1 : Math.clamp((now - transitionStarted) / 1_000_000_000.0, 0, 1);
+                KawarpRaster.render(previous, current, blend, motionTime, frame);
+                if (blend >= 1) previous = null;
+                hueShift = fx.hueAuto() ? (hueShift + fx.huePulse() * 150 * delta) % 360 : fx.huePulse() * 80;
+                bloomGlow += (fx.bloomPulse() - bloomGlow) * (1 - Math.exp(-delta * 5));
+                for (int py = 0; py < SIZE; py++) for (int px = 0; px < SIZE; px++) {
+                    int color = frame[py * SIZE + px];
+                    if (Math.abs(hueShift) > .01) color = rotateHue(color, hueShift);
+                    if (fx.tint()) color = tint(color, fx.centroid() < .5 ? 0xFFE06020 : 0xFF3090E8,
+                            Math.abs(Math.clamp(fx.centroid(), 0, 1) - .5) * 2 * fx.tintStrength());
+                    if (bloomGlow > .01) {
+                        double lift = 1 + bloomGlow * .25;
+                        color = 0xFF000000 | Math.min(255, (int) ((color >>> 16 & 255) * lift)) << 16
+                                | Math.min(255, (int) ((color >>> 8 & 255) * lift)) << 8 | Math.min(255, (int) ((color & 255) * lift));
+                    }
+                    frame[py * SIZE + px] = color;
+                }
+                lastFrame = now;
             }
             resizeComposite(width, height);
-            if (animate || composite == null || compositeRadius != cornerRadius) {
-                compositeField(width, height, cornerRadius);
-            }
-            PlatformTextures.draw(context, compositeId, x, y, width, height,
-                    0, 0, compositeWidth, compositeHeight,
+            if (animate || compositeRadius != cornerRadius) compositeField(width, height, cornerRadius);
+            PlatformTextures.draw(context, compositeId, x, y, width, height, 0, 0, compositeWidth, compositeHeight,
                     compositeWidth, compositeHeight, opacity, 1);
         }
 
-        private void ensureField() {
-            if (fieldImage != null) return;
-            // The 96 px field is a CPU-only source for the display-size composite. Registering
-            // and uploading it as a second GPU texture performed work that was never sampled.
-            fieldImage = new NativeImage(SIZE, SIZE, true);
+        private static float[] prepare(TextureState source, int passes) {
+            int[] pixels = new int[SIZE * SIZE];
+            for (int y = 0; y < SIZE; y++) for (int x = 0; x < SIZE; x++) {
+                double sx = (x + .5) * source.width() / SIZE - .5, sy = (y + .5) * source.height() / SIZE - .5;
+                int ix = (int) Math.floor(sx), iy = (int) Math.floor(sy);
+                double tx = sx - ix, ty = sy - iy;
+                int a = PlatformTextures.colorArgb(source.image(), Math.clamp(ix, 0, source.width() - 1), Math.clamp(iy, 0, source.height() - 1));
+                int b = PlatformTextures.colorArgb(source.image(), Math.clamp(ix + 1, 0, source.width() - 1), Math.clamp(iy, 0, source.height() - 1));
+                int c = PlatformTextures.colorArgb(source.image(), Math.clamp(ix, 0, source.width() - 1), Math.clamp(iy + 1, 0, source.height() - 1));
+                int d = PlatformTextures.colorArgb(source.image(), Math.clamp(ix + 1, 0, source.width() - 1), Math.clamp(iy + 1, 0, source.height() - 1));
+                int color = 0xFF000000;
+                for (int shift = 0; shift < 24; shift += 8) color |= (int) Math.round(bilinear(a >>> shift & 255, b >>> shift & 255, c >>> shift & 255, d >>> shift & 255, tx, ty)) << shift;
+                pixels[y * SIZE + x] = color;
+            }
+            return KawarpRaster.prepare(pixels, SIZE, SIZE, passes);
         }
 
         private void resizeComposite(int width, int height) {
@@ -1034,7 +1406,7 @@ public final class CoverArtTexture implements AutoCloseable {
             if (composite != null && this.compositeWidth == compositeWidth
                     && this.compositeHeight == compositeHeight) return;
             if (composite != null) {
-                Minecraft.getInstance().getTextureManager().release(compositeId);
+                PlatformTextures.retireEffectMask(compositeId);
                 composite = null;
                 compositeId = null;
             }
@@ -1048,12 +1420,11 @@ public final class CoverArtTexture implements AutoCloseable {
             this.samplingPlan = null;
         }
 
-        /** Upscales the 96px field to display resolution and clips it with the popup's
+        /** Upscales the 128px field to display resolution and clips it with the popup's
          *  signed-distance rounding (same SDF as the border), so corners stay crisp. */
         private void compositeField(int width, int height, int cornerRadius) {
-            NativeImage source = fieldImage;
             NativeImage target = composite.getPixels();
-            if (source == null || target == null) return;
+            if (target == null) return;
             int outputWidth = compositeWidth;
             int outputHeight = compositeHeight;
             int radius = cornerRadius;
@@ -1070,10 +1441,10 @@ public final class CoverArtTexture implements AutoCloseable {
                     int x0 = plan.x0[px];
                     int x1 = plan.x1[px];
                     double tx = plan.tx[px];
-                    int c00 = PlatformTextures.colorArgb(source, x0, y0);
-                    int c10 = PlatformTextures.colorArgb(source, x1, y0);
-                    int c01 = PlatformTextures.colorArgb(source, x0, y1);
-                    int c11 = PlatformTextures.colorArgb(source, x1, y1);
+                    int c00 = frame[y0 * SIZE + x0];
+                    int c10 = frame[y0 * SIZE + x1];
+                    int c01 = frame[y1 * SIZE + x0];
+                    int c11 = frame[y1 * SIZE + x1];
                     double r = bilinear(c00 >>> 16 & 255, c10 >>> 16 & 255,
                             c01 >>> 16 & 255, c11 >>> 16 & 255, tx, ty);
                     double g = bilinear(c00 >>> 8 & 255, c10 >>> 8 & 255,
@@ -1096,166 +1467,13 @@ public final class CoverArtTexture implements AutoCloseable {
             return top + (bottom - top) * ty;
         }
 
-        private void updateField(int[] palette, long now, double speedMultiplier, double aspect,
-                            BackdropFx fx) {
-            NativeImage image = fieldImage;
-            if (image == null) return;
-            boolean firstMotionFrame = lastMotionFrame == 0;
-            double delta = firstMotionFrame ? .08
-                    : Math.clamp((now - lastMotionFrame) / 1_000_000_000.0, .01, .25);
-            lastMotionFrame = now;
-            double effectDelta = firstMotionFrame ? .016 : delta;
-            if (fx.hueAuto()) {
-                hueShift = (hueShift + Math.clamp(fx.huePulse(), 0, 1) * AUTO_HUE_RATE * effectDelta) % 360;
-            } else {
-                double targetHue = Math.clamp(fx.huePulse(), 0, 1) * MAX_HUE_SHIFT;
-                hueShift += (targetHue - hueShift) * (1 - Math.exp(-effectDelta * 5));
-            }
-            // Fast attack on each beat, slow release so the glow lingers after it.
-            double targetGlow = Math.clamp(fx.bloomPulse(), 0, 3);
-            double response = targetGlow > bloomGlow
-                    ? 1 - Math.exp(-effectDelta * 6)
-                    : 1 - Math.exp(-effectDelta * 1.4);
-            bloomGlow += (targetGlow - bloomGlow) * response;
-            motionTime += delta * speedMultiplier;
-            int colorCount = Math.clamp(palette.length, 1, 6);
-            boolean neutralPalette = isNeutralPalette(palette);
-            double tintMix = fx.tint()
-                    ? Math.abs(Math.clamp(fx.centroid(), 0, 1) - .5) * 2 * Math.clamp(fx.tintStrength(), 0, 3)
-                    : 0;
-            int tintColor = fx.centroid() < .5 ? 0xFFE06020 : 0xFF3090E8;
-            for (int index = 0; index < colorCount; index++) {
-                int color = tint(rotateHue(palette[index], hueShift), tintColor, tintMix);
-                int offset = index * 3;
-                double targetR = color >>> 16 & 255;
-                double targetG = color >>> 8 & 255;
-                double targetB = color & 255;
-                if (!initialized || index >= animatedColors || neutralPalette) {
-                    animated[offset] = targetR;
-                    animated[offset + 1] = targetG;
-                    animated[offset + 2] = targetB;
-                } else {
-                    double blend = 1 - Math.exp(-delta * 2.7);
-                    animated[offset] += (targetR - animated[offset]) * blend;
-                    animated[offset + 1] += (targetG - animated[offset + 1]) * blend;
-                    animated[offset + 2] += (targetB - animated[offset + 2]) * blend;
-                }
-            }
-            double targetCentroid = Math.clamp(fx.centroid(), 0, 1);
-            centroidSmooth += (targetCentroid - centroidSmooth) * (1 - Math.exp(-delta * 6));
-            initialized = true;
-            animatedColors = colorCount;
-            double time = motionTime;
-            for (int index = 0; index < colorCount; index++) {
-                double angle = Math.PI * 2 * index / colorCount + index * .37;
-                double direction = index % 2 == 0 ? 1 : -1;
-                double drift = time * (.34 + index * .047) * direction;
-                double orbit = index == 0 ? .16 : .28 + (index % 3) * .045;
-                centersX[index] = .5 + orbit * Math.sin(angle + drift)
-                        + .075 * Math.sin(time * (.73 + index * .035) + index * 2.13);
-                centersY[index] = .5 + orbit * .82 * Math.cos(angle * 1.11 - drift * .87)
-                        + .068 * Math.cos(time * (.61 + index * .043) + index * 1.71);
-                radiiX[index] = (index == 0 ? .48 : .27 + (index % 3) * .038)
-                        + .085 * Math.sin(time * (.58 + index * .052) + index * 1.29);
-                radiiY[index] = (index == 0 ? .55 : .32 + (index % 2) * .055)
-                        + .096 * Math.cos(time * (.49 + index * .061) + index * 1.53);
-                radiusXSquared[index] = radiiX[index] * radiiX[index];
-                radiusYSquared[index] = radiiY[index] * radiiY[index];
-                lobeXSquared[index] = radiusXSquared[index] * .68;
-                lobeYSquared[index] = radiusYSquared[index] * .66;
-                lobeOffsetX[index] = .16 * Math.sin(time * (.88 + index * .047) + index * 1.93);
-                lobeOffsetY[index] = .18 * Math.cos(time * (.74 + index * .039) + index * 1.47);
-            }
-            int baseColor = tint(rotateHue(backdropBaseColor(palette), hueShift), tintColor, tintMix);
-            double baseRed = baseColor >>> 16 & 255;
-            double baseGreen = baseColor >>> 8 & 255;
-            double baseBlue = baseColor & 255;
-            for (int py = 0; py < SIZE; py++) {
-                double v = py / (double) (SIZE - 1);
-                for (int px = 0; px < SIZE; px++) {
-                    double u = px / (double) (SIZE - 1);
-                    double radialX = u - .5;
-                    double radialY = v - .5;
-                    double radial = Math.sqrt(radialX * radialX + radialY * radialY);
-                    double swirl = .24 * Math.sin(time * .72 + radial * 9.0);
-                    double sinSwirl = Math.sin(swirl);
-                    double cosSwirl = Math.cos(swirl);
-                    double spunU = .5 + radialX * cosSwirl - radialY * sinSwirl;
-                    double spunV = .5 + radialX * sinSwirl + radialY * cosSwirl;
-                    double warpedU = spunU + .082 * Math.sin(spunV * Math.PI * 2.0 + time * 1.08)
-                            + .034 * Math.sin((spunU + spunV) * Math.PI * 4.0 - time * 1.42);
-                    double warpedV = spunV + .074 * Math.sin(spunU * Math.PI * 2.0 - time * .94)
-                            + .031 * Math.cos((spunU - spunV) * Math.PI * 5.0 + time * 1.27);
-                    double total = .72;
-                    double red = baseRed * total;
-                    double green = baseGreen * total;
-                    double blue = baseBlue * total;
-                    for (int index = 0; index < colorCount; index++) {
-                        double dx = (warpedU - centersX[index]) * aspect;
-                        double dy = warpedV - centersY[index];
-                        double mainField = Math.exp(-1.92 * (dx * dx / radiusXSquared[index]
-                                + dy * dy / radiusYSquared[index]));
-                        double lobeX = dx + lobeOffsetX[index];
-                        double lobeY = dy - lobeOffsetY[index];
-                        double lobeField = .78 * Math.exp(-2.48 * (lobeX * lobeX / lobeXSquared[index]
-                                + lobeY * lobeY / lobeYSquared[index]));
-                        double ripple = .10 * Math.sin((dx * 5.2 - dy * 4.4) * Math.PI
-                                + time * (1.35 + index * .11));
-                        double field = Math.clamp(mainField + lobeField + ripple * mainField, 0, 1.48);
-                        double weight = Math.pow(field, 1.20) * (index == 0 ? 2.85 : 2.35);
-                        int offset = index * 3;
-                        red += animated[offset] * weight;
-                        green += animated[offset + 1] * weight;
-                        blue += animated[offset + 2] * weight;
-                        total += weight;
-                    }
-                    double vignette = Math.clamp((u - .5) * (u - .5) + (v - .5) * (v - .5), 0, .5);
-                    double flowLight = .045 * Math.sin((warpedU * 2.7 + warpedV * 1.8) * Math.PI
-                            + time * 1.18);
-                    double light = .94 - vignette * .38 + flowLight;
-                    if (bloomGlow > .01) {
-                        double bloom = bloomGlow
-                                * (.22 + .78 * Math.exp(-radial * 3.8));
-                        light += bloom * .55;
-                    }
-                    int r = Math.clamp((int) Math.round(red / total * light), 0, 255);
-                    int g = Math.clamp((int) Math.round(green / total * light), 0, 255);
-                    int b = Math.clamp((int) Math.round(blue / total * light), 0, 255);
-                    image.setPixelABGR(px, py, 255 << 24 | b << 16 | g << 8 | r);
-                }
-            }
-            lastFrame = now;
-        }
 
-        private static double roundedRectDistance(double x, double y, double halfWidth,
-                                                  double halfHeight, double radius) {
-            double qx = Math.abs(x - halfWidth) - Math.max(0, halfWidth - radius);
-            double qy = Math.abs(y - halfHeight) - Math.max(0, halfHeight - radius);
-            double outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
-            return outside + Math.min(Math.max(qx, qy), 0) - radius;
-        }
-
-        @Override
-        public void close() {
-            if (fieldImage != null) fieldImage.close();
-            if (compositeId != null) {
-                Minecraft.getInstance().getTextureManager().release(compositeId);
-            }
-            fieldImage = null;
-            composite = null;
-            compositeId = null;
-            compositeWidth = 0;
-            compositeHeight = 0;
-            compositeRadius = -1;
-            samplingPlan = null;
-            initialized = false;
-            animatedColors = 0;
-            lastFrame = 0;
-            lastMotionFrame = 0;
-            motionTime = 0;
-            hueShift = 0;
-            bloomGlow = 0;
-            centroidSmooth = .5;
+        @Override public void close() {
+            if (compositeId != null) PlatformTextures.retireEffectMask(compositeId);
+            composite = null; compositeId = null; sourceId = null;
+            current = null; previous = null; samplingPlan = null;
+            compositeWidth = compositeHeight = 0; compositeRadius = -1;
+            lastFrame = lastSource = 0; motionTime = currentSpeed = hueShift = bloomGlow = 0;
         }
     }
 

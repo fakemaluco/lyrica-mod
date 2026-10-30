@@ -7,6 +7,107 @@ import static org.assertj.core.data.Offset.offset;
 
 class LyricsAnimationTest {
     @Test
+    void lineScrollTrailStaggersFollowingRowsAndCapsTheDelayAtFourRows() {
+        var trail = new LyricsAnimation.ScrollTrail();
+        trail.record(1_000_000_000L, 0, 2, true);
+        trail.record(1_050_000_000L, 10, 2, false);
+        trail.record(1_100_000_000L, 20, 2, false);
+        trail.record(1_200_000_000L, 40, 2, false);
+        assertThat(trail.offset(1)).isZero();
+        assertThat(trail.offset(2)).isZero();
+        assertThat(trail.offset(3)).isCloseTo(10, offset(1E-12));
+        assertThat(trail.offset(4)).isCloseTo(20, offset(1E-12));
+        assertThat(trail.offset(6)).isCloseTo(40, offset(1E-12));
+        assertThat(trail.offset(60)).isEqualTo(trail.offset(6));
+    }
+
+    @Test
+    void reverseScrollTrailsInTheOppositeDirectionAndManualSeekClearsTheDelay() {
+        var trail = new LyricsAnimation.ScrollTrail();
+        trail.record(1_000_000_000L, 40, 3, true);
+        trail.record(1_050_000_000L, 30, 3, false);
+        assertThat(trail.offset(4)).isZero();
+        assertThat(trail.offset(2)).isEqualTo(-10);
+        trail.record(1_100_000_000L, 200, 10, true);
+        assertThat(trail.offset(0)).isZero();
+        assertThat(trail.offset(20)).isZero();
+    }
+
+    @Test
+    void referenceWordAndHeldLetterSplinesKeepTheOriginalKnots() {
+        assertThat(LyricsAnimation.spicyScaleTarget(0, false)).isEqualTo(.95);
+        assertThat(LyricsAnimation.spicyScaleTarget(.7, false)).isCloseTo(1.0505, offset(1E-12));
+        assertThat(LyricsAnimation.spicyScaleTarget(.7, true)).isCloseTo(1.175, offset(1E-12));
+        assertThat(LyricsAnimation.spicyScaleTarget(1, true)).isEqualTo(1);
+        assertThat(LyricsAnimation.spicyElevationTarget(0, false)).isEqualTo(-.01);
+        assertThat(LyricsAnimation.spicyElevationTarget(.9, false)).isCloseTo(1.0 / 60, offset(1E-12));
+        assertThat(LyricsAnimation.spicyElevationTarget(.9, true)).isCloseTo(2.0 / 56, offset(1E-12));
+        assertThat(LyricsAnimation.spicyElevationTarget(1, true)).isZero();
+        for (boolean letter : new boolean[]{false, true}) {
+            double knot = .7, delta = 1E-6;
+            double centre = LyricsAnimation.spicyScaleTarget(knot, letter);
+            double leftSlope = (centre - LyricsAnimation.spicyScaleTarget(knot - delta, letter)) / delta;
+            double rightSlope = (LyricsAnimation.spicyScaleTarget(knot + delta, letter) - centre) / delta;
+            assertThat(leftSlope).isCloseTo(rightSlope, offset(.0001));
+        }
+    }
+
+    @Test
+    void wordsRiseAndHeldLettersKeepSettlingAfterTheirTimingEnds() {
+        var word = new LyricsAnimation.ElementMotion(false);
+        var letter = new LyricsAnimation.ElementMotion(true);
+        for (int frame = 0; frame < 120; frame++) {
+            double progress = frame / 120.0;
+            word.update(progress, true, 1 / 60.0);
+            letter.update(progress, true, 1 / 60.0);
+        }
+        assertThat(word.elevation()).isPositive();
+        assertThat(letter.elevation()).isGreaterThan(word.elevation());
+        double previous = letter.elevation();
+        letter.update(1, true, 1 / 60.0);
+        assertThat(Math.abs(letter.elevation() - previous)).isLessThan(.01);
+        for (int frame = 0; frame < 360; frame++) letter.update(1, true, 1 / 60.0);
+        assertThat(letter.elevation()).isCloseTo(0, offset(.0001));
+        assertThat(letter.scale()).isCloseTo(1, offset(.0001));
+        assertThat(letter.glow()).isCloseTo(0, offset(.0001));
+    }
+
+    @Test
+    void reducedMotionImmediatelyRestoresGeometryWithoutAHiddenSpringTail() {
+        var letter = new LyricsAnimation.ElementMotion(true);
+        for (int frame = 0; frame < 60; frame++) letter.update(.7, true, 1 / 60.0);
+        assertThat(letter.scale()).isGreaterThan(1);
+        letter.update(.7, false, 0);
+        assertThat(letter.scale()).isEqualTo(1);
+        assertThat(letter.elevation()).isZero();
+        assertThat(letter.glow()).isZero();
+    }
+
+    @Test
+    void seekDropsThePreviousWordVelocityAndSamplesTheDestinationPose() {
+        var letter = new LyricsAnimation.ElementMotion(true);
+        for (int frame = 0; frame < 60; frame++) letter.update(.7, true, 1 / 60.0);
+        letter.reset(0, true);
+        assertThat(letter.scale()).isEqualTo(.95);
+        assertThat(letter.elevation()).isEqualTo(-.02);
+        assertThat(letter.glow()).isZero();
+        letter.reset(1, true);
+        assertThat(letter.scale()).isEqualTo(1);
+        assertThat(letter.elevation()).isZero();
+    }
+
+    @Test
+    void referencePoseSpringsAreIndependentOfTheSelectedFrameRate() {
+        var thirty = new LyricsAnimation.ElementMotion(true);
+        var oneTwenty = new LyricsAnimation.ElementMotion(true);
+        for (int frame = 0; frame < 30; frame++) thirty.update(.7, true, 1 / 30.0);
+        for (int frame = 0; frame < 120; frame++) oneTwenty.update(.7, true, 1 / 120.0);
+        assertThat(thirty.scale()).isCloseTo(oneTwenty.scale(), offset(1E-10));
+        assertThat(thirty.elevation()).isCloseTo(oneTwenty.elevation(), offset(1E-10));
+        assertThat(thirty.glow()).isCloseTo(oneTwenty.glow(), offset(1E-10));
+    }
+
+    @Test
     void spicyGlowMatchesTheReferenceKnotsAndHasAContinuousHeldWordCurve() {
         assertThat(LyricsAnimation.spicyGlowTarget(-.5)).isZero();
         assertThat(LyricsAnimation.spicyGlowTarget(0)).isZero();

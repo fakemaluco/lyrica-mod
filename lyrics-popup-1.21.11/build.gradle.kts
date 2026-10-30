@@ -41,6 +41,11 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
     from(rootProject.file("lyrics-popup/src/version/1.21.11/java"))
     from(rootProject.file("mod/src/main/java")) {
         include("dev/fandroid/client/music/LyricsAnimation.java")
+        include("dev/fandroid/client/music/KawarpRaster.java")
+        include("dev/fandroid/client/music/GlassButtonRaster.java")
+        include("dev/fandroid/client/music/ResponsiveLyricsLayout.java")
+        include("dev/fandroid/client/music/CanvasPopupLayout.java")
+        include("dev/fandroid/client/music/RoundedVideoRaster.java")
         include("dev/fandroid/client/music/UnavailableLyricsTransition.java")
         include("dev/fandroid/client/music/LyricsEffectRaster.java")
         include("dev/fandroid/client/music/LyricsEffectCache.java")
@@ -52,6 +57,9 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
         include("dev/fandroid/client/music/WorldLyricsPlacement.java")
         include("dev/fandroid/client/music/WorldLyricsMotion.java")
         include("dev/fandroid/client/music/WorldLyricsLayout.java")
+        include("dev/fandroid/client/music/WorldLyricsExperience.java")
+        include("dev/fandroid/client/music/WorldLyricsSpace.java")
+        include("dev/fandroid/client/music/WorldLyricsLights.java")
         include("dev/fandroid/client/music/LyricsViewport.java")
         include("dev/fandroid/client/music/ManualLyricsScroll.java")
         include("dev/fandroid/client/music/SpringValue.java")
@@ -61,6 +69,7 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
         include("dev/fandroid/client/music/**")
         include("dev/fandroid/client/ui/LyricsOverlay.java")
         include("dev/fandroid/client/ui/PopupIcons.java")
+        include("dev/fandroid/client/ui/LiquidGlass.java")
         include("dev/fandroid/client/ui/RetroDraw.java")
         include("dev/fandroid/client/ui/RoundedGui.java")
         include("dev/fandroid/client/ui/GoogleFontScreen.java")
@@ -89,6 +98,7 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
         include("dev/fandroid/client/ui/GuiTransform.java")
         include("dev/fandroid/client/ui/PlatformTextStyles.java")
         include("dev/fandroid/client/ui/FanDroidScreenBase.java")
+        include("dev/fandroid/client/ui/SettingsButtonBase.java")
         include("dev/fandroid/client/ui/PlatformCursor.java")
         filter { line: String -> line.replace("fandroid", "relaylyrics") }
     }
@@ -108,6 +118,9 @@ sourceSets.main {
 sourceSets.test { java.setSrcDirs(listOf(rootProject.file("lyrics-popup/src/test/java"))) }
 
 dependencies {
+    modCompileOnly("dev.lambdaurora.lambdynamiclights:lambdynamiclights-api:4.9.1+1.21.11")
+    implementation(project(":lyrics-engine"))
+    include(project(":lyrics-engine"))
     minecraft("com.mojang:minecraft:$minecraftVersion")
     mappings("net.fabricmc:yarn:$yarnMappings:v2")
     modImplementation("net.fabricmc:fabric-loader:${property("loader_version")}")

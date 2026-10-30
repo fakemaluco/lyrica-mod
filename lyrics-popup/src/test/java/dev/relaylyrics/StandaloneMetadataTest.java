@@ -12,12 +12,12 @@ final class StandaloneMetadataTest {
     private static final String[] OPTIONAL_COMPATIBILITY_MODS = {
             "modmenu", "controlify", "minecraft-cursor", "cursors_extended",
             "mousetweaks", "emi", "roughlyenoughitems", "iris", "sodium",
-            "immediatelyfast", "xaerominimap", "appleskin"
+            "immediatelyfast", "xaerominimap", "appleskin", "lambdynlights"
     };
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
-    void exposesOnlyClientAndModMenuEntrypoints() throws Exception {
+    void exposesClientSettingsAndOptionalLightingEntrypoints() throws Exception {
         try (InputStream stream = getClass().getResourceAsStream("/fabric.mod.json")) {
             assertThat(stream).isNotNull();
             JsonNode metadata = mapper.readTree(stream);
@@ -27,6 +27,8 @@ final class StandaloneMetadataTest {
             assertThat(metadata.path("entrypoints").has("modmenu")).isTrue();
             assertThat(metadata.path("entrypoints").has("main")).isFalse();
             assertThat(metadata.path("entrypoints").has("voicechat")).isFalse();
+            assertThat(metadata.path("entrypoints").path("lambdynlights:initializer").get(0).path("adapter").asText()).isEqualTo("lyrica_optional_lighting");
+            assertThat(metadata.path("languageAdapters").has("lyrica_optional_lighting")).isTrue();
         }
     }
 

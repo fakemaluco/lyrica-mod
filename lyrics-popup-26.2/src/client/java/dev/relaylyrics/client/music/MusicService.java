@@ -16,6 +16,8 @@ import dev.relaylyrics.protocol.music.MusicConnector;
 import dev.relaylyrics.protocol.music.PlaybackSnapshot;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import dev.lyrica.engine.DesktopMotionArtworkEngine;
+import dev.lyrica.engine.DesktopArtistArtworkEngine;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -26,7 +28,24 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public final class MusicService implements AutoCloseable {
     private final MusicConnector connector;
-    private final SpicyLyricsApiClient spicyApi = new SpicyLyricsApiClient();
+    private final DesktopMotionArtworkEngine motionEngine;
+    private final DesktopArtistArtworkEngine artistEngine;
+    private CompletableFuture<String> artistLookup;
+    private String artistTrackKey;
+    private long artistGeneration;
+    private volatile CompletableFuture<DesktopMotionArtworkEngine.Result> motionLookup;
+    private String motionTrackKey;
+    private static final long[] MOTION_RETRY_DELAYS = {15_000, 45_000, 120_000, 120_000};
+    private long motionNextRetryMillis;
+    private int motionRetryCount;
+    private boolean motionMissing, motionForceRefresh;
+    private String motionCanvasUrl, motionCoverUrl;
+    private long motionGeneration;
+    private volatile String motionDiagnostics = "";
+    private final MultiSourceLyricsClient lyricsClient;
+    private volatile String sourceDiagnostics = "";
+    private volatile boolean closed;
+    private volatile CompletableFuture<MultiSourceLyricsClient.Result> remoteLookup;
     private final SecureTtmlParser ttmlParser = new SecureTtmlParser();
     private final SpicyLyricsParser spicyParser = new SpicyLyricsParser();
     private final Path importsFolder = FabricLoader.getInstance().getConfigDir().resolve("relaylyrics/lyrics/imports");
@@ -47,6 +66,7 @@ public final class MusicService implements AutoCloseable {
     private volatile String importsPendingKey;
     private volatile String importedLyricsKey;
     private volatile String spicyLyricsKey;
+    private volatile String preferredLyricsKey;
     private volatile List<ImportedLyricsClient.Candidate> importCandidates = List.of();
     private volatile String lyricsStatus = "Start playback to find lyrics";
     private volatile String artworkTrackKey;
@@ -55,6 +75,9 @@ public final class MusicService implements AutoCloseable {
     public MusicService(LyricsOverlay overlay, ClientPreferences preferences) {
         this.overlay = overlay;
         this.preferences = preferences;
+        lyricsClient = new MultiSourceLyricsClient(importsFolder.resolveSibling("sources"));
+        motionEngine = new DesktopMotionArtworkEngine(importsFolder.resolveSibling("motion").toFile());
+        artistEngine = new DesktopArtistArtworkEngine(importsFolder.resolveSibling("artist-artwork").toFile());
         String executable = System.getProperty("os.name", "").toLowerCase().contains("win")
                 ? "relaylyrics-media-bridge.exe" : "relaylyrics-media-bridge";
         Path directory = FabricLoader.getInstance().getConfigDir().resolve("relaylyrics/bin");
@@ -65,23 +88,9 @@ public final class MusicService implements AutoCloseable {
         } catch (Exception exception) {
             FanDroidMod.LOGGER.warn("Could not install the bundled media bridge", exception);
         }
-        Path hotUpdate = directory.resolve("relaylyrics-media-bridge-next.exe");
-        Path newestUpdate = directory.resolve("relaylyrics-media-bridge-update.exe");
-        Path musicTwoUpdate = directory.resolve("relaylyrics-media-bridge-v2.exe");
-        if (System.getProperty("os.name", "").toLowerCase().contains("win")
-                && Files.isRegularFile(musicTwoUpdate)) {
-            path = musicTwoUpdate;
-        } else if (System.getProperty("os.name", "").toLowerCase().contains("win")
-                && Files.isRegularFile(newestUpdate)) {
-            path = newestUpdate;
-        } else if (System.getProperty("os.name", "").toLowerCase().contains("win")
-                && Files.isRegularFile(hotUpdate)) {
-            path = hotUpdate;
-        }
         connector = MediaBridgeConnector.start(path);
         spotifyAccount = new SpotifyAccountClient(preferences, this::update,
-                () -> !(connector instanceof MediaBridgeConnector bridge)
-                        || (!bridge.spicetifyConnected() && !bridge.youtubeConnected()));
+                () -> !hasPlayingSystemMedia());
         connector.subscribe(value -> {
             if (!spotifyAccount.shouldOverrideBridge()) update(value);
         });
@@ -126,9 +135,12 @@ public final class MusicService implements AutoCloseable {
     public String spotifyTrackMatchStatus() { return spotifyAccount.matchStatus(); }
     public String spotifyAccountStatus() { return spotifyAccount.status(); }
 
-    private void update(PlaybackSnapshot value) {
+    private synchronized void update(PlaybackSnapshot value) {
+        if (closed) return;
         snapshot.set(value);
         clock.update(value);
+        updateMotionArtwork(value);
+        updateArtistArtwork(value);
         String currentArtworkKey = value.spotifyUri() == null || value.spotifyUri().isBlank()
                 ? String.valueOf(value.title()) + '\n' + value.artist() : value.spotifyUri();
         boolean changedTrack = !currentArtworkKey.equals(artworkTrackKey);
@@ -154,6 +166,7 @@ public final class MusicService implements AutoCloseable {
         overlay.setPlayback(value);
         if (value.title() == null || value.title().equals("Nothing playing")) {
             lookupKey = null;
+            if (remoteLookup != null) remoteLookup.cancel(true);
             lookupTrackKey = null;
             lookupCredentialGeneration = spotifyAccount.credentialGeneration();
             nextLookupRetryMillis = 0;
@@ -194,6 +207,9 @@ public final class MusicService implements AutoCloseable {
         importedLyricsKey = null;
         spicyLyricsKey = null;
         importCandidates = List.of();
+        CompletableFuture<?> previousLookup = remoteLookup;
+        if (previousLookup != null) previousLookup.cancel(true);
+        sourceDiagnostics = "";
         overlay.beginLookup();
         lyricsStatus = "Finding lyrics...";
         refreshIdleArtworkFallback();
@@ -204,63 +220,187 @@ public final class MusicService implements AutoCloseable {
         CompletableFuture.runAsync(() -> beginSourceLookup(value, key, spotifyId));
     }
 
-    private void beginSourceLookup(PlaybackSnapshot value, String key, String spotifyId) {
-        ImportedLyricsClient.SearchResult imported = importedLyrics.find(value);
-        if (!key.equals(lookupKey)) return;
-        importsPendingKey = null;
-        importCandidates = imported.candidates();
-        if (imported.match().isPresent()) {
-            applyImported(imported.match().get(), key);
-            return;
-        }
-        if (!importCandidates.isEmpty()) {
-            lyricsStatus = "Choose an imported TTML match";
-        } else {
-            lyricsStatus = "Finding lyrics...";
-        }
-        List<String> resolvedIds = spotifyAccount.resolveTrackIds(value);
-        if (!key.equals(lookupKey)) return;
-        if (resolvedIds.isEmpty() && spotifyAccount.matchStatus().startsWith("Spotify search HTTP ")) {
-            nextLookupRetryMillis = System.currentTimeMillis() + 60_000;
-        }
-        String resolvedId = resolvedIds.isEmpty() ? null : resolvedIds.getFirst();
-        if (spotifyId == null && resolvedId != null) {
-            FanDroidMod.LOGGER.info("Resolved music metadata to Spotify track {}", resolvedId);
-        }
-        String resolvedUri = resolvedId == null ? value.spotifyUri() : "spotify:track:" + resolvedId;
-        if (resolvedId != null && prefersSpicetifyLyrics()) {
-            loadCachedSpicy(resolvedUri, key, resolvedId);
-        }
-        beginNetworkLookup(key, resolvedIds, 0);
+    /** Settings changes reuse the current song; no playback or lyric lookup is restarted. */
+    public synchronized void refreshMotionArtwork() {
+        motionForceRefresh = true;
+        motionTrackKey = null;
+        updateMotionArtwork(snapshot());
     }
 
-    private void beginNetworkLookup(String key, List<String> spotifyIds, int index) {
-        if (!stillNeedsFallback(key)) return;
-        if (index >= spotifyIds.size()) {
-            markUnavailable(spotifyIds.isEmpty() ? "Spotify track ID unavailable" : "No lyrics in Spicy Lyrics");
-            return;
-        }
-        lyricsStatus = "Searching Spicy Lyrics...";
-        String spotifyId = spotifyIds.get(index);
-        spicyApi.find(spotifyId).thenAccept(result -> {
-            if (!stillNeedsFallback(key)) return;
-            if (result.payload().isPresent()) {
-                parseAndApplySpicy(new SpicetifyLyricsPayload("spotify:track:" + spotifyId, "spicy-json",
-                        new String(result.payload().get(), StandardCharsets.UTF_8), "Spicy Lyrics API"), key, true);
-            } else if (result.status() == SpicyLyricsApiClient.Status.NOT_FOUND
-                    && index + 1 < spotifyIds.size()) {
-                beginNetworkLookup(key, spotifyIds, index + 1);
-            } else if (result.status() == SpicyLyricsApiClient.Status.FAILED
-                    || result.status() == SpicyLyricsApiClient.Status.MISSING_KEY) {
-                if (result.message().contains("rate limit") || result.message().contains("connection failed")
-                        || result.message().contains("HTTP 5")) {
-                    nextLookupRetryMillis = System.currentTimeMillis() + 60_000;
-                }
-                markLookupError(result.message());
-            } else {
-                markUnavailable(result.message());
+    public synchronized void refreshBackgroundArtwork() {
+        artistTrackKey = null; updateArtistArtwork(snapshot());
+    }
+    private void updateArtistArtwork(PlaybackSnapshot track) {
+        boolean wanted = preferences.isLyricsDynamicBackground() && preferences.isLyricsArtistBackground();
+        boolean meaningful = track.title() != null && !track.title().isBlank() && !track.title().equals("Nothing playing");
+        String key = wanted && meaningful ? String.join("\n", String.valueOf(track.spotifyUri()), track.title(), String.valueOf(track.artist())) : "off";
+        if (key.equals(artistTrackKey)) return;
+        artistTrackKey = key; long token = ++artistGeneration;
+        if (artistLookup != null) artistLookup.cancel(true);
+        artwork.configureArtist(null);
+        if (!wanted || !meaningful || closed) return;
+        artistLookup = artistEngine.find(track.title(), java.util.Objects.toString(track.artist(), ""),
+                java.util.Objects.toString(track.album(), ""), track.durationMillis(), SpicyLyricsApiClient.spotifyTrackId(track.spotifyUri()));
+        artistLookup.thenAccept(url -> {
+            synchronized (this) {
+                if (!closed && token == artistGeneration) artwork.configureArtist(url);
             }
         });
+    }
+
+    public String motionArtworkStatus() {
+        String decoder = artwork.motionStatus();
+        return motionDiagnostics.isBlank() ? decoder : decoder + " — " + motionDiagnostics;
+    }
+
+    private synchronized void updateMotionArtwork(PlaybackSnapshot track) {
+        artwork.setMotionPlaying(track.playing());
+        boolean allow = preferences.isLyricsAnimations();
+        boolean canvas = allow && preferences.isSpotifyCanvas();
+        boolean cover = allow && preferences.isAnimatedCovers();
+        boolean background = allow && preferences.isCanvasBackground();
+        boolean meaningful = track.title() != null && !track.title().isBlank()
+                && !track.title().equals("Nothing playing") && !isSpotifyDjSpeaking(track);
+        String key = meaningful ? String.join("\n", String.valueOf(track.spotifyUri()), track.title(),
+                String.valueOf(track.artist()), String.valueOf(track.album()), Long.toString(track.durationMillis()),
+                Boolean.toString(canvas), Boolean.toString(cover), Boolean.toString(background),
+                Boolean.toString(preferences.isPauseMotionWithMusic())) : "idle";
+        boolean retry = key.equals(motionTrackKey);
+        if (retry && (motionRetryCount >= 3 || motionLookup != null && !motionLookup.isDone()
+                || !(motionMissing || artwork.canvasFailed() || artwork.animatedCoverFailed())
+                || System.currentTimeMillis() < motionNextRetryMillis)) return;
+        if (retry) {
+            motionRetryCount++;
+            if (artwork.canvasFailed()) motionCanvasUrl = null;
+            if (artwork.animatedCoverFailed()) motionCoverUrl = null;
+            artwork.configureMotion(motionCanvasUrl, motionCoverUrl, canvas, cover, background, preferences.isPauseMotionWithMusic());
+        } else {
+            motionRetryCount = 0; motionCanvasUrl = null; motionCoverUrl = null; motionMissing = false;
+            artwork.clearMotion();
+        }
+        motionTrackKey = key;
+        motionNextRetryMillis = Long.MAX_VALUE;
+        long generation = ++motionGeneration;
+        if (motionLookup != null) motionLookup.cancel(true);
+        motionDiagnostics = "";
+        if (!meaningful || !(canvas || cover || background) || closed) return;
+        motionDiagnostics = "Finding Canvas and animated cover";
+        boolean forceRefresh = retry || motionForceRefresh; motionForceRefresh = false;
+        motionLookup = motionEngine.find(track.title(), java.util.Objects.toString(track.artist(), ""),
+                java.util.Objects.toString(track.album(), ""), track.durationMillis(),
+                SpicyLyricsApiClient.spotifyTrackId(track.spotifyUri()), canvas || background, cover, forceRefresh,
+                result -> applyMotionArtwork(generation, result, canvas, cover, background));
+        motionLookup.thenAccept(result -> {
+            synchronized (this) {
+                applyMotionArtwork(generation, result, canvas, cover, background);
+                if (!closed && generation == motionGeneration) motionNextRetryMillis = System.currentTimeMillis() + MOTION_RETRY_DELAYS[motionRetryCount];
+            }
+        })
+                .exceptionally(error -> {
+                    synchronized (this) {
+                        if (!closed && generation == motionGeneration) { motionMissing = true; motionNextRetryMillis = System.currentTimeMillis() + MOTION_RETRY_DELAYS[motionRetryCount]; motionDiagnostics = "Video lookup unavailable; retry scheduled"; }
+                    }
+                    return null;
+                });
+    }
+
+    private synchronized void applyMotionArtwork(long generation, DesktopMotionArtworkEngine.Result result,
+                                                 boolean canvas, boolean cover, boolean background) {
+        if (closed || generation != motionGeneration) return;
+        motionDiagnostics = result.getDiagnostics();
+        if (result.getCanvasUrl() != null) motionCanvasUrl = result.getCanvasUrl();
+        if (result.getAnimatedCoverUrl() != null) motionCoverUrl = result.getAnimatedCoverUrl();
+        motionMissing = (canvas || background) && motionCanvasUrl == null || cover && motionCoverUrl == null;
+        artwork.configureMotion(motionCanvasUrl, motionCoverUrl, canvas, cover, background,
+                preferences.isPauseMotionWithMusic());
+        artwork.setMotionPlaying(snapshot().playing());
+    }
+
+    private void beginSourceLookup(PlaybackSnapshot value, String key, String spotifyId) {
+        ImportedLyricsClient.SearchResult imported = importedLyrics.find(value);
+        synchronized (this) {
+            if (!isCurrentLookup(key)) return;
+            importsPendingKey = null;
+            importCandidates = imported.candidates();
+            if (imported.match().isPresent()) {
+                applyImported(imported.match().get(), key);
+                return;
+            }
+            lyricsStatus = importCandidates.isEmpty() ? "Finding lyrics..." : "Choose an imported TTML match";
+        }
+        // Metadata-based sources run without a Spotify account or Spotify ID.
+        // The engine resolves anonymous Spotify matches only for sources that need one.
+        List<String> ids = spotifyId == null ? List.of() : List.of(spotifyId);
+        startRemoteLookup(value, key, ids);
+    }
+
+    private synchronized void startRemoteLookup(PlaybackSnapshot value, String key, List<String> ids) {
+        if (!isCurrentLookup(key)) return;
+        remoteLookup = lyricsClient.find(value, ids, preferences.getLyricsSources(), preferences.getLyricsSourceOrder(), preferences.isPreferSpicyLyrics(), result -> applySourceResult(key, result));
+        remoteLookup.thenAccept(result -> finishSourceLookup(key, result)).exceptionally(error -> {
+            failSourceLookup(key);
+            return null;
+        });
+    }
+
+    private synchronized void finishSourceLookup(String key, MultiSourceLyricsClient.Result result) {
+        if (!isCurrentLookup(key)) return;
+        applySourceResult(key, result);
+        if (result.document().isEmpty() && overlay.document().lines().isEmpty()) {
+            markUnavailable(preferences.getLyricsSources().isEmpty()
+                    ? "No lyrics sources enabled" : "No matching lyrics in enabled sources");
+            nextLookupRetryMillis = System.currentTimeMillis() + 60_000;
+        }
+    }
+
+    private synchronized void failSourceLookup(String key) {
+        if (isCurrentLookup(key) && overlay.document().lines().isEmpty()) {
+            markLookupError("Lyrics sources unavailable; retry shortly");
+            nextLookupRetryMillis = System.currentTimeMillis() + 60_000;
+        }
+    }
+
+    private boolean isCurrentLookup(String key) {
+        return !closed && key != null && key.equals(lookupKey) && !key.equals(importedLyricsKey);
+    }
+
+    private synchronized void applySourceResult(String key, MultiSourceLyricsClient.Result result) {
+        if (!isCurrentLookup(key)) return;
+        sourceDiagnostics = result.diagnostics();
+        if (result.document().isEmpty()) return;
+        LyricsDocument document = result.document().get();
+        boolean preferred = preferences.isPreferSpicyLyrics() && "spicy_lyrics".equals(result.sourceId());
+        if (preferences.isPreferSpicyLyrics() && key.equals(preferredLyricsKey) && !preferred) return;
+        if (preferred && key.equals(preferredLyricsKey) && hasWordTiming(overlay.document()) && !hasWordTiming(document)) return;
+        if (preferred) preferredLyricsKey = key;
+        // A late line-only source must not replace word-synced companion/cache lyrics.
+        if (!(preferences.isPreferSpicyLyrics() && "spicy_lyrics".equals(result.sourceId()))
+                && key.equals(spicyLyricsKey) && hasWordTiming(overlay.document()) && !hasWordTiming(document)) return;
+        if (overlay.document().equals(document)) return;
+        spicyLyricsKey = key;
+        lyricsStatus = "Lyrics ready";
+        overlay.setLyrics(document, "LYRICS");
+        FanDroidMod.LOGGER.info("Loaded lyrics from {} ({} lines)", result.provider(), document.lines().size());
+    }
+
+    public String lyricsSourceDiagnostics() { return sourceDiagnostics; }
+
+    public String playbackMethod() {
+        if (spotifyAccount.shouldOverrideBridge()) return "account";
+        if (connector instanceof MediaBridgeConnector bridge) return switch (bridge.activeSource()) {
+            case "YOUTUBE_MUSIC" -> "youtube";
+            case "SPICETIFY_BRIDGE" -> "spicetify";
+            default -> "bridge";
+        };
+        return "bridge";
+    }
+
+    private boolean hasPlayingSystemMedia() {
+        if (connector instanceof MediaBridgeConnector bridge && !bridge.bridgeAlive()) return false;
+        PlaybackSnapshot media = connector.snapshot().getNow(PlaybackSnapshot.unavailable());
+        return media.playing() && media.title() != null && !media.title().isBlank()
+                && !media.title().equals("Nothing playing") && media.observedAt() != null
+                && java.time.Duration.between(media.observedAt(), java.time.Instant.now()).abs().toSeconds() < 5;
     }
 
     private static boolean isSpotifyDjSpeaking(PlaybackSnapshot value) {
@@ -392,7 +532,7 @@ public final class MusicService implements AutoCloseable {
     }
 
     private void refreshIdleArtworkFallback() {
-        boolean connected = spotifyAccount.connected()
+        boolean connected = bridgeAlive() || spotifyAccount.connected()
                 || connector instanceof MediaBridgeConnector bridge
                 && (bridge.spicetifyConnected() || bridge.youtubeConnected());
         artwork.setFallback(connected ? CoverArtTexture.Fallback.SONG_NOT_FOUND
@@ -405,6 +545,7 @@ public final class MusicService implements AutoCloseable {
     }
 
     private void acceptSpicyLyrics(SpicetifyLyricsPayload payload) {
+        if (!preferences.isLyricsSourceEnabled("spicy_lyrics")) return;
         if (!prefersSpicetifyLyrics()) return;
         PlaybackSnapshot current = snapshot();
         String key = lookupKey;
@@ -441,8 +582,8 @@ public final class MusicService implements AutoCloseable {
         });
     }
 
-    private void parseAndApplySpicy(SpicetifyLyricsPayload payload, String key, boolean persist) {
-        if (!key.equals(lookupKey)) return;
+    private synchronized void parseAndApplySpicy(SpicetifyLyricsPayload payload, String key, boolean persist) {
+        if (!isCurrentLookup(key)) return;
         try {
             byte[] bytes = payload.payload().getBytes(StandardCharsets.UTF_8);
             LyricsDocument document;
@@ -457,7 +598,9 @@ public final class MusicService implements AutoCloseable {
             } else {
                 return;
             }
-            if (!key.equals(lookupKey)) return;
+            if (!key.equals(lookupKey) || document.lines().isEmpty()) return;
+            if (preferences.isPreferSpicyLyrics() && key.equals(preferredLyricsKey) && hasWordTiming(overlay.document()) && !wordSynced) return;
+            if (preferences.isPreferSpicyLyrics()) preferredLyricsKey = key;
             spicyLyricsKey = key;
             String precision = wordSynced ? "WORD SYNC" : "LINE SYNC";
             LyricsSource source = payload.format().equals("ttml") ? LyricsSource.SPICY_TTML : LyricsSource.SPICY_CACHE;
@@ -526,7 +669,7 @@ public final class MusicService implements AutoCloseable {
         return preferred != null && !preferred.isBlank() ? preferred : fallback == null ? "" : fallback;
     }
 
-    private void applyImported(ImportedLyricsClient.Match match, String key) {
+    private synchronized void applyImported(ImportedLyricsClient.Match match, String key) {
         if (key == null || !key.equals(lookupKey)) return;
         importedLyricsKey = key;
         spicyLyricsKey = null;
@@ -560,6 +703,14 @@ public final class MusicService implements AutoCloseable {
 
     @Override
     public void close() {
+        closed = true;
+        lookupKey = null;
+        if (remoteLookup != null) remoteLookup.cancel(true);
+        if (motionLookup != null) motionLookup.cancel(true);
+        if (artistLookup != null) artistLookup.cancel(true);
+        artistEngine.close();
+        motionEngine.close();
+        lyricsClient.close();
         artwork.close();
         spotifyAccount.close();
         connector.close();

@@ -44,6 +44,7 @@ public final class MediaBridgeConnector implements MusicConnector {
     private volatile boolean bridgeAlive = true;
     private volatile String startupError;
     private volatile String source = "AUTOMATIC";
+    private volatile String activeSource = "WINDOWS_MEDIA";
 
     private MediaBridgeConnector(Process process) {
         this.process = process;
@@ -167,6 +168,7 @@ public final class MediaBridgeConnector implements MusicConnector {
                     continue;
                 }
                 if (!node.path("type").asText().equals("snapshot")) continue;
+                activeSource = node.path("activeSource").asText("WINDOWS_MEDIA");
                 latest = ProtocolCodec.mapper().treeToValue(node.path("snapshot"), PlaybackSnapshot.class);
                 for (Consumer<PlaybackSnapshot> listener : listeners) listener.accept(latest);
             }
@@ -197,6 +199,7 @@ public final class MediaBridgeConnector implements MusicConnector {
     public int pairingPort() { return pairingPort; }
     public boolean spicetifyConnected() { return spicetifyConnected; }
     public boolean youtubeConnected() { return youtubeConnected; }
+    public String activeSource() { return activeSource; }
     public int extensionProtocolVersion() { return extensionProtocolVersion; }
     public String extensionVersion() { return extensionVersion; }
     public boolean extensionOutdated() { return spicetifyConnected && extensionProtocolVersion < 2; }

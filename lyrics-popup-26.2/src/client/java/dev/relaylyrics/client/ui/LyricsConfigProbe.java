@@ -24,14 +24,31 @@ import java.util.function.Consumer;
 
 /** Opt-in real Minecraft GUI fixture. Never connects accounts or writes user preferences. */
 public final class LyricsConfigProbe {
-    private static final String[] STAGES = Boolean.getBoolean("lyrica.configNoticeOnlySelfTest")
+    private static final String[] STAGES = Boolean.getBoolean("lyrica.configResponsiveSelfTest")
+            ? new String[]{"general", "source_priority", "priority_choices", "compact", "compact_priority", "compact_tiny"}
+            : Boolean.getBoolean("lyrica.configArtistOnlySelfTest")
+            ? new String[]{"appearance", "artist", "artist_fallback"}
+            : Boolean.getBoolean("lyrica.configRenderingSelfTest")
+            ? new String[]{"general", "appearance", "quality_choices", "compact", "compact_choices", "kawarp", "kawarp_later", "artist", "artist_fallback", "static", "paused"}
+            : Boolean.getBoolean("lyrica.configInteractionSelfTest")
+            ? new String[]{"ui_toggle_0", "ui_toggle_20", "ui_toggle_40", "ui_toggle_80", "ui_toggle_140", "ui_toggle_220",
+            "ui_hover_0", "ui_hover_50", "ui_hover_150", "ui_press_60", "ui_pane_0", "ui_pane_30", "ui_pane_70", "ui_pane_140", "ui_open_0", "ui_open_30", "ui_open_70", "ui_open_140", "ui_open_220", "ui_peek", "compact", "compact_choices"}
+            : Boolean.getBoolean("lyrica.configCompactOnlySelfTest")
+            ? new String[]{"compact", "compact_choices", "search"}
+            : Boolean.getBoolean("lyrica.configModalOnlySelfTest")
+            ? new String[]{"general", "appearance", "choices", "search", "sources_end", "motion_artwork", "world", "compact", "compact_choices"}
+            : Boolean.getBoolean("lyrica.configMotionOnlySelfTest")
+            ? new String[]{"appearance", "motion_artwork"}
+            : Boolean.getBoolean("lyrica.configSourcesOnlySelfTest")
+            ? new String[]{"sources", "sources_end"}
+            : Boolean.getBoolean("lyrica.configNoticeOnlySelfTest")
             ? new String[]{"unavailable_notice", "unavailable_faded", "lyrics_return"}
             : new String[]{"general", "appearance", "connection", "custom", "advanced",
             "experimental", "world", "world_fixed", "effects", "choices", "editor",
             "unavailable_notice", "unavailable_faded", "lyrics_return", "spotify_guide", "youtube_guide",
             "general", "appearance", "custom", "advanced", "world", "categories", "editor",
             "spotify_guide", "youtube_guide"};
-    private static int stage, ticks;
+    private static int stage, ticks, backdropFrame;
     private static boolean capturePending, portuguese;
     private static LyricsConfigScreen screen;
     private static SpotifyAccountScreen spotifyScreen;
@@ -52,7 +69,11 @@ public final class LyricsConfigProbe {
         showStage();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (capturePending || client.gui.overlay() != null) return;
-            if (++ticks < 30) return;
+            if (++ticks < (Boolean.getBoolean("lyrica.configInteractionSelfTest") ? 4 : 30)) return;
+            if (Boolean.getBoolean("lyrica.configRenderingSelfTest") && STAGES[stage].equals("artist") && !ARTWORK.artistReady()) {
+                if (ticks < 300) return;
+                throw new IllegalStateException("Artist photo was not decoded and installed");
+            }
             if (STAGES[stage].equals("unavailable_faded")
                     && System.nanoTime() - unavailableNanos < 13_000_000_000L) return;
             if (STAGES[stage].equals("unavailable_faded")) {
@@ -68,8 +89,22 @@ public final class LyricsConfigProbe {
     }
     private static void showStage() {
         Minecraft client = Minecraft.getInstance();
-        client.options.guiScale().set(stage >= 16 ? 3 : 1); client.resizeGui();
+        client.options.guiScale().set((Boolean.getBoolean("lyrica.configResponsiveSelfTest") || Boolean.getBoolean("lyrica.configModalOnlySelfTest") || Boolean.getBoolean("lyrica.configCompactOnlySelfTest") || Boolean.getBoolean("lyrica.configInteractionSelfTest") || Boolean.getBoolean("lyrica.configRenderingSelfTest")) ? (STAGES[stage].startsWith("compact") ? 3 : 1) : stage >= 16 ? 3 : 1); client.resizeGui();
         String name = STAGES[stage];
+        if (Boolean.getBoolean("lyrica.configResponsiveSelfTest")) {
+            PREFERENCES.setLyricsWidth(name.equals("compact_tiny") ? 96 : 420);
+            PREFERENCES.setLyricsHeight(name.equals("compact_tiny") ? 64 : 260);
+        }
+        if (Boolean.getBoolean("lyrica.configRenderingSelfTest")) {
+            restoreCurrentSong(!name.equals("paused"));
+            PREFERENCES.setLyricsAnimations(!name.equals("static"));
+            PREFERENCES.setLyricsDynamicBackground(true);
+            PREFERENCES.setLyricsArtistBackground(name.startsWith("artist"));
+            PREFERENCES.setLyricsWidth(840); PREFERENCES.setLyricsHeight(540);
+            PREFERENCES.setLyricsX(40); PREFERENCES.setLyricsY(52);
+            ARTWORK.configureArtist(name.equals("artist") ? dev.relaylyrics.client.LyricsSettingsDemo.artistArtwork() : null);
+            ARTWORK.setMotionPlaying(!name.equals("paused"));
+        }
         screen = null; spotifyScreen = null; youtubeScreen = null;
         if (name.equals("unavailable_notice")) {
             RelayLyricsClient.overlay().clearLyrics();
@@ -88,9 +123,13 @@ public final class LyricsConfigProbe {
             client.gui.setScreen(screen);
             screen.configureProbe(name.startsWith("unavailable_") || name.equals("lyrics_return") ? "editor" : name);
         }
-        ticks = 0; capturePending = false;
+        if (screen != null) screen.prepareInteractionProbe(name);
+        ticks = 0; backdropFrame = 0; capturePending = false;
     }
     private static void captured() {
+        if (Boolean.getBoolean("lyrica.configRenderingSelfTest") && STAGES[stage].equals("kawarp") && ++backdropFrame < 32) {
+            ticks = 28; capturePending = false; return;
+        }
         var client = Minecraft.getInstance();
         if (++stage < STAGES.length) { client.execute(LyricsConfigProbe::showStage); return; }
         if (!portuguese) {
@@ -98,12 +137,23 @@ public final class LyricsConfigProbe {
             client.getLanguageManager().setSelected("pt_br");
             client.reloadResourcePacks().thenRun(() -> client.execute(LyricsConfigProbe::showStage)); return;
         }
-        FanDroidMod.LOGGER.info(Boolean.getBoolean("lyrica.configNoticeOnlySelfTest")
+        FanDroidMod.LOGGER.info(Boolean.getBoolean("lyrica.configRenderingSelfTest")
+                ? "Rendering GUI probe passed: sharp fonts/borders at GUI scales 1/3, Kawarp, artist image/fallback and static/paused states"
+                : Boolean.getBoolean("lyrica.configInteractionSelfTest")
+                ? "Settings interaction GUI probe passed: English/Portuguese, intermediate toggle/hover/press/pane/open frames and unchanged live popup bounds"
+                : Boolean.getBoolean("lyrica.configModalOnlySelfTest")
+                ? "Centered settings GUI probe passed: English/Portuguese, navigation, search, dropdowns, sources, videos and compact GUI scale"
+                : Boolean.getBoolean("lyrica.configMotionOnlySelfTest")
+                ? "Motion settings GUI probe passed: English/Portuguese, video controls and scrolling"
+                : Boolean.getBoolean("lyrica.configSourcesOnlySelfTest")
+                ? "Sources GUI probe passed: English/Portuguese, full source list and scrolling"
+                : Boolean.getBoolean("lyrica.configNoticeOnlySelfTest")
                 ? "Notice GUI probe passed: English/Portuguese, 10s notice fade, unchanged popup bounds, lyrics return"
                 : "Settings GUI probe passed: English/Portuguese, inline choices, custom settings, live-song preview, 10s unavailable fade/fixed bounds/return, connection guides and GUI scales 1/3");
         client.stop();
     }
-    private static void restoreCurrentSong() {
+    private static void restoreCurrentSong() { restoreCurrentSong(true); }
+    private static void restoreCurrentSong(boolean playing) {
         if (fixtureLyrics == null) {
             List<LyricLine> lines = new ArrayList<>();
             String[] phrases = {"Let the words follow the music", "Every moment has a rhythm", "A luz acompanha a canção"};
@@ -121,7 +171,7 @@ public final class LyricsConfigProbe {
         }
         RelayLyricsClient.overlay().setPlayback(new PlaybackSnapshot("Current song • Música atual",
                 "Lyrica visual test", "Current playback", null, "spotify:track:configFixture", "Native GUI fixture",
-                2_000, 400_000, true, .65, false, "off", true, .4, 0, 110, .5, new double[0],
+                2_000, 400_000, playing, .65, false, "off", true, .4, 0, 110, .5, new double[0],
                 Instant.now(), MusicCapabilities.unavailable()));
         RelayLyricsClient.overlay().setLyrics(fixtureLyrics, "LYRICS");
     }
@@ -133,7 +183,11 @@ public final class LyricsConfigProbe {
                 Path directory = Path.of(System.getProperty("lyrica.configProbeOutput", "build/config-qa")).toAbsolutePath().normalize();
                 Files.createDirectories(directory);
                 Path output = directory.resolve("config-" + version + "-" + (portuguese ? "pt" : "en") + "-" + stage + "-" + STAGES[stage] + ".png");
-                image.writeToFile(output);
+                if (Boolean.getBoolean("lyrica.configRenderingSelfTest") && STAGES[stage].equals("kawarp")) {
+                    Path frame = directory.resolve("kawarp-" + version + "-" + (portuguese ? "pt" : "en") + "-" + String.format(java.util.Locale.ROOT, "%02d", backdropFrame) + ".png");
+                    image.writeToFile(frame);
+                    if (backdropFrame == 0) image.writeToFile(output);
+                } else image.writeToFile(output);
                 FanDroidMod.LOGGER.info("Settings screenshot: {}", output);
                 captured();
             } catch (Exception failure) { throw new IllegalStateException("Settings screenshot failed", failure); }

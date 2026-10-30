@@ -57,7 +57,7 @@ final class LyricsBloomRenderer implements AutoCloseable {
     boolean finish(DrawContext context, int left, int top, int right, int bottom,
                    float radius, boolean clip, boolean additive) {
         recording = false;
-        if (clip) context.enableScissor(left, top, right, bottom);
+        if (clip) GuiTransform.enableScissor(context, left, top, right, bottom);
         try {
             for (GlowGlyph glyph : glyphs) {
                 double blur = Double.isFinite(glyph.blurRadius()) ? glyph.blurRadius() : radius;

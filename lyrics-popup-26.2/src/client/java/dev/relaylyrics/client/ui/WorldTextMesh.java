@@ -53,7 +53,10 @@ public final class WorldTextMesh {
     }
 
     public static void tick() {
-        if (Minecraft.getInstance().level == null) { clear(); return; }
+        var preferences = dev.relaylyrics.client.RelayLyricsClient.preferences();
+        if (!preferences.isWorldLyrics()) { clear(); WorldGlyphAtlas.releaseSnapshots(); return; }
+
+        if (Minecraft.getInstance().level == null) { clear(); WorldGlyphAtlas.releaseSnapshots(); return; }
         for (int i = 0; i < 2 && !QUEUE.isEmpty(); i++) {
             Component text = QUEUE.removeFirst();
             Entry entry = CACHE.get(text);
@@ -76,6 +79,17 @@ public final class WorldTextMesh {
             if (mesh != null) bytes -= mesh.bytes;
             QUEUE.remove(old.getKey()); iterator.remove();
         }
+    }
+
+    static boolean drawBudgeted(Component text, Matrix4f matrix, MultiBufferSource target, float xOffset,
+                                float depth, int faceColor, int sideColor, float alpha, Float boundary,
+                                boolean rtl, boolean bevel, dev.relaylyrics.client.music.WorldLyricsExperience.Budget budget) {
+        if (budget.remainingFaces() <= 0) return false;
+        Entry entry = CACHE.get(text);
+        Mesh mesh = entry == null ? null : ready(entry);
+        if (mesh != null && !budget.mesh(mesh.faces * (bevel ? 2 : 1))) return false;
+        return draw(text, matrix, target, xOffset, depth, faceColor, sideColor, alpha,
+                boundary, rtl, bevel, .30f, mesh == null ? 0 : MAX_FACES);
     }
 
     private static Mesh ready(Entry entry) {

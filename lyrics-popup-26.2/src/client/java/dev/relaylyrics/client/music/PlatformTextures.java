@@ -12,6 +12,11 @@ import net.minecraft.resources.Identifier;
 
 /** Minecraft 1.21.11 render-pipeline and GPU texture adapter. */
 public final class PlatformTextures {
+    private static double renderScale = 1;
+    public static double renderScale() { return renderScale; }
+    public static double beginUiScale(double value) { double old = renderScale; renderScale *= value; return old; }
+    public static void endUiScale(double previous) { renderScale = previous; }
+
     private PlatformTextures() { }
 
     static DynamicTexture fromImage(String name, NativeImage image) {
@@ -24,7 +29,7 @@ public final class PlatformTextures {
 
     /** Physical pixels represented by one logical GUI pixel. */
     public static double guiScale() {
-        return Math.max(1.0, Minecraft.getInstance().getWindow().getGuiScale());
+        return Math.max(.05, Minecraft.getInstance().getWindow().getGuiScale() * renderScale);
     }
 
     public static boolean supportsRoundedCoverComposite() { return true; }
@@ -46,6 +51,25 @@ public final class PlatformTextures {
         for (int y = 0; y < mask.height(); y++) for (int x = 0; x < mask.width(); x++)
             setColorArgb(image, x, y, (mask.alpha()[y * mask.width() + x] & 255) << 24 | 0xFFFFFF);
         texture.upload();
+        return register(name, texture);
+    }
+
+    public static void upload(DynamicTexture texture) {
+        texture.upload();
+    }
+
+    public static void retireEffectMask(Identifier id) {
+        RenderSystem.queueFencedTask(() -> Minecraft.getInstance().getTextureManager().release(id));
+    }
+
+    public static Identifier registerUiMask(String name, int width, int height, byte[] alpha) {
+        if (width <= 0 || height <= 0 || width > 4096 || height > 1024 || (long) width * height != alpha.length)
+            throw new IllegalArgumentException("Invalid UI text raster");
+        DynamicTexture texture = empty(name, width, height);
+        NativeImage image = texture.getPixels();
+        for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+            setColorArgb(image, x, y, (alpha[y * width + x] & 255) << 24 | 0xFFFFFF);
+        upload(texture);
         return register(name, texture);
     }
 
@@ -73,6 +97,8 @@ public final class PlatformTextures {
     static int colorArgb(NativeImage image, int x, int y) {
         return image.getPixel(x, y);
     }
+
+    public static void setUiPixel(NativeImage image, int x, int y, int argb) { setColorArgb(image, x, y, argb); }
 
     static void setColorArgb(NativeImage image, int x, int y, int argb) {
         image.setPixel(x, y, argb);

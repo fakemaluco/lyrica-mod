@@ -39,6 +39,11 @@ impl SystemMedia {
             )
             .to_lowercase(),
             liked: false,
+            intensity: 0.0,
+            beat_phase: 0.0,
+            bpm: 0.0,
+            spectral_centroid: 0.5,
+            intensity_bands: Vec::new(),
             observed_at: Utc::now(),
             capabilities: MusicCapabilities {
                 play_pause: true,

@@ -10,6 +10,18 @@ public final class GuiTransform {
     public static boolean nativeTextShadow() { return false; }
     public static boolean dualGlow() { return false; }
 
+    /** Immediate renderer already preserves paint order. */
+    public static void nextLayer(DrawContext context) { }
+
+    public static void enableScissor(DrawContext context, int left, int top, int right, int bottom) {
+        var matrix = context.getMatrices().peek().getPositionMatrix();
+        var a = matrix.transformPosition(new org.joml.Vector3f(left, top, 0));
+        var b = matrix.transformPosition(new org.joml.Vector3f(right, bottom, 0));
+        context.enableScissor((int) Math.floor(Math.min(a.x, b.x)), (int) Math.floor(Math.min(a.y, b.y)),
+                (int) Math.ceil(Math.max(a.x, b.x)), (int) Math.ceil(Math.max(a.y, b.y)));
+    }
+    public static void finishUiDraw(DrawContext context, int mouseX, int mouseY, float delta) {  }
+
     public static void push(DrawContext context) {
         context.getMatrices().push();
     }

@@ -22,7 +22,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
     private static int effectsProbeTicks;
 
     public static ClientPreferences preferences() {
-        if (preferences == null) preferences = ClientPreferences.load();
+        if (preferences == null) preferences = Boolean.getBoolean("lyrica.worldExperienceSelfTest") ? new ClientPreferences() : ClientPreferences.load();
         return preferences;
     }
 
@@ -42,7 +42,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
         CompatibilityManager.initialize();
 
         overlay = new LyricsOverlay(preferences());
-        if (!Boolean.getBoolean("lyrica.worldMeshSelfTest") && !Boolean.getBoolean("lyrica.effectsSelfTest") && !Boolean.getBoolean("lyrica.configSelfTest"))
+        if (!Boolean.getBoolean("lyrica.worldExperienceSelfTest") && !Boolean.getBoolean("lyrica.worldMeshSelfTest") && !Boolean.getBoolean("lyrica.effectsSelfTest") && !Boolean.getBoolean("lyrica.configSelfTest") && !Boolean.getBoolean("lyrica.motionArtworkSelfTest"))
             music = new MusicService(overlay, preferences());
         GoogleFontManager.restore(preferences().getGoogleFontFamily(),
                 preferences().getLyricsFontWeight().cssWeight(), overlay::fontChanged);
@@ -64,12 +64,15 @@ public final class RelayLyricsClient implements ClientModInitializer {
             ClientLifecycleEvents.CLIENT_STARTED.register(client -> effectsProbeArmed = true);
         if (Boolean.getBoolean("lyrica.configSelfTest"))
             ClientLifecycleEvents.CLIENT_STARTED.register(client -> effectsProbeArmed = true);
+        if (Boolean.getBoolean("lyrica.motionArtworkSelfTest"))
+            ClientLifecycleEvents.CLIENT_STARTED.register(client -> effectsProbeArmed = true);
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (effectsProbeArmed && client.getOverlay() == null && ++effectsProbeTicks >= 10) {
                 effectsProbeArmed = false;
                 client.options.getGuiScale().setValue(1);
                 client.onResolutionChanged();
-                if (Boolean.getBoolean("lyrica.configSelfTest")) dev.relaylyrics.client.ui.LyricsConfigProbe.start();
+                if (Boolean.getBoolean("lyrica.motionArtworkSelfTest")) dev.relaylyrics.client.ui.MotionArtworkProbe.start();
+                else if (Boolean.getBoolean("lyrica.configSelfTest")) dev.relaylyrics.client.ui.LyricsConfigProbe.start();
                 else client.setScreen(new dev.relaylyrics.client.ui.LyricsEffectsProbe());
             }
             if (meshProbeArmed && client.getOverlay() == null && ++meshProbeTicks >= 10) {
@@ -81,8 +84,11 @@ public final class RelayLyricsClient implements ClientModInitializer {
                 finally { client.scheduleStop(); }
             }
             overlay.tick();
+            dev.relaylyrics.client.ui.WorldLyricsProbe.tick(client);
             dev.relaylyrics.client.ui.WorldLyricsRenderer.tickPlayerMotion(client);
             dev.relaylyrics.client.ui.WorldTextMesh.tick();
+            dev.relaylyrics.client.music.WorldLyricsLights.tick(client.world, System.nanoTime(),
+                    preferences().isWorldLyrics() && preferences().isLyricsVisible() && preferences().isWorldLyricsTerrainLight());
             InventoryLyricsController.tick(client);
         });
         // Keep the normal HUD pass as a fallback. Inventory screens receive a

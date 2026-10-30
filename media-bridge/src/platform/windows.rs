@@ -7,6 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::IntensityCapture;
+use crate::session_selection::{SessionCandidate, select_session};
 
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
@@ -306,31 +307,54 @@ const MAX_ARTWORK_BYTES: u64 = 8 * 1024 * 1024;
 
 pub struct SystemMedia {
     manager: GlobalSystemMediaTransportControlsSessionManager,
+    selected: Option<GlobalSystemMediaTransportControlsSession>,
+    selected_source: String,
+    artwork_key: String,
+    artwork: Option<String>,
 }
 
 impl SystemMedia {
     pub fn new() -> Result<Self> {
         Ok(Self {
             manager: GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.get()?,
+            selected: None,
+            selected_source: String::new(),
+            artwork_key: String::new(),
+            artwork: None,
         })
     }
 
-    fn session(&self) -> Result<GlobalSystemMediaTransportControlsSession> {
-        Ok(self.manager.GetCurrentSession()?)
-    }
-
-    fn session_for(&self, source: &str) -> Result<GlobalSystemMediaTransportControlsSession> {
-        if source != "YOUTUBE_MUSIC" { return self.session(); }
+    fn session_for(&mut self, source: &str) -> Result<GlobalSystemMediaTransportControlsSession> {
+        let current = self.manager.GetCurrentSession().ok();
+        let mut available = Vec::new();
+        let mut candidates = Vec::new();
         let sessions = self.manager.GetSessions()?;
         for index in 0..sessions.Size()? {
             let session = sessions.GetAt(index)?;
             let id = session.SourceAppUserModelId()?.to_string().to_lowercase();
-            if id.contains("youtube") || id.contains("music.youtube")
-                || id.contains("cinhimbnkkaeohfgghhklpknlkffjgod") {
-                return Ok(session);
+            if source == "YOUTUBE_MUSIC" && !(id.contains("youtube") || id.contains("music.youtube")
+                || id.contains("cinhimbnkkaeohfgghhklpknlkffjgod")) {
+                continue;
             }
+            let Ok(properties) = session.TryGetMediaPropertiesAsync().and_then(|value| value.get()) else { continue };
+            let title = properties.Title().map(|value| value.to_string()).unwrap_or_default();
+            let artist = properties.Artist().map(|value| value.to_string()).unwrap_or_default();
+            let playing = session.GetPlaybackInfo().and_then(|value| value.PlaybackStatus())
+                .is_ok_and(|status| status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing);
+            candidates.push(SessionCandidate {
+                playing,
+                meaningful: !title.trim().is_empty(),
+                music_metadata: !artist.trim().is_empty(),
+                previous: self.selected.as_ref() == Some(&session),
+                current: current.as_ref() == Some(&session),
+            });
+            available.push(session);
         }
-        anyhow::bail!("YouTube Music media session not found")
+        let index = select_session(&candidates).ok_or_else(|| anyhow::anyhow!("No active media session"))?;
+        let session = available.swap_remove(index);
+        self.selected = Some(session.clone());
+        self.selected_source = source.to_owned();
+        Ok(session)
     }
 
     fn artwork_data(
@@ -375,17 +399,35 @@ impl SystemMedia {
         let timeline = session.GetTimelineProperties()?;
         let playback = session.GetPlaybackInfo()?;
         let controls = playback.Controls()?;
+        let title = media.Title()?.to_string();
+        let artist = media.Artist()?.to_string();
+        let album = media.AlbumTitle()?.to_string();
+        let app = session.SourceAppUserModelId()?.to_string();
+        let playing = playback.PlaybackStatus()?
+            == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
+        let now = Utc::now();
+        let report_age_ms = timeline.LastUpdatedTime().map(|updated|
+            now.timestamp_millis() - (updated.UniversalTime / 10_000 - 11_644_473_600_000))
+            .unwrap_or(0);
+        let rate = playback.PlaybackRate().ok().and_then(|value| value.Value().ok()).unwrap_or(1.0);
+        let duration_millis = timeline.EndTime()?.Duration / 10_000;
+        let position_millis = crate::timeline::project_position(timeline.Position()?.Duration / 10_000,
+            duration_millis, playing, rate, report_age_ms);
+        let artwork_key = format!("{app}\n{title}\n{artist}\n{album}");
+        if self.artwork_key != artwork_key || self.artwork.is_none() {
+            self.artwork = Self::artwork_data(&media);
+            self.artwork_key = artwork_key;
+        }
         Ok(PlaybackSnapshot {
-            title: media.Title()?.to_string(),
-            artist: media.Artist()?.to_string(),
-            album: media.AlbumTitle()?.to_string(),
-            artwork_url: Self::artwork_data(&media),
+            title,
+            artist,
+            album,
+            artwork_url: self.artwork.clone(),
             spotify_uri: None,
-            device_name: Some(session.SourceAppUserModelId()?.to_string()),
-            position_millis: timeline.Position()?.Duration / 10_000,
-            duration_millis: timeline.EndTime()?.Duration / 10_000,
-            playing: playback.PlaybackStatus()?
-                == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing,
+            device_name: Some(app),
+            position_millis,
+            duration_millis,
+            playing,
             volume: 0.0,
             shuffled: false,
             repeat_mode: "off".into(),
@@ -395,7 +437,7 @@ impl SystemMedia {
             bpm: 0.0,
             spectral_centroid: 0.5,
             intensity_bands: Vec::new(),
-            observed_at: Utc::now(),
+            observed_at: now,
             capabilities: MusicCapabilities {
                 play_pause: controls.IsPlayEnabled()? || controls.IsPauseEnabled()?,
                 previous: controls.IsPreviousEnabled()?,
@@ -415,7 +457,12 @@ impl SystemMedia {
     }
 
     pub fn command_for(&mut self, command: &MusicCommand, source: &str) -> Result<()> {
-        let session = self.session_for(source)?;
+        // A command controls the player whose snapshot the user last saw,
+        // even if Windows moves its global transport focus in the meantime.
+        let session = match &self.selected {
+            Some(session) if self.selected_source == source => session.clone(),
+            _ => self.session_for(source)?,
+        };
         match command.action.as_str() {
             "PLAY_PAUSE" => {
                 session.TryTogglePlayPauseAsync()?.get()?;

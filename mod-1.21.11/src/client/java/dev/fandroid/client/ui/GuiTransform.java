@@ -10,6 +10,14 @@ public final class GuiTransform {
     public static boolean nativeTextShadow() { return false; }
     public static boolean dualGlow() { return false; }
 
+    /** Keep separately composed translucent surfaces out of the same sorted batch. */
+    public static void nextLayer(DrawContext context) { context.createNewRootLayer(); }
+
+    public static void enableScissor(DrawContext context, int left, int top, int right, int bottom) {
+        context.enableScissor(left, top, right, bottom);
+    }
+    public static void finishUiDraw(DrawContext context, int mouseX, int mouseY, float delta) { context.drawDeferredElements(); }
+
     public static void push(DrawContext context) {
         context.getMatrices().pushMatrix();
     }

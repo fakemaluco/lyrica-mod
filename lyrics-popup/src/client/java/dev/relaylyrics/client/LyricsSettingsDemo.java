@@ -10,6 +10,26 @@ public final class LyricsSettingsDemo {
     private LyricsSettingsDemo() { }
     private static final class Artwork { static final String DATA = create(); }
     public static String artwork() { return Artwork.DATA; }
+    private static final class ArtistArtwork { static final String DATA = createArtist(); }
+    public static String artistArtwork() {
+        String remote = System.getProperty("lyrica.configArtistProbeUrl", "");
+        return Boolean.getBoolean("lyrica.configSelfTest") && remote.startsWith("https://i.scdn.co/image/") ? remote : ArtistArtwork.DATA;
+    }
+    /** Geometric local fixture for testing a wide artist header, never used for real playback. */
+    private static String createArtist() {
+        BufferedImage image = new BufferedImage(960, 540, BufferedImage.TYPE_INT_RGB);
+        var g = image.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setPaint(new java.awt.GradientPaint(0, 0, new java.awt.Color(18, 91, 103), 960, 540, new java.awt.Color(208, 112, 64)));
+        g.fillRect(0, 0, 960, 540);
+        g.setColor(new java.awt.Color(239, 183, 101)); g.fillOval(650, 40, 210, 210);
+        g.setColor(new java.awt.Color(26, 31, 46)); g.fillOval(620, 140, 130, 155); g.fillRoundRect(555, 275, 260, 350, 120, 120);
+        g.dispose();
+        try (ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+            ImageIO.write(image, "png", bytes);
+            return "data:image/png;base64," + Base64.getEncoder().encodeToString(bytes.toByteArray());
+        } catch (java.io.IOException e) { throw new IllegalStateException(e); }
+    }
     private static String create() {
         BufferedImage image = new BufferedImage(96, 96, BufferedImage.TYPE_INT_RGB);
         for (int y = 0; y < 96; y++) for (int x = 0; x < 96; x++) {

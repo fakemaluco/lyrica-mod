@@ -8,6 +8,14 @@ public final class GuiTransform {
 
     public static boolean scissorTransformsPose() { return true; }
 
+    /** Keep separately composed translucent surfaces out of the same sorted batch. */
+    public static void nextLayer(GuiGraphicsExtractor context) { context.nextStratum(); }
+
+    public static void enableScissor(GuiGraphicsExtractor context, int left, int top, int right, int bottom) {
+        context.enableScissor(left, top, right, bottom);
+    }
+    public static void finishUiDraw(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) { context.extractDeferredElements(mouseX, mouseY, delta); }
+
     public static void push(GuiGraphicsExtractor context) {
         context.pose().pushMatrix();
     }

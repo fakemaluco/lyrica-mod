@@ -5,7 +5,7 @@ public final class LyricsSettingsPresets {
     private LyricsSettingsPresets() { }
 
     public enum Effects { NONE, SOFT, SPICY, CUSTOM }
-    public enum Background { SIMPLE, COVER, REACTIVE }
+    public enum Background { SIMPLE, COVER, REACTIVE, ARTIST }
 
     public static Effects effects(ClientPreferences p) {
         for (Effects preset : Effects.values()) {
@@ -35,11 +35,13 @@ public final class LyricsSettingsPresets {
     }
 
     public static Background background(ClientPreferences p) {
-        return p.isLyricsReactiveBackground() ? Background.REACTIVE
+        return p.isLyricsArtistBackground() && p.isLyricsDynamicBackground() ? Background.ARTIST
+                : p.isLyricsReactiveBackground() ? Background.REACTIVE
                 : p.isLyricsDynamicBackground() ? Background.COVER : Background.SIMPLE;
     }
 
     public static void applyBackground(ClientPreferences p, Background value) {
+        p.setLyricsArtistBackground(value == Background.ARTIST);
         p.setLyricsDynamicBackground(value != Background.SIMPLE);
         p.setLyricsReactiveBackground(value == Background.REACTIVE);
     }

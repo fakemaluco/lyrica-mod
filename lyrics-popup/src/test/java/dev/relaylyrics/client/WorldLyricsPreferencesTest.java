@@ -6,6 +6,23 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class WorldLyricsPreferencesTest {
+    @Test void rebuiltWorldStyleHasSafeDefaultsAndPreservesCustomFontAndColors() throws Exception {
+        var old = ClientPreferences.decode("{\"worldLyricsPositionVersion\":5,\"worldLyrics\":true,\"googleFontFamily\":\"Inter\",\"worldLyricsFaceColor\":1193046}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(old.isWorldLyrics()).isTrue();
+        assertThat(old.getWorldLyricsStyle()).isEqualTo(dev.relaylyrics.client.music.WorldLyricsExperience.Style.SPICY);
+        assertThat(old.getWorldLyricsRenderMode()).isEqualTo(dev.relaylyrics.client.music.WorldLyricsExperience.RenderMode.AUTO);
+        assertThat(old.isWorldLyricsGlow()).isFalse(); assertThat(old.isWorldLyricsSmoothFont()).isTrue();
+        assertThat(old.getGoogleFontFamily()).isEqualTo("Inter"); assertThat(old.getWorldLyricsFaceColor()).isEqualTo(0x123456);
+        old.setWorldLyricsStyle(dev.relaylyrics.client.music.WorldLyricsExperience.Style.SCULPTED);
+        old.setWorldLyricsRenderMode(dev.relaylyrics.client.music.WorldLyricsExperience.RenderMode.SAFE);
+        old.setWorldLyricsGlow(false); old.setWorldLyricsSmoothFont(false); old.setWorldLyricsAccent(0x98E7FF);
+        var restored = ClientPreferences.decode(ProtocolCodec.mapper().writeValueAsBytes(old));
+        assertThat(restored.getWorldLyricsStyle()).isEqualTo(old.getWorldLyricsStyle());
+        assertThat(restored.getWorldLyricsRenderMode()).isEqualTo(old.getWorldLyricsRenderMode());
+        assertThat(restored.isWorldLyricsGlow()).isFalse(); assertThat(restored.isWorldLyricsSmoothFont()).isFalse();
+        assertThat(restored.getWorldLyricsAccent()).isEqualTo(0x98E7FF);
+    }
     @Test void oldPresetSelectionIsReplacedWithoutDisablingWorldLyrics() throws Exception {
         var restored = ClientPreferences.decode("{\"worldLyrics\":true,\"lyricsVisible\":false,\"lyricsFont\":\"MINECRAFT\",\"worldLyricsPositionVersion\":4,\"worldLyricsPreset\":\"SCULPTURE\",\"worldLyricsPresetMask\":127,\"enabledWorldLyricsPresets\":[\"CLASSIC\",\"CINEMA\",\"SCULPTURE\"]}"
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));

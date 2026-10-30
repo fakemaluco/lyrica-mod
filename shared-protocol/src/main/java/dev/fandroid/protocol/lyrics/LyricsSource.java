@@ -3,6 +3,7 @@ package dev.fandroid.protocol.lyrics;
 public enum LyricsSource {
     UNKNOWN("UNKNOWN"),
     IMPORTED("IMPORTED"),
+    REMOTE("ONLINE"),
     SPICY_TTML("SPICY TTML"),
     SPICY_CACHE("SPICY CACHE");
 

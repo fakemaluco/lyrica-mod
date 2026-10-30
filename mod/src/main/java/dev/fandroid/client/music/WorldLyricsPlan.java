@@ -19,7 +19,8 @@ public final class WorldLyricsPlan {
     private WorldLyricsPlan() { }
 
     public static List<WorldLine> visibleLines(LyricsDocument document, long now) {
-        if (document == null) return List.of();
+        if (document == null || document.metadata().syncMode()
+                == dev.fandroid.protocol.lyrics.LyricsSyncMode.STATIC) return List.of();
         List<WorldLine> result = new ArrayList<>();
         if (document.groups().isEmpty()) {
             for (LyricLine line : document.lines()) {
@@ -210,7 +211,7 @@ public final class WorldLyricsPlan {
         public double movementSpeed() { return speed; }
         public double blocksPerSecond() { return travelSpeed; }
         public boolean flying() { return flyingInput; }
-        public void clear() { initialized = false; }
+        public void clear() { initialized = false; world = null; document = null; track = null; }
     }
 
     public record Interlude(long startMillis, long endMillis) {

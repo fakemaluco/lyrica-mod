@@ -3,9 +3,18 @@ allprojects {
     tasks.withType(JavaExec).configureEach {
         if (name == 'runClient') {
             systemProperty 'lyrica.configSelfTest', 'true'
+            systemProperty 'lyrica.configRenderingSelfTest', providers.gradleProperty('renderOnly').getOrElse('false')
+            systemProperty 'lyrica.configArtistOnlySelfTest', providers.gradleProperty('artistOnly').getOrElse('false')
+            systemProperty 'lyrica.configArtistProbeUrl', providers.gradleProperty('artistProbeUrl').getOrElse('')
+            systemProperty 'lyrica.configInteractionSelfTest', providers.gradleProperty('interactionOnly').getOrElse('false')
+            systemProperty 'lyrica.configCompactOnlySelfTest', providers.gradleProperty('compactOnly').getOrElse('false')
+            systemProperty 'lyrica.configModalOnlySelfTest', providers.gradleProperty('modalOnly').getOrElse('false')
+            systemProperty 'lyrica.configMotionOnlySelfTest', providers.gradleProperty('motionOnly').getOrElse('false')
+            systemProperty 'lyrica.configSourcesOnlySelfTest', providers.gradleProperty('sourcesOnly').getOrElse('false')
             systemProperty 'lyrica.configNoticeOnlySelfTest', providers.gradleProperty('noticeOnly').getOrElse('false')
+            systemProperty 'lyrica.configResponsiveSelfTest', providers.gradleProperty('responsiveOnly').getOrElse('false')
             systemProperty 'lyrica.configProbeOutput', rootProject.layout.buildDirectory.dir('lyrics-gui-qa').get().asFile.absolutePath
-            args '--width', '1280', '--height', '720'
+            args '--width', providers.gradleProperty('probeWidth').getOrElse('1280'), '--height', providers.gradleProperty('probeHeight').getOrElse('720')
         }
     }
 }

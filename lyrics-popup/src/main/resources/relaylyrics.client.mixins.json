@@ -5,7 +5,8 @@
   "client": [
     "HandledScreenAccessor",
     "InventoryMouseDragMixin",
-    "WorldGlyphAtlasMixin"
+    "WorldGlyphAtlasMixin",
+    "JiCinematicLyricsMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -4,6 +4,16 @@ use chrono::Utc;
 
 use crate::PlaybackSnapshot;
 
+/// Positions in Windows media sessions are anchored to LastUpdatedTime, not
+/// necessarily to the instant the bridge reads them. Account for that initial
+/// age before the monotonic tracker handles repeated reports.
+pub fn project_position(position: i64, duration: i64, playing: bool, rate: f64, age_ms: i64) -> i64 {
+    let projected = if playing && (0..=300_000).contains(&age_ms) && rate.is_finite() && rate > 0.0 {
+        position.saturating_add((age_ms as f64 * rate) as i64)
+    } else { position };
+    if duration > 0 { projected.clamp(0, duration) } else { projected.max(0) }
+}
+
 /** Keeps lyric time moving when Windows or a background browser repeats a stale position. */
 #[derive(Default)]
 pub struct TimelineTracker {
@@ -57,6 +67,15 @@ impl TimelineTracker {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn projects_initial_os_position_from_report_timestamp_only_when_playing() {
+        assert_eq!(project_position(10_000, 120_000, true, 1.0, 3_000), 13_000);
+        assert_eq!(project_position(10_000, 120_000, false, 1.0, 3_000), 10_000);
+        assert_eq!(project_position(119_000, 120_000, true, 1.0, 3_000), 120_000);
+        assert_eq!(project_position(10_000, 120_000, true, 1.0, -1), 10_000);
+        assert_eq!(project_position(10_000, 120_000, true, 1.0, 86_400_000), 10_000);
+    }
 
     fn song(raw: i64, playing: bool) -> PlaybackSnapshot {
         let mut value = PlaybackSnapshot::unavailable();

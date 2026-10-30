@@ -18,6 +18,10 @@ abstract class FanDroidScreenBase extends Screen {
         super.extractRenderState(context, mouseX, mouseY, delta);
     }
 
+    protected double inputScale() { return 1; }
+    protected double pointerX(double x) { return x / inputScale(); }
+    protected double pointerY(double y) { return y / inputScale(); }
+
     protected boolean handleMouseClicked(double x, double y, int button) { return false; }
     protected boolean handleMouseDragged(double x, double y, int button, double dx, double dy) { return false; }
     protected boolean handleMouseReleased(double x, double y, int button) { return false; }
@@ -27,24 +31,28 @@ abstract class FanDroidScreenBase extends Screen {
 
     @Override
     public final boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
+        click = new MouseButtonEvent(pointerX(click.x()), pointerY(click.y()), click.buttonInfo());
         return handleMouseClicked(click.x(), click.y(), click.button())
                 || super.mouseClicked(click, doubled);
     }
 
     @Override
     public final boolean mouseDragged(MouseButtonEvent click, double dx, double dy) {
+        click = new MouseButtonEvent(pointerX(click.x()), pointerY(click.y()), click.buttonInfo()); dx /= inputScale(); dy /= inputScale();
         return handleMouseDragged(click.x(), click.y(), click.button(), dx, dy)
                 || super.mouseDragged(click, dx, dy);
     }
 
     @Override
     public final boolean mouseReleased(MouseButtonEvent click) {
+        click = new MouseButtonEvent(pointerX(click.x()), pointerY(click.y()), click.buttonInfo());
         return handleMouseReleased(click.x(), click.y(), click.button())
                 || super.mouseReleased(click);
     }
 
     @Override
     public final boolean mouseScrolled(double x, double y, double horizontal, double vertical) {
+        x = pointerX(x); y = pointerY(y);
         return handleMouseScrolled(x, y, horizontal, vertical)
                 || super.mouseScrolled(x, y, horizontal, vertical);
     }

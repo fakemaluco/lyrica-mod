@@ -62,8 +62,11 @@ public final class SecureTtmlParser {
             for (Element paragraph : elements(xml, "p")) {
                 ParagraphResult result = readParagraph(paragraph, sidecars);
                 if (result == null) continue;
-                if (firstAgent.isBlank()) firstAgent = result.lead.agent();
-                LyricAlignment alignment = LyricAlignment.forAgent(result.lead.agent(), firstAgent);
+                if (firstAgent.isBlank() && !result.lead.text().isBlank()) firstAgent = result.lead.agent();
+                String explicitSide = attribute(paragraph, "oppositeAligned");
+                LyricAlignment alignment = "true".equalsIgnoreCase(explicitSide) || "1".equals(explicitSide)
+                        ? LyricAlignment.OPPOSITE : "false".equalsIgnoreCase(explicitSide) || "0".equals(explicitSide)
+                        ? LyricAlignment.NORMAL : LyricAlignment.forAgent(result.lead.agent(), firstAgent);
                 groups.add(new LyricVocalGroup(result.lead.startMillis(), result.endMillis(),
                         result.lead, result.backgrounds, alignment));
             }
@@ -83,18 +86,29 @@ public final class SecureTtmlParser {
     private ParagraphResult readParagraph(Element paragraph, Sidecars sidecars) {
         long start = elementStart(paragraph, 0);
         long end = elementEnd(paragraph, start);
-        String agent = firstNonBlank(attribute(paragraph, "agent"), "v1");
+        String agent = firstNonBlank(inheritedAttribute(paragraph, "agent"), "v1");
         String role = firstNonBlank(attribute(paragraph, "role"), "").toLowerCase(Locale.ROOT);
         boolean paragraphBackground = role.contains("x-bg") || booleanAttribute(paragraph, "background");
-        String key = attribute(paragraph, "key");
+        String key = firstNonBlank(attribute(paragraph, "key"), attribute(paragraph, "id"));
 
         LineBuilder main = new LineBuilder(start, end, agent, paragraphBackground);
         List<LyricLine> backgrounds = new ArrayList<>();
         walk(paragraph, main, backgrounds, false);
         if (main.translation == null) main.translation = sidecars.translations.get(key);
-        if (main.romanization == null) main.romanization = sidecars.romanizations.get(key);
+        Romanization romanization = sidecars.romanizations.get(key);
+        if (main.romanization == null) main.romanization = romanization;
         LyricLine line = main.build();
-        if (line.text().isBlank()) return null;
+        if (romanization != null) {
+            for (int index = 0; index < backgrounds.size(); index++) {
+                // Older Spicy cache entries placed all backing spans in one wrapper.
+                List<LyricLine> candidates = romanization.backgrounds;
+                if (candidates.size() == backgrounds.size()) candidates = List.of(candidates.get(index));
+                for (LyricLine candidate : candidates) {
+                    backgrounds.set(index, applyRomanization(backgrounds.get(index), candidate));
+                }
+            }
+        }
+        if (line.text().isBlank() && backgrounds.isEmpty()) return null;
         long groupEnd = Math.max(line.endMillis(), backgrounds.stream()
                 .mapToLong(LyricLine::endMillis).max().orElse(line.endMillis()));
         return new ParagraphResult(line, List.copyOf(backgrounds), groupEnd);
@@ -117,7 +131,7 @@ public final class SecureTtmlParser {
                 continue;
             }
             if (role.contains("roman") || role.contains("translit")) {
-                line.romanization = cleanText(visibleText(element));
+                line.romanization = readRomanization(element, line.start, line.end);
                 continue;
             }
             if (role.contains("x-bg") && !insideBackground) {
@@ -148,9 +162,17 @@ public final class SecureTtmlParser {
                 String value = visibleText(element);
                 long start = elementStart(element, line.start);
                 long end = elementEnd(element, line.end);
-                line.appendTimed(value, start, end);
+                line.appendTimed(value, start, end, inlineRomanization(element));
             }
         }
+    }
+
+    private static String inheritedAttribute(Element element, String name) {
+        for (Node current = element; current instanceof Element parent; current = current.getParentNode()) {
+            String value = attribute(parent, name);
+            if (value != null && !value.isBlank()) return value;
+        }
+        return null;
     }
 
     private static List<LyricVocalGroup> repairGroupEnds(List<LyricVocalGroup> source) {
@@ -211,9 +233,9 @@ public final class SecureTtmlParser {
         return "";
     }
 
-    private static Sidecars readSidecars(Document document) {
+    private Sidecars readSidecars(Document document) {
         Map<String, String> translations = new HashMap<>();
-        Map<String, String> romanizations = new HashMap<>();
+        Map<String, Romanization> romanizations = new HashMap<>();
         for (Element text : elements(document, "text")) {
             String key = attribute(text, "for");
             if (key == null || key.isBlank()) continue;
@@ -227,13 +249,53 @@ public final class SecureTtmlParser {
                     break;
                 }
                 if (name.equals("transliteration")) {
-                    romanizations.putIfAbsent(key, value);
+                    romanizations.putIfAbsent(key, readRomanization(text, 0, 0));
                     break;
                 }
                 cursor = cursor.getParentNode();
             }
         }
         return new Sidecars(translations, romanizations);
+    }
+
+    private Romanization readRomanization(Element element, long start, long end) {
+        LineBuilder lead = new LineBuilder(start, end, "", false);
+        List<LyricLine> backgrounds = new ArrayList<>();
+        walk(element, lead, backgrounds, false);
+        return new Romanization(lead.build(), List.copyOf(backgrounds));
+    }
+
+    /** Match the provider's syllables, keeping the original timing and independent backing voices. */
+    private static LyricLine applyRomanization(LyricLine line, LyricLine romanized) {
+        List<TimedWord> words = new ArrayList<>(line.words().size());
+        StringBuilder text = new StringBuilder();
+        int matched = 0;
+        for (TimedWord word : line.words()) {
+            TimedWord match = romanized.words().stream().filter(candidate ->
+                    Math.abs(candidate.startMillis() - word.startMillis()) <= 2
+                            && Math.abs(candidate.endMillis() - word.endMillis()) <= 2)
+                    .findFirst().orElse(null);
+            String roman = word.romanization();
+            if (roman == null && match != null) {
+                // A separator in either script separates the romanized words. This also
+                // repairs cached Spicy sidecars whose spans omitted their whitespace.
+                boolean joined = word.joinPrevious() && match.joinPrevious();
+                roman = (words.isEmpty() || joined ? "" : " ") + cleanText(match.text());
+            }
+            if (roman != null && !roman.isBlank()) {
+                matched++;
+                text.append(roman);
+            }
+            words.add(new TimedWord(word.startMillis(), word.endMillis(), word.text(),
+                    word.joinPrevious(), roman));
+        }
+        String fullText = line.romanization();
+        if (fullText == null) {
+            fullText = matched == words.size() && matched > 0 ? cleanText(text.toString())
+                    : matched == 0 ? LineBuilder.blankToNull(romanized.text()) : null;
+        }
+        return new LyricLine(line.startMillis(), line.endMillis(), line.text(), words, line.agent(),
+                line.background(), line.translation(), fullText);
     }
 
     private static List<Element> elements(Node root, String wantedLocalName) {
@@ -260,7 +322,7 @@ public final class SecureTtmlParser {
             String role = firstNonBlank(attribute(child, "role"), attribute(child, "type"), "")
                     .toLowerCase(Locale.ROOT);
             String ruby = attribute(child, "ruby");
-            if (!role.contains("translation") && !role.contains("roman") && !role.contains("x-bg")
+            if (!role.contains("translation") && !role.contains("roman") && !role.contains("translit") && !role.contains("x-bg")
                     && (ruby == null || (!ruby.equalsIgnoreCase("text") && !ruby.equalsIgnoreCase("textContainer")))) {
                 return true;
             }
@@ -283,6 +345,17 @@ public final class SecureTtmlParser {
         return result.toString();
     }
 
+    private static String inlineRomanization(Element element) {
+        for (Element span : elements(element, "span")) {
+            String role = firstNonBlank(attribute(span, "role"), attribute(span, "type"), "")
+                    .toLowerCase(Locale.ROOT);
+            if (role.contains("roman") || role.contains("translit")) {
+                return LineBuilder.blankToNull(cleanText(visibleText(span)));
+            }
+        }
+        return null;
+    }
+
     private static void appendVisibleText(Node node, StringBuilder result) {
         NodeList children = node.getChildNodes();
         for (int i = 0; i < children.getLength(); i++) {
@@ -293,7 +366,7 @@ public final class SecureTtmlParser {
                 String role = firstNonBlank(attribute(element, "role"), attribute(element, "type"), "")
                         .toLowerCase(Locale.ROOT);
                 String ruby = attribute(element, "ruby");
-                if (role.contains("translation") || role.contains("roman") || role.contains("x-bg")) continue;
+                if (role.contains("translation") || role.contains("roman") || role.contains("translit") || role.contains("x-bg")) continue;
                 if (ruby != null && (ruby.equalsIgnoreCase("text") || ruby.equalsIgnoreCase("textContainer"))) continue;
                 appendVisibleText(element, result);
             }
@@ -402,7 +475,9 @@ public final class SecureTtmlParser {
         return "";
     }
 
-    private record Sidecars(Map<String, String> translations, Map<String, String> romanizations) { }
+    private record Sidecars(Map<String, String> translations, Map<String, Romanization> romanizations) { }
+
+    private record Romanization(LyricLine lead, List<LyricLine> backgrounds) { }
 
     private record ParagraphResult(LyricLine lead, List<LyricLine> backgrounds, long endMillis) { }
 
@@ -414,7 +489,7 @@ public final class SecureTtmlParser {
         private final StringBuilder text = new StringBuilder();
         private final List<WordDraft> words = new ArrayList<>();
         private String translation;
-        private String romanization;
+        private Romanization romanization;
 
         private LineBuilder(long start, long end, String agent, boolean background) {
             this.start = start;
@@ -433,24 +508,29 @@ public final class SecureTtmlParser {
         }
 
         private void appendTimed(String value, long wordStart, long wordEnd) {
+            appendTimed(value, wordStart, wordEnd, null);
+        }
+
+        private void appendTimed(String value, long wordStart, long wordEnd, String romanized) {
             String cleaned = cleanWord(value);
             if (cleaned.isEmpty()) return;
             boolean joinPrevious = text.length() > 0
                     && !Character.isWhitespace(text.charAt(text.length() - 1))
                     && !Character.isWhitespace(cleaned.charAt(0));
             text.append(cleaned);
-            words.add(new WordDraft(wordStart, Math.max(wordStart, wordEnd), cleaned, joinPrevious));
+            words.add(new WordDraft(wordStart, Math.max(wordStart, wordEnd), cleaned, joinPrevious, romanized));
         }
 
         private LyricLine build() {
             String normalized = cleanText(text.toString());
             List<TimedWord> timed = words.stream()
                     .filter(word -> !word.text.isEmpty())
-                    .map(word -> new TimedWord(word.start, word.end, word.text.toString(), word.joinPrevious))
+                    .map(word -> new TimedWord(word.start, word.end, word.text.toString(), word.joinPrevious, word.romanization))
                     .toList();
             if (timed.isEmpty() && !normalized.isBlank()) timed = List.of(new TimedWord(start, end, normalized));
-            return new LyricLine(start, end, normalized, timed, agent, background,
-                    blankToNull(translation), blankToNull(romanization));
+            LyricLine line = new LyricLine(start, end, normalized, timed, agent, background,
+                    blankToNull(translation), null);
+            return romanization == null ? line : applyRomanization(line, romanization.lead);
         }
 
         private static String blankToNull(String value) {
@@ -463,16 +543,18 @@ public final class SecureTtmlParser {
         private final long end;
         private final StringBuilder text;
         private final boolean joinPrevious;
+        private final String romanization;
 
         private WordDraft(long start, long end, String text) {
-            this(start, end, text, false);
+            this(start, end, text, false, null);
         }
 
-        private WordDraft(long start, long end, String text, boolean joinPrevious) {
+        private WordDraft(long start, long end, String text, boolean joinPrevious, String romanization) {
             this.start = start;
             this.end = end;
             this.text = new StringBuilder(text);
             this.joinPrevious = joinPrevious;
+            this.romanization = romanization;
         }
     }
 }

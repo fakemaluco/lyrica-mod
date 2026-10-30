@@ -24,6 +24,7 @@ public final class CompatibilityManager {
     private static final boolean MOD_MENU = loaded("modmenu");
     private static final boolean MINECRAFT_CURSOR = loaded("minecraft-cursor")
             || loaded("cursors_extended");
+    private static final IrisBridge IRIS_API = IrisBridge.discover(IRIS);
 
     private CompatibilityManager() { }
 
@@ -31,6 +32,7 @@ public final class CompatibilityManager {
         List<String> active = new ArrayList<>();
         add(active, MOUSE_TWEAKS, "Mouse Tweaks");
         add(active, IRIS, "Iris");
+        add(active, JI_AFK, "Ji AFK Cinematic");
         add(active, SODIUM, "Sodium");
         add(active, IMMEDIATELY_FAST, "ImmediatelyFast");
         add(active, EMI, "EMI");
@@ -56,6 +58,48 @@ public final class CompatibilityManager {
     public static boolean appleSkin() { return APPLE_SKIN; }
     public static boolean modMenu() { return MOD_MENU; }
     public static boolean minecraftCursor() { return MINECRAFT_CURSOR; }
+
+    private static final boolean JI_AFK = loaded("ji-afk-cinematic");
+    private static final java.lang.reflect.Method JI_STATE = jiStateMethod();
+    private static java.lang.reflect.Method jiStateMethod() {
+        if (JI_AFK) try {
+            return Class.forName("com.ji.afkcinematic.cinematic.CinematicManager", false,
+                    CompatibilityManager.class.getClassLoader()).getMethod("getState");
+        } catch (ReflectiveOperationException | LinkageError ignored) { }
+        return null;
+    }
+    /** Optional public API; no timers that could confuse sleeping or a manually hidden HUD with AFK. */
+    public static boolean jiAfkCinematicActive() {
+        if (JI_STATE == null) return false;
+        try { return "CINEMATIC_ACTIVE".equals(String.valueOf(JI_STATE.invoke(null))); }
+        catch (ReflectiveOperationException | LinkageError ignored) { return false; }
+    }
+
+    /** Public Iris API only. Optional linkage never makes Iris a required dependency. */
+    public static boolean worldShaderActive() { return IRIS_API.query(false); }
+    public static boolean worldShadowPass() { return IRIS_API.query(true); }
+
+    static final class IrisBridge {
+        final Object instance;
+        final java.lang.reflect.Method shaders, shadows;
+        boolean failed;
+        IrisBridge(Object instance, java.lang.reflect.Method shaders, java.lang.reflect.Method shadows) {
+            this.instance = instance; this.shaders = shaders; this.shadows = shadows;
+        }
+        static IrisBridge discover(boolean present) {
+            if (present) try {
+                Class<?> api = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
+                return new IrisBridge(api.getMethod("getInstance").invoke(null),
+                        api.getMethod("isShaderPackInUse"), api.getMethod("isRenderingShadowPass"));
+            } catch (ReflectiveOperationException | LinkageError ignored) { }
+            return new IrisBridge(null, null, null);
+        }
+        boolean query(boolean shadow) {
+            if (instance == null || failed) return false;
+            try { return Boolean.TRUE.equals((shadow ? shadows : shaders).invoke(instance)); }
+            catch (ReflectiveOperationException | LinkageError ignored) { failed = true; return false; }
+        }
+    }
 
     /** Render mods batch GUI work aggressively, so framebuffer passes must flush explicitly. */
     public static boolean needsExplicitGuiFlush() {

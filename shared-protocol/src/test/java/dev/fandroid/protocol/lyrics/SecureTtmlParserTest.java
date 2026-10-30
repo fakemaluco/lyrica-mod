@@ -10,6 +10,107 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SecureTtmlParserTest {
     private final SecureTtmlParser parser = new SecureTtmlParser();
 
+    @Test void romanizationNestedInsideEachWordRetainsThatWordsOwnTiming() {
+        var line = parser.parse("""
+                <tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><p begin="1s" end="4s">
+                  <span begin="1s" end="2s">안녕<span ttm:role="x-roman">annyeong</span></span>
+                  <span begin="3s" end="4s"> 세계<span ttm:role="x-transliteration">segye</span></span>
+                </p></body></tt>
+                """.getBytes(StandardCharsets.UTF_8)).lines().getFirst();
+        assertThat(line.text()).isEqualTo("안녕 세계");
+        assertThat(line.words()).extracting(TimedWord::romanization).containsExactly("annyeong", "segye");
+        assertThat(line.words()).extracting(TimedWord::startMillis).containsExactly(1000L, 3000L);
+        assertThat(line.words()).extracting(TimedWord::endMillis).containsExactly(2000L, 4000L);
+    }
+
+    @Test void timedRomanizationKeepsWordBoundariesAndDoesNotMixSimultaneousBackingVoices() {
+        var doc = parser.parse("""
+                <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata"
+                    xmlns:itunes="http://music.apple.com/lyric-ttml-internal">
+                  <head><metadata><transliterations><transliteration><text for="L1">
+                    <span begin="1001ms" end="1.499s">wata</span><span begin="1.7s" end="2s">shi </span>
+                    <span begin="3s" end="4s">wa</span>
+                    <span ttm:role="x-bg"><span begin="1s" end="4s">koe</span></span>
+                    <span ttm:role="x-bg"><span begin="1s" end="4s">ai</span></span>
+                  </text></transliteration></transliterations></metadata></head>
+                  <body><p begin="1s" end="4s" itunes:key="L1"><span begin="1s" end="1.5s">わた</span><span begin="1.7s" end="2s">し</span><span begin="3s" end="4s">は</span><span ttm:role="x-bg"><span begin="1s" end="4s">声</span></span><span ttm:role="x-bg"><span begin="1s" end="4s">愛</span></span></p></body>
+                </tt>
+                """.getBytes(StandardCharsets.UTF_8));
+        var group = doc.groups().getFirst();
+        assertThat(group.lead().romanization()).isEqualTo("watashi wa");
+        assertThat(group.lead().words()).extracting(TimedWord::romanization).containsExactly("wata", "shi", " wa");
+        assertThat(group.lead().words()).extracting(TimedWord::startMillis).containsExactly(1000L, 1700L, 3000L);
+        assertThat(group.backingVocals()).extracting(LyricLine::romanization).containsExactly("koe", "ai");
+        assertThat(group.backingVocals()).allSatisfy(line ->
+                assertThat(line.words().getFirst().romanization()).isEqualTo(line.romanization()));
+    }
+
+    @Test void repairsOldSpicySidecarSpacingUsingItsOriginalTimedWords() {
+        var line = parser.parse("""
+                <tt xmlns:itunes="http://music.apple.com/lyric-ttml-internal">
+                  <head><transliterations><transliteration><text for="L1"><span begin="1s" end="2s">annyeong</span><span begin="3s" end="4s">segye</span></text></transliteration></transliterations></head>
+                  <body><p begin="1s" end="4s" itunes:key="L1"><span begin="1s" end="2s">안녕</span><span begin="3s" end="4s"> 세계</span></p></body>
+                </tt>
+                """.getBytes(StandardCharsets.UTF_8)).lines().getFirst();
+        assertThat(line.romanization()).isEqualTo("annyeong segye");
+        assertThat(line.words()).extracting(TimedWord::romanization).containsExactly("annyeong", " segye");
+    }
+
+    @Test void inlineTimedRomanizationDoesNotReplaceTheOriginalTextOrTimestamps() {
+        var line = parser.parse("""
+                <tt xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><p begin="1s" end="4s">
+                  <span begin="1s" end="2s">안녕 </span><span begin="3s" end="4s">세계</span>
+                  <span ttm:role="x-roman"><span begin="1s" end="2s">annyeong </span><span begin="3s" end="4s">segye</span></span>
+                </p></body></tt>
+                """.getBytes(StandardCharsets.UTF_8)).lines().getFirst();
+        assertThat(line.text()).isEqualTo("안녕 세계");
+        assertThat(line.romanization()).isEqualTo("annyeong segye");
+        assertThat(line.words()).extracting(TimedWord::romanization).containsExactly("annyeong", " segye");
+        assertThat(line.words()).extracting(TimedWord::startMillis).containsExactly(1000L, 3000L);
+    }
+
+    @Test void spicyExplicitDuetSideWinsEvenWithoutAgentsAndPreservesSimultaneousSinging() {
+        var doc = parser.parse("""
+                <tt xmlns="http://www.w3.org/ns/ttml" xmlns:spicy="https://spicylyrics.org/ns/ttml"
+                    xmlns:ttm="http://www.w3.org/ns/ttml#metadata"><body><div>
+                  <p begin="1s" end="5s" spicy:oppositeAligned="true"><span begin="1s" end="5s">Right voice</span>
+                    <span ttm:role="x-bg"><span begin="2s" end="4s">Backing voice</span></span></p>
+                  <p begin="2s" end="6s" ttm:agent="v2" spicy:oppositeAligned="false">Left voice</p>
+                </div></body></tt>
+                """.getBytes(StandardCharsets.UTF_8));
+        assertThat(doc.groups().getFirst().alignment()).isEqualTo(LyricAlignment.OPPOSITE);
+        assertThat(doc.groups().get(1).alignment()).isEqualTo(LyricAlignment.NORMAL);
+        assertThat(doc.groups().getFirst().backingVocals()).hasSize(1);
+        assertThat(doc.activeGroupsAt(3_000)).hasSize(2);
+    }
+
+    @Test void appleAgentsAreInheritedAndVoice2000KeepsItsSideWhenOpeningTheSong() {
+        var doc = parser.parse("""
+                <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+                  <body ttm:agent="v1000"><div ttm:agent="v2000"><p begin="1s" end="4s">Right opens</p>
+                    <p begin="2s" end="5s" ttm:agent="v1000">Left overrides</p></div>
+                    <div><p begin="6s" end="8s">Left inherits body</p></div></body>
+                </tt>
+                """.getBytes(StandardCharsets.UTF_8));
+        assertThat(doc.groups()).extracting(LyricVocalGroup::alignment)
+                .containsExactly(LyricAlignment.OPPOSITE, LyricAlignment.NORMAL, LyricAlignment.NORMAL);
+        assertThat(doc.groups().getFirst().lead().agent()).isEqualTo("v2000");
+    }
+
+    @Test void aSpicyBackgroundOnlyOpeningIsKeptAndItsTimingIsNotCancelledByTheNextVoice() {
+        var doc = parser.parse("""
+                <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata">
+                  <body><div><p begin="1s" end="5s"><span ttm:role="x-bg">
+                    <span begin="1s" end="2s">Backing </span><span begin="2s" end="5s">opening</span></span></p>
+                    <p begin="3s" end="6s" ttm:agent="v2">Second voice</p></div></body>
+                </tt>
+                """.getBytes(StandardCharsets.UTF_8));
+        assertThat(doc.groups()).hasSize(2);
+        assertThat(doc.groups().getFirst().lead().text()).isBlank();
+        assertThat(doc.groups().getFirst().backingVocals().getFirst().words()).hasSize(2);
+        assertThat(doc.activeGroupsAt(4_000)).hasSize(2);
+    }
+
     @Test
     void parsesLineAndWordTimingTranslationAndDuetAgent() {
         String ttml = """

@@ -1,0 +1,16 @@
+// Local fixture only: never contacts music providers or changes user preferences.
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        if (name == 'runClient') {
+            systemProperty 'lyrica.motionArtworkSelfTest', 'true'
+            systemProperty 'lyrica.motionSelfTest', 'true'
+            systemProperty 'lyrica.canvasLayoutSelfTest', providers.gradleProperty('canvasLayout').getOrElse('false')
+            systemProperty 'lyrica.glassButtonsSelfTest', providers.gradleProperty('glassButtons').getOrElse('false')
+            systemProperty 'lyrica.toolbarSelfTest', providers.gradleProperty('toolbar').getOrElse('false')
+            systemProperty 'lyrica.slidersSelfTest', providers.gradleProperty('sliders').getOrElse('false')
+            systemProperty 'lyrica.motionProbeVideo', rootProject.layout.buildDirectory.file('motion-video-fixture.mp4').get().asFile.absolutePath
+            systemProperty 'lyrica.motionProbeOutput', rootProject.layout.buildDirectory.dir('motion-artwork-qa').get().asFile.absolutePath
+            args '--width', providers.gradleProperty('probeWidth').getOrElse('854'), '--height', providers.gradleProperty('probeHeight').getOrElse('480')
+        }
+    }
+}

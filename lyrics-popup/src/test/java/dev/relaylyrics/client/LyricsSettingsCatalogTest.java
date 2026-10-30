@@ -8,24 +8,51 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LyricsSettingsCatalogTest {
+    @Test void searchingFoldedSectionsPreservesNavigationAndPreferences() throws Exception {
+        var p = new ClientPreferences(); var c = catalog(p);
+        var before = keys(c, Category.APPEARANCE);
+        String preferences = ProtocolCodec.mapper().writeValueAsString(p);
+        assertThat(c.searchEntries(Category.APPEARANCE)).anyMatch(e -> e.key.endsWith("motion.canvas"));
+        assertThat(c.searchEntries(Category.CUSTOM)).anyMatch(e -> e.key.endsWith(".glow"));
+        assertThat(keys(c, Category.APPEARANCE)).isEqualTo(before);
+        assertThat(c.expanded("motion_artwork")).isFalse();
+        assertThat(c.expanded("effects")).isFalse();
+        assertThat(ProtocolCodec.mapper().writeValueAsString(p)).isEqualTo(preferences);
+    }
     private static LyricsSettingsCatalog catalog(ClientPreferences p) {
         return new LyricsSettingsCatalog(p, new LyricsSettingsCatalog.Actions() {
             public void run(String action) { }
             public String status(String name) { return name; }
         });
     }
+    @Test void dimensionSlidersEditTheActiveMediaProfileWithoutChangingTheNormalPopup() {
+        var p = new ClientPreferences();
+        var c = new LyricsSettingsCatalog(p, new LyricsSettingsCatalog.Actions() {
+            public void run(String action) { }
+            public String status(String name) { return name; }
+            public boolean videoPopupProfile() { return true; }
+        });
+        c.expand("interaction");
+        var entries = c.entries(Category.CUSTOM);
+        entries.stream().filter(e -> e.key.equals(LyricsSettingsCatalog.PREFIX + "width")).findFirst().orElseThrow().setNumber.accept(300);
+        entries.stream().filter(e -> e.key.equals(LyricsSettingsCatalog.PREFIX + "height")).findFirst().orElseThrow().setNumber.accept(280);
+        assertThat(p.getPopupWidth(true, false)).isEqualTo(300);
+        assertThat(p.getPopupHeight(true, false)).isEqualTo(280);
+        assertThat(p.getLyricsWidth()).isEqualTo(420);
+        assertThat(p.getLyricsHeight()).isEqualTo(260);
+    }
     private static List<String> keys(LyricsSettingsCatalog catalog, Category category) {
         return catalog.entries(category).stream().map(e -> e.key.substring(LyricsSettingsCatalog.PREFIX.length())).toList();
     }
     @Test void organizedCustomCategoryAndSmallMainPagesWithOptionalWorld() {
         var p = new ClientPreferences(); var c = catalog(p);
-        assertThat(c.categories()).containsExactly(Category.GENERAL, Category.APPEARANCE, Category.CUSTOM, Category.CONNECTION, Category.ADVANCED);
-        for (var category : c.categories()) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(8);
+        assertThat(c.categories()).containsExactly(Category.GENERAL, Category.APPEARANCE, Category.CUSTOM, Category.CONNECTION, Category.SOURCES, Category.ADVANCED, Category.WORLD);
+        for (var category : c.categories()) if (category != Category.SOURCES) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(8);
         p.setWorldLyrics(true);
         assertThat(c.categories()).endsWith(Category.WORLD);
-        for (var category : c.categories()) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(8);
+        for (var category : c.categories()) if (category != Category.SOURCES) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(8);
         assertThat(keys(c, Category.ADVANCED)).doesNotContain("world_lyrics");
-        c.expand("experimental"); assertThat(keys(c, Category.ADVANCED)).contains("world_lyrics");
+        assertThat(keys(c, Category.WORLD)).contains("world_lyrics", "world_style", "world_terrain_light", "world_position", "world_luminance");
         assertThat(keys(c, Category.GENERAL)).doesNotContain("world_lyrics");
     }
     @Test void openingEveryCategoryDoesNotMigrateOrOverwriteCustomValues() throws Exception {
@@ -77,7 +104,7 @@ class LyricsSettingsCatalogTest {
         assertThat(keys(c, Category.CUSTOM)).contains("shadow_distance", "reactive_hue_amount", "world_depth");
         assertThat(p.getLyricsShadowDistance()).isEqualTo(3); assertThat(p.getLyricsReactiveHueAmount()).isEqualTo(135);
         p.setWorldLyricsAutomatic(true); assertThat(keys(c, Category.WORLD)).doesNotContain("world_preset");
-        p.setWorldLyricsAutomatic(false); assertThat(keys(c, Category.WORLD)).contains("world_preset");
+        p.setWorldLyricsAutomatic(false); assertThat(keys(c, Category.WORLD)).contains("world_style").doesNotContain("world_preset");
         assertThat(p.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.MONOLITH);
     }
     @Test void manualConnectionMethodsStaySelectableAndRecognized() {
@@ -91,6 +118,16 @@ class LyricsSettingsCatalogTest {
             var methods = c.entries(Category.CONNECTION).stream().filter(e -> e.key.endsWith(".music_source")).findFirst().orElseThrow();
             assertThat(methods.options).hasSize(MusicSource.values().length);
         }
+    }
+    @Test void choosingSourcePriorityMovesTheOriginWithoutDisablingProviders() {
+        var p = new ClientPreferences(); var c = catalog(p);
+        var enabled = p.getLyricsSources();
+        c.expand("source_priority");
+        var entry = c.entries(Category.SOURCES).stream().filter(e -> e.key.endsWith("sources.priority.lrclib")).findFirst().orElseThrow();
+        entry.select.accept(0);
+        assertThat(p.getLyricsSourceOrder()).startsWith("lrclib", "spicy_community");
+        assertThat(p.getLyricsSources()).isEqualTo(enabled);
+        assertThat(c.entries(Category.SOURCES).stream().filter(e -> e.key.endsWith("sources.priority.lrclib")).findFirst().orElseThrow().value.get()).isEqualTo("#1");
     }
     @Test void detailedSettingsStayInCustomizeAndNoPreviewActionsRemain() {
         var p = new ClientPreferences(); var c = catalog(p);
@@ -125,7 +162,7 @@ class LyricsSettingsCatalogTest {
                 var translations = ProtocolCodec.mapper().readTree(stream);
                 var p = new ClientPreferences(); var c = catalog(p);
                 p.setWorldLyrics(true); LyricsSettingsPresets.applyBackground(p, LyricsSettingsPresets.Background.REACTIVE);
-                for (String group : List.of("effects", "background", "world", "typography", "experimental", "performance", "interaction", "connection_details")) c.expand(group);
+                for (String group : List.of("effects", "background", "world", "typography", "experimental", "performance", "interaction", "connection_details", "motion_artwork", "source_priority")) c.expand(group);
                 for (boolean automatic : List.of(true, false)) {
                     p.setWorldLyricsAutomatic(automatic);
                     for (var category : c.categories()) for (var entry : c.entries(category)) {

@@ -13,6 +13,7 @@ import net.minecraft.client.renderer.rendertype.RenderType;
 public final class WorldGlyphAtlas {
     private static final Map<RenderType, Source> SOURCES = new LinkedHashMap<>();
     private WorldGlyphAtlas() { }
+    public static void releaseSnapshots() { for (Source source : SOURCES.values()) source.pixels=null; }
 
     public static void changed(RenderType layer, int textureId, boolean color) {
         Source source = SOURCES.get(layer);

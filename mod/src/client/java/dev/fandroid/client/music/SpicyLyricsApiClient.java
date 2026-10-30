@@ -84,7 +84,7 @@ public final class SpicyLyricsApiClient {
         }
     }
 
-    private static String configuredKey() {
+    static String configuredKey() {
         String property = System.getProperty("lyrica.spicyLyricsKey", "").strip();
         if (!property.isBlank()) return validKey(property);
         String publishable = System.getenv("SPICY_LYRICS_PUBLISHABLE_KEY");

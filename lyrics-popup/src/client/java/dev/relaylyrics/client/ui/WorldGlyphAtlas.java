@@ -13,6 +13,7 @@ import java.util.Map;
 public final class WorldGlyphAtlas {
     private static final Map<RenderLayer, Source> SOURCES = new LinkedHashMap<>();
     private WorldGlyphAtlas() { }
+    public static void releaseSnapshots() { for (Source source : SOURCES.values()) source.pixels=null; }
 
     public static void changed(RenderLayer layer, int textureId, boolean color) {
         Source source = SOURCES.get(layer);

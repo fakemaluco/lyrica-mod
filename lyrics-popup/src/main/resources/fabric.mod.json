@@ -5,7 +5,9 @@
   "name": "Lyrica",
   "icon": "icon.png",
   "description": "Synchronized music lyrics for Minecraft.",
-  "authors": ["Lyrica contributors"],
+  "authors": [
+    "Lyrica contributors"
+  ],
   "contact": {
     "sources": "https://github.com/fakemaluco/lyrica-mod"
   },
@@ -13,8 +15,18 @@
   "environment": "client",
   "mixins": ["relaylyrics.client.mixins.json"],
   "entrypoints": {
-    "client": ["dev.relaylyrics.client.RelayLyricsClient"],
-    "modmenu": ["dev.relaylyrics.client.RelayLyricsModMenu"]
+    "client": [
+      "dev.relaylyrics.client.RelayLyricsClient"
+    ],
+    "modmenu": [
+      "dev.relaylyrics.client.RelayLyricsModMenu"
+    ],
+    "lambdynlights:initializer": [
+      {
+        "adapter": "lyrica_optional_lighting",
+        "value": "dev.relaylyrics.client.WorldLyricsLightIntegration"
+      }
+    ]
   },
   "depends": {
     "fabricloader": ">=0.19.3",
@@ -34,11 +46,18 @@
     "sodium": "*",
     "immediatelyfast": "*",
     "xaerominimap": "*",
-    "appleskin": "*"
+    "appleskin": "*",
+    "lambdynlights": ">=4.8.0",
+    "ji-afk-cinematic": "*"
   },
   "custom": {
     "modmenu": {
-      "badges": ["client"]
+      "badges": [
+        "client"
+      ]
     }
+  },
+  "languageAdapters": {
+    "lyrica_optional_lighting": "dev.relaylyrics.client.WorldLyricsLightAdapter"
   }
 }

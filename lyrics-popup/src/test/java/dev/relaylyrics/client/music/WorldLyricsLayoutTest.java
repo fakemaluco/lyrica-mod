@@ -59,15 +59,13 @@ class WorldLyricsLayoutTest {
                 .containsExactly("A\u0301" + family + "B\u0301");
     }
 
-    @Test void wideRowsUseUpToThreeWholeWordsAndAvoidAnOrphan() {
+    @Test void widePhrasesUseTheAvailableWidthWithoutThreeWordLimit() {
         var tokens = List.of(token("one", 0, 500, true), token("two", 500, 1000, true),
                 token("three", 1000, 1500, true), token("four", 1500, 2000, true));
         var planned = rows(WorldLyricsLayout.plan(tokens, true, false, 200, WIDTH));
-        assertThat(planned).hasSize(2);
+        assertThat(planned).hasSize(1);
         assertThat(planned.getFirst().spans()).extracting(WorldLyricsLayout.Span::text)
-                .containsExactly("one", "two");
-        assertThat(planned.getLast().spans()).extracting(WorldLyricsLayout.Span::text)
-                .containsExactly("three", "four");
+                .containsExactly("one", "two", "three", "four");
     }
 
     @Test void timedSyllablesRemainOnOneRowEvenIfTheirWordExceedsTheLimit() {
@@ -78,16 +76,14 @@ class WorldLyricsLayoutTest {
                 .containsExactly("super", "califragilistic");
     }
 
-    @Test void aSlightlyWideThirdWordStaysWithItsNeighbours() {
+    @Test void narrowRowsNeverOverflowTheAvailableWall() {
         var tokens = List.of(token("O", 0, 300, true), token("brilho", 300, 600, true),
                 token("acompanha", 600, 900, true), token("a", 900, 1200, true),
                 token("canção", 1200, 1500, true));
         var planned = rows(WorldLyricsLayout.plan(tokens, true, false, 100, WIDTH));
-        assertThat(planned).hasSize(2);
-        assertThat(planned.getFirst().spans()).extracting(WorldLyricsLayout.Span::text)
-                .containsExactly("O", "brilho");
-        assertThat(planned.getLast().spans()).extracting(WorldLyricsLayout.Span::text)
-                .containsExactly("acompanha", "a", "canção");
+        assertThat(planned).hasSize(3).allMatch(row -> row.width() <= 100);
+        assertThat(planned.stream().flatMap(row -> row.spans().stream()).map(WorldLyricsLayout.Span::text))
+                .containsExactly("O", "brilho", "acompanha", "a", "canção");
     }
 
     @Test void untimedTextWrapsButNeverReceivesInventedTimedPageTurns() {
@@ -133,10 +129,10 @@ class WorldLyricsLayoutTest {
         }
     }
 
-    @Test void scaleFavorsShortPhrasesButRespectsAvailableSpaceAndAnimationMargins() {
+    @Test void scaleStaysConsistentAndRespectsAvailableSpaceAndAnimationMargins() {
         double shortSize = WorldLyricsLayout.pixelScale(30, 1, 15, 5, 6, 1.2, false, 15);
         double longSize = WorldLyricsLayout.pixelScale(150, 2, 15, 5, 6, 1.2, false, 15);
-        assertThat(shortSize).isGreaterThan(longSize);
+        assertThat(shortSize).isEqualTo(longSize);
         double tinyWall = WorldLyricsLayout.pixelScale(120, 2, 2.2, 1.1, 12, 2, false, 15);
         assertThat((120 + 6) * tinyWall * 1.16 + .5).isLessThanOrEqualTo(2.200001);
         assertThat(2 * 15 * tinyWall * 1.16 + .5).isLessThanOrEqualTo(1.100001);
