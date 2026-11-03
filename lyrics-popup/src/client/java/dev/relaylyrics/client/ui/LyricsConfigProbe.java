@@ -24,7 +24,16 @@ import java.util.function.Consumer;
 
 /** Opt-in real Minecraft GUI fixture. Never connects accounts or writes user preferences. */
 public final class LyricsConfigProbe {
-    private static final String[] STAGES = Boolean.getBoolean("lyrica.configResponsiveSelfTest")
+    private static final boolean GEMINI = Boolean.getBoolean("lyrica.geminiShaderSelfTest");
+    private static final String[] STAGES = Boolean.getBoolean("lyrica.configLanguageSupportSelfTest")
+            ? new String[]{"languages", "translation_provider", "motion_artwork", "updates", "support", "languages_preview", "languages_replace"}
+            : GEMINI
+            ? new String[]{"gemini_controls", "gemini_controls_lower", "gemini_controls_creative", "gemini_controls_art", "gemini_controls_actions"}
+            : Boolean.getBoolean("lyrica.configAccordionSelfTest")
+            ? new String[]{"cards_style", "accordion_0", "accordion_30", "accordion_80", "accordion_180", "accordion_270", "collapse_60", "reverse_40", "category_60", "reduced", "compact_accordion"}
+            : Boolean.getBoolean("lyrica.configConnectionSelfTest")
+            ? new String[]{"connection", "spotify_panel", "spotify_setup", "youtube_panel", "spicy_key", "zoom_small", "zoom_large", "compact_connection"}
+            : Boolean.getBoolean("lyrica.configResponsiveSelfTest")
             ? new String[]{"general", "source_priority", "priority_choices", "compact", "compact_priority", "compact_tiny"}
             : Boolean.getBoolean("lyrica.configArtistOnlySelfTest")
             ? new String[]{"appearance", "artist", "artist_fallback"}
@@ -89,8 +98,19 @@ public final class LyricsConfigProbe {
     }
     private static void showStage() {
         MinecraftClient client = MinecraftClient.getInstance();
-        client.options.getGuiScale().setValue((Boolean.getBoolean("lyrica.configResponsiveSelfTest") || Boolean.getBoolean("lyrica.configModalOnlySelfTest") || Boolean.getBoolean("lyrica.configCompactOnlySelfTest") || Boolean.getBoolean("lyrica.configInteractionSelfTest") || Boolean.getBoolean("lyrica.configRenderingSelfTest")) ? (STAGES[stage].startsWith("compact") ? 3 : 1) : stage >= 16 ? 3 : 1); client.onResolutionChanged();
+        client.options.getGuiScale().setValue((Boolean.getBoolean("lyrica.configAccordionSelfTest") || Boolean.getBoolean("lyrica.configConnectionSelfTest") || Boolean.getBoolean("lyrica.configResponsiveSelfTest") || Boolean.getBoolean("lyrica.configModalOnlySelfTest") || Boolean.getBoolean("lyrica.configCompactOnlySelfTest") || Boolean.getBoolean("lyrica.configInteractionSelfTest") || Boolean.getBoolean("lyrica.configRenderingSelfTest")) ? (STAGES[stage].startsWith("compact") ? 3 : 1) : stage >= 16 ? 3 : 1); client.onResolutionChanged();
         String name = STAGES[stage];
+        if (name.equals("languages_preview") || name.equals("languages_replace")) {
+            PREFERENCES.setRomanizationUnderLine(name.equals("languages_preview"));
+            PREFERENCES.setLyricsRomanization(true); PREFERENCES.setLyricsTranslation(true);
+            PREFERENCES.setLyricsWidth(620); PREFERENCES.setLyricsHeight(360);
+            PREFERENCES.setLyricsX(120); PREFERENCES.setLyricsY(110); PREFERENCES.setPopupDocked(false);
+            RelayLyricsClient.overlay().setLyrics(new LyricsDocument(List.of(
+                    new LyricLine(0, 8_500, "声を聞かせて", List.of(new TimedWord(0, 8_500, "声を聞かせて", false, "koe o kikasete")), "lead", false,
+                            "Deixe-me ouvir a sua voz", "koe o kikasete"),
+                    new LyricLine(10_000, 18_000, "君と歩こう", List.of(), "lead", false,
+                            "Vamos caminhar juntos", "kimi to arukou"))));
+        }
         if (Boolean.getBoolean("lyrica.configResponsiveSelfTest")) {
             PREFERENCES.setLyricsWidth(name.equals("compact_tiny") ? 96 : 420);
             PREFERENCES.setLyricsHeight(name.equals("compact_tiny") ? 64 : 260);

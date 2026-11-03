@@ -22,7 +22,7 @@ final class ClientPreferencesCompatibilityTest {
         var preferences = ProtocolCodec.mapper().readValue("{}", ClientPreferences.class);
         assertThat(preferences.isSpotifyCanvas()).isTrue();
         assertThat(preferences.isAnimatedCovers()).isTrue();
-        assertThat(preferences.isCanvasBackground()).isFalse();
+        assertThat(preferences.isCanvasBackground()).isTrue();
         assertThat(preferences.isPauseMotionWithMusic()).isTrue();
         preferences.setSpotifyCanvas(false);
         preferences.setAnimatedCovers(false);
@@ -95,8 +95,8 @@ final class ClientPreferencesCompatibilityTest {
         assertThat(preferences.isWorldLyrics()).isFalse();
         assertThat(preferences.getMusicSource()).isEqualTo(MusicSource.AUTOMATIC);
         assertThat(preferences.getLyricsRenderType()).isEqualTo(LyricsRenderType.NON_INTRUSIVE);
-        assertThat(preferences.getLyricsWidth()).isEqualTo(420);
-        assertThat(preferences.getLyricsHeight()).isEqualTo(260);
+        assertThat(preferences.getLyricsWidth()).isEqualTo(210);
+        assertThat(preferences.getLyricsHeight()).isEqualTo(130);
     }
 
     @Test
@@ -163,5 +163,15 @@ final class ClientPreferencesCompatibilityTest {
         ClientPreferences restored = ProtocolCodec.mapper().readValue(
                 ProtocolCodec.mapper().writeValueAsBytes(preferences), ClientPreferences.class);
         assertThat(restored.isWorldLyrics()).isTrue();
+    }
+    @Test void islandDefaultsAndExplicitOptOutSurviveReload() throws Exception {
+        var preferences=ProtocolCodec.mapper().readValue("{}",ClientPreferences.class);
+        assertThat(preferences.isIslandKawarpBackground()).isTrue(); assertThat(preferences.isIslandVideoCover()).isTrue();
+        assertThat(preferences.isPopupDocked()).isTrue(); assertThat(preferences.getLyricsTextScale()).isEqualTo(.6);
+        preferences.setIslandKawarpBackground(false); preferences.setIslandVideoCover(false); preferences.setPopupDocked(false); preferences.setLyricsTextScale(1.2);
+        var restored=ProtocolCodec.mapper().readValue(ProtocolCodec.mapper().writeValueAsBytes(preferences),ClientPreferences.class);
+        assertThat(restored.isIslandKawarpBackground()).isFalse(); assertThat(restored.isIslandVideoCover()).isFalse();
+        assertThat(restored.isPopupDocked()).isFalse(); assertThat(restored.getLyricsTextScale()).isEqualTo(1.2);
+        restored.resetLayout(); assertThat(restored.isPopupDocked()).isTrue();
     }
 }

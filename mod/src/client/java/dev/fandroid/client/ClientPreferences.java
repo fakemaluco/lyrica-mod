@@ -10,6 +10,40 @@ import java.util.ArrayList;
 import dev.fandroid.client.music.MultiSourceLyricsClient;
 
 public final class ClientPreferences {
+    private boolean romanizationUnderLine = true;
+    private boolean automaticTranslation;
+    private String translationLanguage = java.util.Locale.getDefault().getLanguage();
+    private String translationProvider = "Google";
+    private String translationAddress = "https://api.openai.com/v1";
+    private String translationModel = "", translationGeminiModel = "";
+    private boolean motionVideos = true;
+    private boolean updateChecks = true, updatePrereleases;
+    public boolean isRomanizationUnderLine() { return romanizationUnderLine; }
+    public void setRomanizationUnderLine(boolean value) { romanizationUnderLine = value; }
+    public boolean isAutomaticTranslation() { return automaticTranslation; }
+    public void setAutomaticTranslation(boolean value) { automaticTranslation = value; if (value) lyricsTranslation = true; }
+    public String getTranslationLanguage() {
+        String code = com.tx24.spicyplayer.translation.TranslationModelsKt.languageCode(translationLanguage);
+        return code == null ? "en" : code;
+    }
+    public void setTranslationLanguage(String value) { translationLanguage = value; }
+    public String getTranslationProvider() { return java.util.List.of("Google", "DeepL", "Gemini", "OpenAi").contains(translationProvider) ? translationProvider : "Google"; }
+    public void setTranslationProvider(String value) { translationProvider = value; }
+    public String getTranslationAddress() { return translationAddress == null ? "https://api.openai.com/v1" : translationAddress.strip(); }
+    public void setTranslationAddress(String value) { translationAddress = value; }
+    public String getTranslationModel() { return translationModel == null ? "" : translationModel.strip(); }
+    public void setTranslationModel(String value) { translationModel = value; }
+    public String getTranslationGeminiModel() { return translationGeminiModel == null ? "" : translationGeminiModel.strip(); }
+    public void setTranslationGeminiModel(String value) { translationGeminiModel = value; }
+    public String translationModel() { return getTranslationProvider().equals("Gemini") ? getTranslationGeminiModel() : getTranslationModel(); }
+    public void setActiveTranslationModel(String value) { if (getTranslationProvider().equals("Gemini")) setTranslationGeminiModel(value); else setTranslationModel(value); }
+    public boolean isMotionVideos() { return motionVideos; }
+    public void setMotionVideos(boolean value) { motionVideos = value; }
+    public boolean isUpdateChecks() { return updateChecks; }
+    public void setUpdateChecks(boolean value) { updateChecks = value; }
+    public boolean isUpdatePrereleases() { return updatePrereleases; }
+    public void setUpdatePrereleases(boolean value) { updatePrereleases = value; }
+
     private dev.fandroid.client.music.WorldLyricsExperience.Style worldLyricsStyle;
     private dev.fandroid.client.music.WorldLyricsExperience.RenderMode worldLyricsRenderMode;
     private boolean worldLyricsSmoothFont = true;
@@ -41,7 +75,7 @@ public final class ClientPreferences {
 
     private boolean spotifyCanvas = true;
     private boolean animatedCovers = true;
-    private boolean canvasBackground;
+    private boolean canvasBackground = true;
     private boolean pauseMotionWithMusic = true;
 
     private boolean preferSpicyLyrics = true;
@@ -86,6 +120,80 @@ public final class ClientPreferences {
         setLyricsSources(values);
     }
     private double phoneHeight = 0.55;
+    private boolean islandKawarpBackground, islandVideoCover;
+    private boolean jadeIsland = true;
+    public boolean isJadeIsland() { return jadeIsland; }
+    public void setJadeIsland(boolean value) { jadeIsland=value; }
+    public boolean isIslandKawarpBackground() { return islandKawarpBackground; }
+    public void setIslandKawarpBackground(boolean value) { islandKawarpBackground=value; }
+    public boolean isIslandVideoCover() { return islandVideoCover; }
+    public void setIslandVideoCover(boolean value) { islandVideoCover=value; }
+
+    private boolean popupEdgeDocking = true, popupDocked;
+    private dev.fandroid.client.music.PopupDockLayout.Edge popupDockEdge;
+    private double popupDockAnchor = .5;
+    public boolean isPopupEdgeDocking() { return popupEdgeDocking; }
+    public void setPopupEdgeDocking(boolean enabled) { popupEdgeDocking=enabled; if(!enabled) popupDocked=false; }
+    public boolean isPopupDocked() { return popupEdgeDocking && popupDocked; }
+    public void setPopupDocked(boolean value) { popupDocked=popupEdgeDocking && value; }
+    public dev.fandroid.client.music.PopupDockLayout.Edge getPopupDockEdge() { return dev.fandroid.client.music.PopupDockLayout.Edge.TOP; }
+    public void setPopupDockEdge(dev.fandroid.client.music.PopupDockLayout.Edge value) { popupDockEdge=dev.fandroid.client.music.PopupDockLayout.Edge.TOP; }
+    public double getPopupDockAnchor() { return .5; }
+    public void setPopupDockAnchor(double value) { popupDockAnchor=.5; }
+
+
+
+    private int geminiCreativeFreedom=85;
+    private boolean geminiSongContext=true;
+    public int getGeminiCreativeFreedom(){return Math.clamp(geminiCreativeFreedom,0,100);}
+    public void setGeminiCreativeFreedom(int v){geminiCreativeFreedom=Math.clamp(v,0,100);}
+    public boolean isGeminiSongContext(){return geminiSongContext;}
+    public void setGeminiSongContext(boolean v){geminiSongContext=v;}
+    private String geminiArtStyle="auto", geminiArtSecondary="none";
+    private int geminiArtScale=100, geminiArtStroke=100, geminiArtGrain=30, geminiArtSeed=1, geminiArtBlend=35;
+    private boolean geminiArtAnimated, geminiArtAudio=true;
+    public String getGeminiArtStyle(){return geminiArtStyle==null?"auto":geminiArtStyle;}
+    public void setGeminiArtStyle(String v){geminiArtStyle=v;}
+    public String getGeminiArtSecondary(){return geminiArtSecondary==null?"none":geminiArtSecondary;}
+    public void setGeminiArtSecondary(String v){geminiArtSecondary=v;}
+    public int getGeminiArtScale(){return Math.clamp(geminiArtScale,25,300);}
+    public void setGeminiArtScale(int v){geminiArtScale=Math.clamp(v,25,300);}
+    public int getGeminiArtStroke(){return Math.clamp(geminiArtStroke,25,300);}
+    public void setGeminiArtStroke(int v){geminiArtStroke=Math.clamp(v,25,300);}
+    public int getGeminiArtGrain(){return Math.clamp(geminiArtGrain,0,100);}
+    public void setGeminiArtGrain(int v){geminiArtGrain=Math.clamp(v,0,100);}
+    public int getGeminiArtSeed(){return Math.clamp(geminiArtSeed,0,999);}
+    public void setGeminiArtSeed(int v){geminiArtSeed=Math.clamp(v,0,999);}
+    public int getGeminiArtBlend(){return Math.clamp(geminiArtBlend,0,100);}
+    public void setGeminiArtBlend(int v){geminiArtBlend=Math.clamp(v,0,100);}
+    public boolean isGeminiArtAnimated(){return geminiArtAnimated;}
+    public void setGeminiArtAnimated(boolean v){geminiArtAnimated=v;}
+    public boolean isGeminiArtAudio(){return geminiArtAudio;}
+    public void setGeminiArtAudio(boolean v){geminiArtAudio=v;}
+
+    private boolean geminiShaderEnabled;
+    private int geminiWorldStrength = 100;
+    public int getGeminiWorldStrength() { return Math.clamp(geminiWorldStrength, 0, 100); }
+    public void setGeminiWorldStrength(int value) { geminiWorldStrength = Math.clamp(value, 0, 100); }
+    private boolean geminiShaderAutomatic = true;
+    private String geminiShaderModel = "gemini-flash-latest";
+    private String geminiShaderDirection = "";
+    private int geminiShaderResolution = 192, geminiShaderFps = 24, geminiShaderBrightness = 65;
+    public boolean isGeminiShaderEnabled() { return geminiShaderEnabled; }
+    public void setGeminiShaderEnabled(boolean value) { geminiShaderEnabled = value; }
+    public boolean isGeminiShaderAutomatic() { return geminiShaderAutomatic; }
+    public void setGeminiShaderAutomatic(boolean value) { geminiShaderAutomatic = value; }
+    public String getGeminiShaderModel() { return geminiShaderModel == null || geminiShaderModel.isBlank() ? "gemini-flash-latest" : geminiShaderModel.strip(); }
+    public void setGeminiShaderModel(String value) { geminiShaderModel = value == null ? "" : value.strip().substring(0, Math.min(value.strip().length(), 100)); }
+    public String getGeminiShaderDirection() { return geminiShaderDirection == null ? "" : geminiShaderDirection.substring(0, Math.min(geminiShaderDirection.length(), 500)); }
+    public void setGeminiShaderDirection(String value) { geminiShaderDirection = value == null ? "" : value.substring(0, Math.min(value.length(), 500)); }
+    public int getGeminiShaderResolution() { return geminiShaderResolution <= 128 ? 128 : geminiShaderResolution <= 192 ? 192 : 256; }
+    public void setGeminiShaderResolution(int value) { geminiShaderResolution = value; }
+    public int getGeminiShaderFps() { return Math.clamp(geminiShaderFps, 15, 30); }
+    public void setGeminiShaderFps(int value) { geminiShaderFps = value; }
+    public int getGeminiShaderBrightness() { return Math.clamp(geminiShaderBrightness, 15, 100); }
+    public void setGeminiShaderBrightness(int value) { geminiShaderBrightness = Math.clamp(value, 15, 100); }
+
     private boolean lyricsVisible = true;
     private boolean lyricsPinned = true;
     private boolean lyricsAllowGuiOverlap;
@@ -107,11 +215,20 @@ public final class ClientPreferences {
     private int lyricsShadowDistance = 1;
     private int lyricsShadowSoftness = 1;
     private boolean lyricsClickSeek = true;
+    private int lyricsDelayMillis;
+    public int getLyricsDelayMillis() { return Math.clamp(lyricsDelayMillis, -5_000, 5_000); }
+    public void setLyricsDelayMillis(int value) { lyricsDelayMillis = Math.clamp(value, -5_000, 5_000); }
     private boolean readReceipts = true;
     private int lyricsX = 24;
     private int lyricsY = 24;
-    private int lyricsWidth = 420;
-    private int lyricsHeight = 260;
+    private boolean musicPresenceEnabled = true;
+    private boolean musicPresenceSharing = true;
+    public boolean isMusicPresenceEnabled() { return musicPresenceEnabled; }
+    public void setMusicPresenceEnabled(boolean value) { musicPresenceEnabled = value; }
+    public boolean isMusicPresenceSharing() { return musicPresenceSharing; }
+    public void setMusicPresenceSharing(boolean value) { musicPresenceSharing = value; }
+    private int lyricsWidth = 210;
+    private int lyricsHeight = 130;
     // Zero migrates lazily from the existing dimensions, without overwriting them.
     @com.fasterxml.jackson.annotation.JsonProperty
     private int lyricsVideoWidth;
@@ -142,6 +259,8 @@ public final class ClientPreferences {
     private MusicSource musicSource = MusicSource.AUTOMATIC;
     private LyricsRenderType lyricsRenderType = LyricsRenderType.NON_INTRUSIVE;
     private String spotifyClientId = "";
+    private String spicyLyricsApiKey = "";
+    private double settingsUiScale = 1;
 
     public static ClientPreferences load() {
         Path file = file();
@@ -412,6 +531,11 @@ public final class ClientPreferences {
     public void setLyricsRenderType(LyricsRenderType value) {
         lyricsRenderType = value == null ? LyricsRenderType.NON_INTRUSIVE : value;
     }
+    public String getSpicyLyricsApiKey() { return spicyLyricsApiKey == null ? "" : spicyLyricsApiKey.strip(); }
+    public void setSpicyLyricsApiKey(String value) { spicyLyricsApiKey = value == null ? "" : value.strip(); }
+    public double getSettingsUiScale() { return Double.isFinite(settingsUiScale) ? Math.clamp(settingsUiScale, .55, 1.5) : 1; }
+    public void setSettingsUiScale(double value) { settingsUiScale = Double.isFinite(value) ? Math.clamp(value, .55, 1.5) : 1; }
+
     public String getSpotifyClientId() { return spotifyClientId == null ? "" : spotifyClientId.strip(); }
     public void setSpotifyClientId(String value) { spotifyClientId = value == null ? "" : value.strip(); }
 }

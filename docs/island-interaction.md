@@ -1,0 +1,27 @@
+# Arrasto e repouso da ilha — 0.8.95
+
+Com **Ilha de música no topo** ativada, arraste o pop-up e leve o cursor até a área da ilha, no topo central da tela. Ele se transforma em ilha imediatamente, sem precisar soltar. Ainda segurando o mesmo botão, puxe para longe dessa área para voltar ao pop-up. Você pode ir e voltar várias vezes no mesmo gesto. Soltar o mouse mantém o formato atual. Um clique parado ou o redimensionamento não aciona essa transformação.
+
+A área para sair da ilha é um pouco maior que a área de entrada, evitando alternância ao tremer o cursor na borda. Depois que o arrasto começou, voltar ao ponto inicial do clique não cancela a captura. Enquanto o pop-up se transforma sob o botão pressionado, o hover não abre os controles da ilha. As molas continuam a partir da posição e velocidade atuais quando o gesto muda de direção.
+
+A ilha mantém o nome e as barras enquanto a música estiver tocando. Ao pausar ou parar, começa uma espera nova de cinco segundos. Depois desse prazo sem hover, ela contrai somente a largura e mostra apenas a capa ou vídeo. A cápsula mínima mede 96 × 32 unidades de layout: três vezes a largura da versão 0.8.91, com a mídia preenchendo a cápsula. A altura compacta e o alinhamento central permanecem iguais. Quando a opção de vídeo da ilha estiver desligada, esse estado usa a foto estática.
+
+Quando essa cápsula de mídia aparece, o Canvas ou vídeo da capa volta a reproduzir, mesmo com a música pausada. Isso vale somente para a cápsula recolhida visível, com vídeo da ilha e animações ativados. O pop-up normal e a ilha expandida continuam respeitando a preferência de pausar os vídeos com a música. Sem vídeo disponível, a capa estática continua sendo o fallback.
+
+A reprodução independente é solicitada por visibilidade e expira se a cápsula deixar de ser desenhada. Não muda o estado de reprodução da música, não precisa reiniciar a origem do vídeo a cada quadro e não mantém um vídeo oculto decodificando indefinidamente. As atualizações de música pausada não interrompem essa reprodução da cápsula.
+
+Passar o mouse sobre a mídia expande os controles da ilha. Ao retirar o mouse, ela volta ao formato compacto com o nome; pausada, mantém o nome por mais cinco segundos. Trocar de música ou recolher o pop-up também renova o prazo. Retomar a reprodução revela o nome sem precisar de hover. Atualizações de progresso da mesma faixa pausada não reiniciam a contagem. O prazo usa tempo real, inclusive com animações desligadas.
+
+A largura usa o mesmo amortecimento dos controles liquid glass, com evolução mais lenta e pequeno retorno elástico. A mola preserva posição e velocidade quando o mouse entra durante o recolhimento ou a música volta a tocar. A transparência do nome é limitada separadamente, sem cortar o retorno elástico da largura. Com animações desligadas, a mudança de tamanho é imediata. Enquanto o nome está oculto, a ilha suspende a solicitação de medição de áudio para as barras.
+
+O retorno do pop-up agora ajusta a elasticidade à distância até a ilha, proporcionalmente à janela. Perto, ele acomoda com pouco bounce; longe, a chegada estica a bolha horizontalmente e comprime a altura antes de assentar. A deformação é limitada e permanece dentro da tela. Restaurar o pop-up também tem uma pequena expansão elástica ao chegar.
+
+Abrir e fechar os detalhes da ilha preserva o retorno da mola nos dois sentidos. As molas podem mudar de resposta sem perder a posição ou a velocidade atuais, inclusive ao inverter o arrasto no meio da chegada. O restante da animação continua sendo desenhado durante a acomodação final, evitando que o bounce de restauração seja cortado ao atingir o tamanho normal. Desligar as animações remove as deformações e vai diretamente ao estado final.
+
+O gesto de puxar o botão de restauração da ilha continua disponível para iniciar um novo arrasto após soltar o mouse. Durante um arrasto já em andamento, puxar para fora da área basta para restaurar. O tamanho escolhido para o pop-up é preservado. Desligar a ilha impede o encaixe por arrasto. O formato e a posição finais são salvos ao terminar o gesto.
+
+Validação: testes determinísticos cobrem a reprodução prolongada, o prazo de cinco segundos após pausar, a renovação pelo hover, a retomada do nome, o retorno elástico e a reversão da mola, além da entrada/saída com margens diferentes em várias escalas. O teste nativo do gesto contínuo cobre oito estados: ilha ainda segurada, saída para pop-up, retorno sem soltar, soltura como ilha, novo arrasto com retorno ao ponto inicial do clique, nova saída, soltura como pop-up e encaixe desativado.
+
+O autoplay tem teste com MP4 real no decodificador, incluindo atualizações repetidas de música pausada, revogação por renderização comum e expiração sem visibilidade. A verificação nativa compara os números dos quadros enviados à GPU e os pixels renderizados da cápsula entre duas capturas; cobre Canvas, vídeo de álbum, retorno à pausa no hover e animações/vídeo desligados.
+
+As molas têm testes para maior bounce em trajetos longos, acomodação dentro da janela, reversão durante a deformação de chegada, preservação de momento ao mudar a resposta e resultados equivalentes em taxas de quadros diferentes. A verificação nativa cobre nove estados em cada versão: origem próxima, chegada próxima, origem distante, chegada distante, restauração elástica, ilha compacta, abertura e fechamento elásticos, e animações desligadas.

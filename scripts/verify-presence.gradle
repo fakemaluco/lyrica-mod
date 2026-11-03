@@ -1,0 +1,11 @@
+// Local avatar/playback fixtures. Never authenticates a music/presence account or saves Lyrica preferences.
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        if (name == 'runClient') {
+            systemProperty 'lyrica.worldExperienceSelfTest', 'true'
+            systemProperty 'lyrica.musicPresenceSelfTest', 'true'
+            systemProperty 'lyrica.presenceProbeOutput', rootProject.layout.buildDirectory.dir('presence-qa').get().asFile.absolutePath
+            args '--width', '1280', '--height', '720', '--quickPlaySingleplayer', 'LyricaWorldQA'
+        }
+    }
+}

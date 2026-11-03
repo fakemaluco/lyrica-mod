@@ -14,6 +14,7 @@ public final class WorldLyricsRenderHook {
     public static void register() {
         LevelRenderEvents.COLLECT_SUBMITS.register(context -> {
             WorldBuffers buffers = new WorldBuffers();
+            dev.relaylyrics.client.ui.MusicPresenceRenderer.renderWorld(context.poseStack(), buffers, context.gameRenderer().mainCamera().position());
             WorldLyricsRenderer.render(context.poseStack(), buffers,
                     context.gameRenderer().mainCamera().position());
             buffers.submit(context.submitNodeCollector());

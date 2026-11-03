@@ -2,6 +2,8 @@ mod platform;
 mod spicetify;
 mod timeline;
 mod session_selection;
+mod reactive_audio;
+mod island_meter;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -155,7 +157,7 @@ enum Event {
     Shutdown,
 }
 
-fn stdin_events(sender: mpsc::Sender<Event>) {
+fn stdin_events(sender: mpsc::Sender<Event>, audio: std::sync::Arc<reactive_audio::ReactiveAudioStream>) {
     thread::spawn(move || {
         for line in io::stdin().lock().lines().map_while(Result::ok) {
             let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -174,6 +176,7 @@ fn stdin_events(sender: mpsc::Sender<Event>) {
                         .unwrap_or("AUTOMATIC").to_owned();
                     if sender.send(Event::Source(source)).is_err() { break; }
                 }
+                Some("audio_levels_enabled") => audio.set_enabled(value["enabled"].as_bool().unwrap_or(false)),
                 Some("reload_audio_output") => {
                     if sender.send(Event::ReloadAudioOutput).is_err() { break; }
                 }
@@ -197,7 +200,8 @@ fn output(value: Value) {
 
 fn main() -> Result<()> {
     let (sender, receiver) = mpsc::channel();
-    stdin_events(sender.clone());
+    let audio = reactive_audio::ReactiveAudioStream::start();
+    stdin_events(sender.clone(), audio.clone());
     let spicetify = spicetify::Server::start(sender)?;
     output(
         json!({"type": "pairing_code", "code": spicetify.pairing_code(), "port": spicetify.port()}),
@@ -205,6 +209,7 @@ fn main() -> Result<()> {
 
     let mut system = platform::SystemMedia::new()?;
     let mut intensity = platform::start_intensity_capture();
+    audio.replace_source(intensity.clone());
     let mut latest_spicetify: Option<(PlaybackSnapshot, Instant)> = None;
     let mut latest_youtube: Option<(PlaybackSnapshot, Instant)> = None;
     let mut spicetify_connected = false;
@@ -216,7 +221,8 @@ fn main() -> Result<()> {
     loop {
         if !drain_events(&receiver, &mut system, &spicetify, &mut latest_spicetify,
             &mut latest_youtube, &mut spicetify_connected, &mut youtube_connected,
-            &mut active_source, &mut intensity, selected_source) {
+            &mut active_source, &mut intensity, &audio, selected_source) {
+            audio.stop();
             intensity.stop();
             return Ok(());
         }
@@ -300,6 +306,7 @@ fn drain_events(
     youtube_connected: &mut bool,
     active_source: &mut String,
     intensity: &mut platform::IntensityCapture,
+    audio: &reactive_audio::ReactiveAudioStream,
     selected_source: SelectedSource,
 ) -> bool {
     while let Ok(event) = receiver.try_recv() {
@@ -316,6 +323,7 @@ fn drain_events(
             Event::ReloadAudioOutput => {
                 intensity.stop();
                 *intensity = platform::start_intensity_capture();
+                audio.replace_source(intensity.clone());
                 output(json!({"type": "audio_output_reloaded"}));
             }
             Event::SpicetifySnapshot(snapshot) => {

@@ -38,4 +38,11 @@ class WorldLyricsPlacementTest {
         assertThat(WorldLyricsPlacement.pageIndex(pages, 1500)).isEqualTo(1);
         assertThat(WorldLyricsPlacement.pageIndex(pages, 500)).isZero();
     }
+
+    @Test void extremeSpeedDoesNotImmediatelyConsumeAFreshAnchor() {
+        assertThat(WorldLyricsPlacement.shouldRelocate(160, 168, 160, 4, .6, true)).isFalse();
+        assertThat(WorldLyricsPlacement.shouldRelocate(90, 168, 160, 4, .6, true)).isTrue();
+        assertThat(WorldLyricsPlacement.shouldRelocate(80, 168, -30, 4, 2, true)).isFalse();
+        assertThat(WorldLyricsPlacement.shouldRelocate(Double.NaN, 168, 30, 4, 2, true)).isFalse();
+    }
 }

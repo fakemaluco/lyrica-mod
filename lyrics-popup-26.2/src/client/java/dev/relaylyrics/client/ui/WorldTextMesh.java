@@ -54,7 +54,8 @@ public final class WorldTextMesh {
 
     public static void tick() {
         var preferences = dev.relaylyrics.client.RelayLyricsClient.preferences();
-        if (!preferences.isWorldLyrics()) { clear(); WorldGlyphAtlas.releaseSnapshots(); return; }
+        if (!preferences.isWorldLyrics() && (dev.relaylyrics.client.MusicPresence.pinned() == null
+                || dev.relaylyrics.client.MusicPresence.track(dev.relaylyrics.client.MusicPresence.pinned()) == null)) { clear(); WorldGlyphAtlas.releaseSnapshots(); return; }
 
         if (Minecraft.getInstance().level == null) { clear(); WorldGlyphAtlas.releaseSnapshots(); return; }
         for (int i = 0; i < 2 && !QUEUE.isEmpty(); i++) {

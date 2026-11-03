@@ -3,21 +3,24 @@ package dev.fandroid.client.music;
 /** Frame-rate-independent damped spring used by the lyric renderer. */
 public final class SpringValue {
     private static final double EPSILON = 1E-5;
-    private final double frequency;
-    private final double damping;
+    private double frequency;
+    private double damping;
     private double goal;
     private double position;
     private double velocity;
 
     public SpringValue(double start, double frequency, double damping) {
-        if (frequency <= 0) throw new IllegalArgumentException("frequency must be positive");
-        if (damping < 0) throw new IllegalArgumentException("damping cannot be negative");
-        this.frequency = frequency;
-        this.damping = damping;
+        retune(frequency,damping);
         goal = start;
         position = start;
     }
 
+    /** Change response without discarding the current position or momentum. */
+    public void retune(double frequency,double damping) {
+        if(!Double.isFinite(frequency) || frequency<=0)throw new IllegalArgumentException("frequency must be positive");
+        if(!Double.isFinite(damping) || damping<0)throw new IllegalArgumentException("damping cannot be negative");
+        this.frequency=frequency;this.damping=damping;
+    }
     public void setGoal(double goal) {
         this.goal = goal;
     }

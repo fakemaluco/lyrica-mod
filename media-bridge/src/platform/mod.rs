@@ -31,6 +31,7 @@ pub struct IntensityCapture {
     pub bpm: Arc<AtomicU32>,
     pub centroid: Arc<AtomicU32>,
     pub bands: Arc<[AtomicU32; BAND_COUNT]>,
+    pub island_bands: Arc<[AtomicU32; 5]>,
 }
 
 impl IntensityCapture {
@@ -44,6 +45,7 @@ impl IntensityCapture {
             bpm: Arc::new(AtomicU32::new(120)),
             centroid: Arc::new(AtomicU32::new(5000)),
             bands: Arc::new([const { AtomicU32::new(0) }; BAND_COUNT]),
+            island_bands: Arc::new([const { AtomicU32::new(0) }; 5]),
         }
     }
 

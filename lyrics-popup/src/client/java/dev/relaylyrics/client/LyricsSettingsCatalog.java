@@ -28,16 +28,18 @@ public final class LyricsSettingsCatalog {
         public final String key;
         Category(String name) { key = PREFIX + "category." + name; }
     }
-    public enum Kind { TOGGLE, CHOICE, SLIDER, ACTION, INFO, GROUP }
+    public enum Kind { TOGGLE, CHOICE, SLIDER, ACTION, INFO, GROUP, TEXT }
     public interface Actions {
         void run(String action);
         String status(String name);
+        default void input(String name, String value) { }
         default boolean videoPopupProfile() { return false; }
         default boolean squareVideoPopupProfile() { return false; }
     }
     public static final class Entry {
         public final String key;
         public final Kind kind;
+        public String section = "";
         public Supplier<String> value = () -> "";
         public List<String> options = List.of();
         public IntSupplier selected = () -> 0;
@@ -46,17 +48,31 @@ public final class LyricsSettingsCatalog {
         public DoubleSupplier number = () -> 0;
         public DoubleConsumer setNumber = ignored -> { };
         public double min, max, step;
-        public boolean changesStructure;
+        public boolean changesStructure, masked;
+        public Consumer<String> setText = ignored -> { };
         Entry(String name, Kind kind) { this.key = PREFIX + name; this.kind = kind; }
+        /** Keep a native control alive while refreshing captured preference values and callbacks. */
+        public void refreshFrom(Entry next) {
+            if (!key.equals(next.key) || kind != next.kind) throw new IllegalArgumentException("Setting identity changed");
+            section = next.section; value = next.value; options = next.options; selected = next.selected;
+            select = next.select; activate = next.activate; number = next.number; setNumber = next.setNumber;
+            min = next.min; max = next.max; step = next.step; changesStructure = next.changesStructure;
+            masked = next.masked; setText = next.setText;
+        }
     }
     private final ClientPreferences p;
     private final Actions actions;
+    private String section = "";
     private final Set<String> expanded = new HashSet<>();
     private final List<Entry> entries = new ArrayList<>();
 
     public LyricsSettingsCatalog(ClientPreferences preferences, Actions actions) {
         p = preferences;
         this.actions = actions;
+    }
+    private Entry input(String name, Supplier<String> value, Consumer<String> change, boolean masked) {
+        Entry entry = entry(name, Kind.TEXT); entry.value = value; entry.setText = change; entry.masked = masked;
+        return entry;
     }
     public List<Category> categories() {
         return List.of(Category.values());
@@ -86,7 +102,7 @@ public final class LyricsSettingsCatalog {
     }
 
     public List<Entry> entries(Category category) {
-        entries.clear();
+        entries.clear(); section = lower(category);
         switch (category) {
             case GENERAL -> {
                 toggle("visible", p::isLyricsVisible, p::setLyricsVisible);
@@ -94,29 +110,42 @@ public final class LyricsSettingsCatalog {
                 indexed("inventory_content", List.of("inventory_content.none", "inventory_content.lyrics", "inventory_content.cover", "inventory_content.both"),
                         () -> LyricsSettingsPresets.inventoryContent(p), n -> LyricsSettingsPresets.setInventoryContent(p, n));
                 toggle("pinned", p::isLyricsPinned, p::setLyricsPinned);
+                toggle("popup_edge_docking", p::isPopupEdgeDocking, p::setPopupEdgeDocking);
                 indexed("additional_text", List.of("additional_text.none", "additional_text.translation", "additional_text.romanization", "additional_text.both"),
                         () -> LyricsSettingsPresets.additionalText(p), n -> LyricsSettingsPresets.setAdditionalText(p, n));
                 toggle("animations", p::isLyricsAnimations, p::setLyricsAnimations).changesStructure = true;
+                integer("lyrics_delay", -5_000, 5_000, 25, p::getLyricsDelayMillis, p::setLyricsDelayMillis, " ms");
+                action("lyrics_delay_reset", "reset", () -> p.setLyricsDelayMillis(0));
                 action("adjust_layout", "adjust_layout.button", () -> actions.run("layout"));
             }
             case APPEARANCE -> {
+                section = "style";
                 indexed("visual_style", List.of("visual_style.classic", "visual_style.modern"), () -> p.isModernMode() ? 1 : 0, n -> p.setModernMode(n == 1));
                 action("font", "font", () -> actions.run("font")).value = () -> p.getGoogleFontFamily().isEmpty() ? "@" + PREFIX + "google_font.minecraft" : p.getGoogleFontFamily();
                 percent("scale", .6, 1.8, .05, p::getLyricsTextScale, p::setLyricsTextScale);
                 choice("alignment", LyricsTextAlignment.values(), p::getLyricsAlignment, p::setLyricsAlignment);
+                section = "appearance_effects";
                 choice("effects_preset", LyricsSettingsPresets.Effects.values(), () -> LyricsSettingsPresets.effects(p), v -> {
                     if (v == LyricsSettingsPresets.Effects.CUSTOM) { expanded.add("effects"); actions.run("custom_effects"); }
                     else LyricsSettingsPresets.applyEffects(p, v);
                 });
+                section = "appearance_background";
                 choice("background_preset", LyricsSettingsPresets.Background.values(), () -> LyricsSettingsPresets.background(p), v -> { LyricsSettingsPresets.applyBackground(p, v); actions.run("background_style"); }).changesStructure = true;
                 if (group("motion_artwork")) {
+                    toggle("motion.videos", p::isMotionVideos, value -> { p.setMotionVideos(value); actions.run("motion_artwork"); });
                     toggle("motion.canvas", p::isSpotifyCanvas, value -> { p.setSpotifyCanvas(value); actions.run("motion_artwork"); });
                     toggle("motion.animated_cover", p::isAnimatedCovers, value -> { p.setAnimatedCovers(value); actions.run("motion_artwork"); });
                     toggle("motion.background", p::isCanvasBackground, value -> { p.setCanvasBackground(value); actions.run("motion_artwork"); });
                     toggle("motion.pause", p::isPauseMotionWithMusic, value -> { p.setPauseMotionWithMusic(value); actions.run("motion_artwork"); });
                     info("motion.status", () -> actions.status("motion_artwork"));
                     action("motion.retry", "motion.retry.button", () -> actions.run("motion_artwork"));
+                    if (group("island")) {
+                        toggle("island.kawarp", p::isIslandKawarpBackground, p::setIslandKawarpBackground);
+                        toggle("island.jade", p::isJadeIsland, p::setJadeIsland);
+                        toggle("island.video", p::isIslandVideoCover, value -> { p.setIslandVideoCover(value); actions.run("motion_artwork"); });
+                    }
                 }
+                section = "appearance_tools";
                 action("restore_appearance", "restore", () -> restore("appearance"));
             }
             case CONNECTION -> {
@@ -124,13 +153,43 @@ public final class LyricsSettingsCatalog {
                 indexed("music_app", main.stream().map(v -> "music_source." + lower(v)).toList(), () -> main.indexOf(p.getMusicSource()), n -> {
                     p.setMusicSource(main.get(n)); actions.run("source");
                 }).changesStructure = true;
-                action("connection.setup", "connection.setup.button", () -> actions.run("connection_setup"));
+                action("connection.auto", "connection.auto.button", () -> actions.run("connection_auto"));
+                if (group("spotify_account")) {
+                    info("spotify.account_status", () -> actions.status("spotify_status"));
+                    info("spotify.account_intro", () -> "@" + PREFIX + "spotify.account_intro.value");
+                    input("spotify.client_input", p::getSpotifyClientId, p::setSpotifyClientId, false);
+                    action("spotify.connect", "spotify.connect", () -> actions.run("spotify_connect"));
+                    action("spotify.disconnect", "spotify.disconnect", () -> actions.run("spotify_disconnect"));
+                    action("spotify.setup.reopen", "spotify.setup.reopen", () -> actions.run("spotify_reopen"));
+                    if (group("spotify_setup")) {
+                        info("spotify.setup_step", () -> "@" + PREFIX + "spotify.setup.application");
+                        action("spotify.setup.dashboard", "spotify.dashboard.button", () -> actions.run("spotify_dashboard"));
+                        action("spotify.setup.redirect", "spotify.copy_redirect", () -> actions.run("spotify_redirect"));
+                    }
+                }
+                if (group("youtube_account")) {
+                    info("youtube.account_status", () -> actions.status("youtube_status"));
+                    info("youtube.account_intro", () -> "@" + PREFIX + "youtube.account_intro.value");
+                    action("youtube.setup.prepare", "youtube.setup.prepare", () -> actions.run("youtube_install"));
+                    action("youtube.setup.copy_folder", "youtube.setup.copy_folder", () -> actions.run("youtube_folder"));
+                    action("youtube.setup.chrome", "youtube.setup.chrome", () -> actions.run("youtube_chrome"));
+                    action("youtube.setup.edge", "youtube.setup.edge", () -> actions.run("youtube_edge"));
+                    info("youtube.load_instructions", () -> "@" + PREFIX + "youtube.setup.load");
+                    action("youtube.setup.open_music", "youtube.setup.open_music", () -> actions.run("youtube_open"));
+                    action("youtube.setup.copy_code", "youtube.setup.copy_code", () -> actions.run("youtube_pair"));
+                }
+                section = "connection_status";
                 info("connection.status", () -> actions.status("connection"));
-                info("connection.method", () -> actions.status("method"));
                 info("connection.playback", () -> actions.status("playback"));
-                info("connection.lyrics", () -> actions.status("lyrics"));
-                action("reload", "reload.button", () -> actions.run("retry"));
+                if (group("music_presence")) {
+                    toggle("music_presence.enabled", p::isMusicPresenceEnabled, p::setMusicPresenceEnabled);
+                    toggle("music_presence.sharing", p::isMusicPresenceSharing, p::setMusicPresenceSharing);
+                    info("music_presence.status", () -> actions.status("music_presence"));
+                }
                 if (group("connection_details")) {
+                    info("connection.method", () -> actions.status("method"));
+                    info("connection.lyrics", () -> actions.status("lyrics"));
+                    action("reload", "reload.button", () -> actions.run("retry"));
                     choice("music_source", MusicSource.values(), p::getMusicSource, v -> { p.setMusicSource(v); actions.run("source"); }).changesStructure = true;
                     action("youtube.matching", "spotify.configure", () -> actions.run("spotify"));
                     info("connection.client_id", p::getSpotifyClientId);
@@ -144,6 +203,13 @@ public final class LyricsSettingsCatalog {
             case CUSTOM -> custom();
             case SOURCES -> {
                 info("sources.explanation", () -> "@" + PREFIX + "sources.explanation.value");
+                if (group("spicy_account")) {
+                    info("spicy.key_status", () -> actions.status("spicy_status"));
+                    input("spicy.key_input", () -> actions.status("spicy_key_input"), value -> actions.input("spicy_key", value), true);
+                    action("spicy.key_apply", "spicy.key_apply.button", () -> actions.run("spicy_apply"));
+                    action("spicy.key_get", "spicy.key_get.button", () -> actions.run("spicy_get"));
+                    action("spicy.key_remove", "spicy.key_remove.button", () -> actions.run("spicy_remove"));
+                }
                 toggle("sources.prefer_spicy", p::isPreferSpicyLyrics, enabled -> { p.setPreferSpicyLyrics(enabled); actions.run("lyrics_sources"); });
                 if (group("source_priority")) {
                     var priorityOrder = p.getLyricsSourceOrder();
@@ -157,6 +223,7 @@ public final class LyricsSettingsCatalog {
                     }
                     action("sources.priority.reset", "restore", () -> { p.setLyricsSourceOrder(null); actions.run("lyrics_sources"); }).changesStructure = true;
                 }
+                section = "source_providers";
                 for (var source : MultiSourceLyricsClient.sources()) {
                     toggle("sources." + source.id(), () -> p.isLyricsSourceEnabled(source.id()), enabled -> {
                         p.setLyricsSourceEnabled(source.id(), enabled); actions.run("lyrics_sources");
@@ -165,6 +232,7 @@ public final class LyricsSettingsCatalog {
                 action("sources.restore", "restore", () -> {
                     p.setLyricsSources(null); actions.run("lyrics_sources");
                 });
+                section = "source_diagnostics";
                 info("sources.diagnostics", () -> actions.status("sources"));
             }
             case ADVANCED -> advanced();
@@ -178,7 +246,6 @@ public final class LyricsSettingsCatalog {
                     choice("world_position", WorldLyricsSpace.Position.values(), p::getWorldLyricsPosition, p::setWorldLyricsPosition);
                     slider("world_luminance", 0, 15, 1, p::getWorldLyricsLuminance, v -> p.setWorldLyricsLuminance((int)Math.round(v)), "");
                     toggle("world_terrain_light", p::isWorldLyricsTerrainLight, p::setWorldLyricsTerrainLight);
-                    choice("world_quality", WorldLyricsDirector.Quality.values(), p::getWorldLyricsQuality, p::setWorldLyricsQuality);
                     action("world_customize", "customize.button", () -> { expanded.add("world"); actions.run("custom_world"); });
                 }
             }
@@ -187,6 +254,19 @@ public final class LyricsSettingsCatalog {
     }
 
     private void advanced() {
+        if (group("updates")) {
+            toggle("updates.automatic", p::isUpdateChecks, p::setUpdateChecks);
+            toggle("updates.prereleases", p::isUpdatePrereleases, p::setUpdatePrereleases);
+            info("updates.status", () -> actions.status("updates"));
+            action("updates.check", "updates.check.button", () -> actions.run("updates_check"));
+            action("updates.open", "updates.open.button", () -> actions.run("updates_open"));
+        }
+        if (group("support")) {
+            info("support.privacy", () -> "@" + PREFIX + "support.privacy.value");
+            action("support.copy", "support.copy.button", () -> actions.run("diagnostics_copy"));
+            action("support.report", "support.report.button", () -> actions.run("bug_report"));
+        }
+
         if (group("performance")) {
             indexed("animation_fps", List.of("animation_fps.0", "animation_fps.30", "animation_fps.60"),
                     () -> p.getLyricsAnimationFrameRate() == 0 ? 0 : p.getLyricsAnimationFrameRate() == 30 ? 1 : 2,
@@ -194,17 +274,85 @@ public final class LyricsSettingsCatalog {
             toggle("loading_skeleton", p::isLyricsLoadingSkeleton, p::setLyricsLoadingSkeleton);
             action("restore_performance", "restore", () -> restore("performance"));
         }
+        if (group("experimental")) {
+            if (group("gemini_shader")) {
+                info("gemini.privacy", () -> "@" + PREFIX + "gemini.privacy.value");
+                toggle("gemini.enabled", p::isGeminiShaderEnabled, p::setGeminiShaderEnabled);
+                input("gemini.key", () -> actions.status("gemini_key_input"), value -> actions.input("gemini_key", value), true);
+                info("gemini.key_status", () -> actions.status("gemini_key_status"));
+                action("gemini.key_save", "gemini.key_save.button", () -> actions.run("gemini_key_save"));
+                action("gemini.key_remove", "gemini.key_remove.button", () -> actions.run("gemini_key_remove"));
+                input("gemini.model", p::getGeminiShaderModel, p::setGeminiShaderModel, false);
+                toggle("gemini.song_context",p::isGeminiSongContext,p::setGeminiSongContext);
+                integer("gemini.creative_freedom",0,100,5,p::getGeminiCreativeFreedom,p::setGeminiCreativeFreedom,"%");
+                var recipes=dev.relaylyrics.client.music.GeminiArtLibrary.RECIPES;
+                var recipeLabels=new java.util.ArrayList<String>();recipeLabels.add("gemini.recipe.custom");
+                recipes.forEach(v->recipeLabels.add("gemini.recipe."+v.id()));
+                indexed("gemini.art_recipe",recipeLabels,()->dev.relaylyrics.client.music.GeminiArtLibrary.recipeIndex(p),i->{if(i>0)recipes.get(i-1).apply(p);});
+                var primary=dev.relaylyrics.client.music.GeminiArtLibrary.ids(false);
+                var secondary=dev.relaylyrics.client.music.GeminiArtLibrary.ids(true);
+                indexed("gemini.art_style", primary.stream().map(v->"gemini.art."+v).toList(),()->Math.max(0,primary.indexOf(p.getGeminiArtStyle())),i->p.setGeminiArtStyle(primary.get(i)));
+                indexed("gemini.art_secondary", secondary.stream().map(v->"gemini.art."+v).toList(),()->Math.max(0,secondary.indexOf(p.getGeminiArtSecondary())),i->p.setGeminiArtSecondary(secondary.get(i)));
+                integer("gemini.art_blend",0,100,5,p::getGeminiArtBlend,p::setGeminiArtBlend,"%");
+                integer("gemini.art_scale",25,300,5,p::getGeminiArtScale,p::setGeminiArtScale,"%");
+                integer("gemini.art_stroke",25,300,5,p::getGeminiArtStroke,p::setGeminiArtStroke,"%");
+                integer("gemini.art_grain",0,100,5,p::getGeminiArtGrain,p::setGeminiArtGrain,"%");
+                integer("gemini.art_seed",0,999,1,p::getGeminiArtSeed,p::setGeminiArtSeed,"");
+                toggle("gemini.art_animated",p::isGeminiArtAnimated,p::setGeminiArtAnimated);
+                toggle("gemini.art_audio",p::isGeminiArtAudio,p::setGeminiArtAudio);
+                input("gemini.direction", p::getGeminiShaderDirection, p::setGeminiShaderDirection, false);
+                toggle("gemini.automatic", p::isGeminiShaderAutomatic, p::setGeminiShaderAutomatic);
+                integer("gemini.world_strength", 0, 100, 5, p::getGeminiWorldStrength, p::setGeminiWorldStrength, "%");
+                info("gemini.status", () -> actions.status("gemini_status"));
+                info("gemini.design", () -> actions.status("gemini_design"));
+                action("gemini.regenerate", "gemini.regenerate.button", () -> actions.run("gemini_regenerate"));
+                action("gemini.clear_cache", "gemini.clear_cache.button", () -> actions.run("gemini_clear_cache"));
+            }
+        }
+        section = "advanced_tools";
         action("defaults", "restore", () -> actions.run("restore_all"));
     }
 
     private void custom() {
+        if (group("languages")) {
+            toggle("romanization", p::isLyricsRomanization, p::setLyricsRomanization);
+            indexed("romanization.mode", List.of("romanization.mode.replace", "romanization.mode.under"),
+                    () -> p.isRomanizationUnderLine() ? 1 : 0, n -> p.setRomanizationUnderLine(n == 1));
+            toggle("translation", p::isLyricsTranslation, p::setLyricsTranslation);
+            var languageCodes = new java.util.ArrayList<>(com.tx24.spicyplayer.translation.TranslationLanguages.INSTANCE.getCommon().keySet());
+            if (!languageCodes.contains(p.getTranslationLanguage())) languageCodes.add(p.getTranslationLanguage());
+            Entry language = entry("translation.language", Kind.CHOICE);
+            language.options = languageCodes.stream().map(code -> java.util.Locale.forLanguageTag(code).getDisplayLanguage(java.util.Locale.getDefault())).toList();
+            language.selected = () -> languageCodes.indexOf(p.getTranslationLanguage());
+            language.select = index -> p.setTranslationLanguage(languageCodes.get(index));
+            language.value = () -> language.options.get(language.selected.getAsInt());
+            info("translation.privacy", () -> "@" + PREFIX + "translation.privacy.value");
+            toggle("translation.automatic", p::isAutomaticTranslation, p::setAutomaticTranslation);
+            action("translation.now", "translation.now.button", () -> actions.run("translation_now"));
+            info("translation.status", () -> actions.status("translation"));
+            if (group("translation_provider")) {
+                var providers = List.of("Google", "DeepL", "Gemini", "OpenAi");
+                indexed("translation.provider", providers.stream().map(v -> "translation.provider." + v).toList(),
+                        () -> providers.indexOf(p.getTranslationProvider()), n -> { p.setTranslationProvider(providers.get(n)); actions.run("translation_provider"); }).changesStructure = true;
+                if (!p.getTranslationProvider().equals("Google")) {
+                    input("translation.key", () -> actions.status("translation_key_input"), v -> actions.input("translation_key", v), true);
+                    info("translation.key_status", () -> actions.status("translation_key_status"));
+                    action("translation.key_save", "translation.key_save.button", () -> actions.run("translation_key_save"));
+                    action("translation.key_remove", "translation.key_remove.button", () -> actions.run("translation_key_remove"));
+                }
+                if (List.of("Gemini", "OpenAi").contains(p.getTranslationProvider())) {
+                    input("translation.model", p::translationModel, p::setActiveTranslationModel, false);
+                }
+                if (p.getTranslationProvider().equals("OpenAi")) input("translation.address", p::getTranslationAddress, p::setTranslationAddress, false);
+            }
+        }
+
         if (group("typography")) {
             action("font", "font", () -> actions.run("font")).value = () -> p.getGoogleFontFamily().isEmpty() ? "@" + PREFIX + "google_font.minecraft" : p.getGoogleFontFamily();
             choice("weight", LyricsFontWeight.values(), p::getLyricsFontWeight, v -> { p.setLyricsFontWeight(v); actions.run("weight"); });
             percent("scale", .6, 1.8, .05, p::getLyricsTextScale, p::setLyricsTextScale);
             choice("alignment", LyricsTextAlignment.values(), p::getLyricsAlignment, p::setLyricsAlignment);
-            toggle("translation", p::isLyricsTranslation, p::setLyricsTranslation);
-            toggle("romanization", p::isLyricsRomanization, p::setLyricsRomanization);
+
         }
         if (group("interaction")) {
             toggle("allow_gui_overlap", p::isLyricsAllowGuiOverlap, p::setLyricsAllowGuiOverlap);
@@ -217,6 +365,7 @@ public final class LyricsSettingsCatalog {
             integer("height", 64, 600, 2,
                     () -> p.getPopupHeight(actions.videoPopupProfile(), actions.squareVideoPopupProfile()),
                     v -> p.setPopupHeight(actions.videoPopupProfile(), actions.squareVideoPopupProfile(), v), " px");
+            action("popup_restore", "popup_restore.button", () -> p.setPopupDocked(false));
             action("reset_layout", "reset", p::resetLayout);
         }
         if (group("effects")) {
@@ -257,6 +406,7 @@ public final class LyricsSettingsCatalog {
             action("restore_background", "restore", () -> restore("background"));
         }
         if (p.isWorldLyrics() && group("world")) {
+            choice("world_quality", WorldLyricsDirector.Quality.values(), p::getWorldLyricsQuality, p::setWorldLyricsQuality);
             action("font", "font", () -> actions.run("font"));
             slider("world_depth", .04, .30, .01, p::getWorldLyricsDepth, p::setWorldLyricsDepth, "");
             colors("world_face_color", new int[]{0xFFFFFF, 0xE4F5FF, 0xFFF0D2, 0xDEF7E4, 0xF5E1FF}, p::getWorldLyricsFaceColor, p::setWorldLyricsFaceColor);
@@ -272,8 +422,10 @@ public final class LyricsSettingsCatalog {
         ClientPreferences d = new ClientPreferences();
         switch (scope) {
             case "appearance" -> {
+                p.setMotionVideos(d.isMotionVideos());
                 p.setModernMode(d.isModernMode()); p.setGoogleFontFamily(""); p.setLyricsFontWeight(d.getLyricsFontWeight());
                 p.setLyricsTextScale(d.getLyricsTextScale()); p.setLyricsAlignment(d.getLyricsAlignment());
+                p.setIslandKawarpBackground(d.isIslandKawarpBackground()); p.setIslandVideoCover(d.isIslandVideoCover()); p.setJadeIsland(d.isJadeIsland());
                 restore("effects"); restore("background"); restore("motion_artwork"); actions.run("font_changed");
             }
             case "effects" -> LyricsSettingsPresets.applyEffects(p, LyricsSettingsPresets.Effects.SPICY);
@@ -321,8 +473,17 @@ public final class LyricsSettingsCatalog {
             case "all" -> {
                 restore("world_experience");
                 restore("appearance"); restore("performance"); restore("world_position"); restore("world_volume"); restore("world_animation");
+                p.setGeminiCreativeFreedom(85); p.setGeminiSongContext(true); p.setGeminiArtStyle("auto"); p.setGeminiArtSecondary("none"); p.setGeminiArtScale(100); p.setGeminiArtStroke(100); p.setGeminiArtGrain(30); p.setGeminiArtSeed(1); p.setGeminiArtBlend(35); p.setGeminiArtAnimated(false); p.setGeminiArtAudio(true);
+                p.setGeminiWorldStrength(100); p.setGeminiShaderEnabled(false); p.setGeminiShaderAutomatic(d.isGeminiShaderAutomatic());
+                p.setGeminiShaderModel(d.getGeminiShaderModel()); p.setGeminiShaderDirection("");
+                p.setGeminiShaderResolution(d.getGeminiShaderResolution()); p.setGeminiShaderFps(d.getGeminiShaderFps());
+                p.setGeminiShaderBrightness(d.getGeminiShaderBrightness());
+                p.setLyricsDelayMillis(d.getLyricsDelayMillis());
                 p.resetLayout(); p.setLyricsVisible(d.isLyricsVisible()); p.setLyricsPinned(d.isLyricsPinned());
                 p.setLyricsRenderType(d.getLyricsRenderType()); p.setInventoryPopup(d.isInventoryPopup()); p.setInventoryNowPlaying(d.isInventoryNowPlaying());
+                p.setAutomaticTranslation(d.isAutomaticTranslation()); p.setTranslationLanguage(d.getTranslationLanguage());
+                p.setTranslationGeminiModel(""); p.setTranslationProvider(d.getTranslationProvider()); p.setTranslationAddress(d.getTranslationAddress()); p.setTranslationModel(d.getTranslationModel());
+                p.setRomanizationUnderLine(d.isRomanizationUnderLine()); p.setUpdateChecks(d.isUpdateChecks()); p.setUpdatePrereleases(d.isUpdatePrereleases());
                 p.setLyricsTranslation(d.isLyricsTranslation()); p.setLyricsRomanization(d.isLyricsRomanization()); p.setLyricsAnimations(d.isLyricsAnimations());
                 p.setLyricsAllowGuiOverlap(d.isLyricsAllowGuiOverlap()); p.setLyricsClickSeek(d.isLyricsClickSeek());
                 p.setLyricsBorder(d.isLyricsBorder()); p.setLyricsResizeGrip(d.isLyricsResizeGrip()); p.setWorldLyrics(false);
@@ -334,13 +495,14 @@ public final class LyricsSettingsCatalog {
     }
 
     private boolean group(String name) {
+        section = name;
         Entry e = entry("group." + name, Kind.GROUP);
         e.value = () -> expanded.contains(name) ? "@" + PREFIX + "collapse" : "@" + PREFIX + "expand";
         e.activate = () -> { if (!expanded.remove(name)) expanded.add(name); };
         e.changesStructure = true;
         return expanded.contains(name);
     }
-    private Entry entry(String name, Kind kind) { Entry e = new Entry(name, kind); entries.add(e); return e; }
+    private Entry entry(String name, Kind kind) { Entry e = new Entry(name, kind); e.section = section; entries.add(e); return e; }
     private Entry toggle(String name, BooleanSupplier getter, Consumer<Boolean> setter) {
         Entry e = entry(name, Kind.TOGGLE);
         e.value = () -> "@options." + (getter.getAsBoolean() ? "on" : "off");

@@ -6,7 +6,11 @@
     "HandledScreenAccessor",
     "InventoryMouseDragMixin",
     "WorldGlyphAtlasMixin",
-    "JiCinematicLyricsMixin"
+    "JiCinematicLyricsMixin",
+    "PresenceCameraMixin",
+    "GeminiWorldMixin",
+    "MusicPresenceTabMixin",
+    "MusicPresenceNameMixin"
   ],
   "injectors": {
     "defaultRequire": 1

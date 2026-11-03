@@ -4,9 +4,10 @@ plugins {
 
 allprojects {
     group = "dev.lyrica"
-    version = providers.gradleProperty("version").orElse("0.8.61").get()
+    version = providers.gradleProperty("version").orElse("0.8.96").get()
     repositories {
         mavenCentral()
+        maven("https://api.modrinth.com/maven") { content { includeGroup("maven.modrinth") } }
         maven("https://libraries.minecraft.net/")
         maven("https://maven.fabricmc.net/")
         maven("https://maven.maxhenkel.de/repository/public")

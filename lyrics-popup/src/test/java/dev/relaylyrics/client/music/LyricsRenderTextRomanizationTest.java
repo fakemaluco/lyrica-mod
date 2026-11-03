@@ -142,4 +142,24 @@ class LyricsRenderTextRomanizationTest {
         assertThat(romanized).isNotBlank();
         assertThat(romanized).doesNotContain("П", "р", "κ", "ό");
     }
+    @Test void japaneseUsesWholeLineReadingsInsteadOfMandarinForKanjiFragments() {
+        var line = new LyricLine(1000, 4000, "私は東京にいる", List.of(
+                new TimedWord(1000, 1500, "私"), new TimedWord(1500, 1800, "は", true, null),
+                new TimedWord(2000, 2800, "東京", true, null), new TimedWord(3000, 4000, "にいる", true, null)),
+                "v1", false, null, null);
+        var words = LyricsRenderText.visualWords(line, true);
+        String text = words.stream().map(LyricsRenderText.VisualWord::text).collect(java.util.stream.Collectors.joining(" "));
+        assertThat(text).contains("watashi", "wa", "tokyo").doesNotContain("dong", "jing");
+        assertThat(words.stream().flatMap(word -> word.fragments().stream()).map(fragment -> fragment.timing().startMillis()))
+                .containsExactly(1000L, 1500L, 2000L, 3000L);
+        assertThat(text.codePoints().allMatch(c -> c < 128)).isTrue();
+    }
+    @Test void japaneseSongContextAlsoReadsKanjiOnlyLinesAndDoesNotLeakIntoTheNextSong() {
+        try {
+            LyricsRomanizer.setDocumentContext(List.of("私は歌う", "東京"));
+            assertThat(LyricsRomanizer.romanize("東京")).isEqualTo("tokyo");
+            LyricsRomanizer.setDocumentContext(List.of("東京"));
+            assertThat(LyricsRomanizer.romanize("東京")).isNotEqualTo("tokyo");
+        } finally { LyricsRomanizer.setDocumentContext(List.of()); }
+    }
 }

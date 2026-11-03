@@ -42,10 +42,16 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
     from(layout.projectDirectory.dir("src/version/1.21.1/java"))
     from(rootProject.file("mod/src/main/java")) {
         include("dev/fandroid/client/music/LyricsAnimation.java")
+        include("dev/fandroid/client/music/LyricsTiming.java")
+        include("dev/fandroid/client/music/PopupResizeGesture.java")
         include("dev/fandroid/client/music/KawarpRaster.java")
         include("dev/fandroid/client/music/GlassButtonRaster.java")
         include("dev/fandroid/client/music/ResponsiveLyricsLayout.java")
         include("dev/fandroid/client/music/CanvasPopupLayout.java")
+        include("dev/fandroid/client/music/AdaptivePopupLayout.java")
+        include("dev/fandroid/client/music/PopupDockLayout.java")
+        include("dev/fandroid/client/music/PopupDockMotion.java")
+        include("dev/fandroid/client/music/IslandAudioMotion.java")
         include("dev/fandroid/client/music/RoundedVideoRaster.java")
         include("dev/fandroid/client/music/UnavailableLyricsTransition.java")
         include("dev/fandroid/client/music/LyricsEffectRaster.java")
@@ -105,6 +111,7 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
 }
 
 dependencies {
+    modCompileOnly("maven.modrinth:jade:15.10.6+fabric") { isTransitive = false }
     modCompileOnly("dev.lambdaurora.lambdynamiclights:lambdynamiclights-api:4.8.11+1.21.1")
     implementation(project(":lyrics-engine"))
     include(project(":lyrics-engine"))

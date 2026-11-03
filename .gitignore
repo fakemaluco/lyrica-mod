@@ -1,5 +1,6 @@
 # Gradle / Java
 .gradle/
+.kotlin/
 **/build/
 out/
 *.class
@@ -38,4 +39,8 @@ local.properties
 Thumbs.db
 *.log
 *.tmp
+
+# Python asset tooling
+__pycache__/
+*.py[cod]
 

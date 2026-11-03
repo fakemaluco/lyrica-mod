@@ -47,6 +47,12 @@ public final class LyricsRenderText {
         return LyricsRomanizer.romanize(line.text()) != null;
     }
 
+    /** A secondary romanization row uses the same source and word spacing as replacement mode. */
+    public static String romanizationText(LyricLine line) {
+        if (!hasRomanization(line)) return "";
+        return visualWords(line, true).stream().map(VisualWord::text).collect(java.util.stream.Collectors.joining(" ")).strip();
+    }
+
     private static List<VisualWord> groupVisualWords(List<TimedWord> source) {
         List<VisualWord> result = new ArrayList<>();
         List<Fragment> current = new ArrayList<>();
@@ -81,13 +87,15 @@ public final class LyricsRenderText {
         String suppliedLineRomanization = line.romanization() != null && !line.romanization().isBlank()
                 ? line.romanization() : null;
         String lineRomanization = suppliedOrGenerated(line.romanization(), line.text());
-        boolean hasFragmentRomanization = source.stream().anyMatch(word ->
-                suppliedOrGenerated(word.romanization(), word.text()) != null);
+        List<String> generatedFragments = LyricsRomanizer.romanizeFragments(source.stream().map(TimedWord::text).toList());
+        boolean hasFragmentRomanization = source.stream().anyMatch(word -> word.romanization() != null && !word.romanization().isBlank())
+                || generatedFragments.stream().anyMatch(java.util.Objects::nonNull);
         if (hasFragmentRomanization) {
             List<TimedWord> romanized = new ArrayList<>(source.size());
             String previous = "";
-            for (TimedWord word : source) {
-                String generated = suppliedOrGenerated(word.romanization(), word.text());
+            for (int index = 0; index < source.size(); index++) {
+                TimedWord word = source.get(index);
+                String generated = word.romanization() != null && !word.romanization().isBlank() ? word.romanization() : generatedFragments.get(index);
                 String text = generated == null ? word.text() : generated;
                 // The romanized script can have spaces where the original has none.
                 // Keep those word boundaries independently from the original geometry.

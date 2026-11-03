@@ -4,6 +4,14 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CanvasPopupLayoutTest {
+    @Test void closeFitsAsFourthUtilityInTheSameSmallToolbar() {
+        for (int width : new int[]{84,96,120,225,400}) {
+            var row=CanvasPopupLayout.utilityRow(width,320,4,true);
+            assertThat(row.size()).isLessThanOrEqualTo(24);
+            assertThat(row.left(3)+row.size()).isLessThanOrEqualTo(width);
+            assertThat(row.left(3)).isGreaterThan(row.left(2)+row.size());
+        }
+    }
     @Test void slidersKeepTransportAboveTheTimelineAndTimesBelowTheTrack() {
         for (int width : new int[]{84, 96, 128, 225, 400, 600}) for (int height : new int[]{84, 128, 160, 400, 600}) {
             for (boolean video : new boolean[]{false, true}) {

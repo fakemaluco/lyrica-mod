@@ -38,7 +38,7 @@ public final class VideoLoop implements AutoCloseable {
     private final Thread worker;
     private volatile String source;
     private volatile long generation;
-    private volatile long visibleUntil;
+    private volatile long visibleUntil, autoplayUntil;
     private volatile boolean playing = true;
     private volatile boolean pauseWithMusic = true;
     private volatile boolean closed;
@@ -58,7 +58,7 @@ public final class VideoLoop implements AutoCloseable {
         String accepted = validSource(value, allowLocalFiles) ? value : null;
         synchronized (wake) {
             if (Objects.equals(source, accepted)) return;
-            source = accepted;
+            source = accepted; autoplayUntil=0;
             generation++;
             frame.set(null);
             failure = null;
@@ -78,6 +78,15 @@ public final class VideoLoop implements AutoCloseable {
         synchronized (wake) { wake.notifyAll(); }
     }
 
+    /** A visible thumbnail can animate independently of music; ordinary draws revoke the lease. */
+    public void touchVisible(boolean autoplay) {
+        autoplayUntil=autoplay?System.nanoTime()+VISIBLE_GRACE:0;
+        touchVisible();
+    }
+    private boolean paused() {
+        return pauseWithMusic && !playing && frame.get()!=null && System.nanoTime()>=autoplayUntil;
+    }
+
     public PixelFrame latest() { return frame.get(); }
     public String status() { return status; }
     public boolean failed() { return status.startsWith("Video unavailable"); }
@@ -94,7 +103,7 @@ public final class VideoLoop implements AutoCloseable {
             if (selected == null || !visible()) { await(100); continue; }
             if (failed()) { await(250); continue; }
             // Preserve the held frame even after an invisible view released its native stream.
-            if (pauseWithMusic && !playing && frame.get() != null) { status = "Video paused"; await(100); continue; }
+            if (paused()) { status = "Video paused"; await(100); continue; }
             String input = selectHlsVariant(selected);
             if (closed || token != generation) continue;
             try (FFmpegFrameGrabber grabber = selected.startsWith("file:")
@@ -124,7 +133,7 @@ public final class VideoLoop implements AutoCloseable {
                 long nextPublish = 0, nextFrame = System.nanoTime(), idleSince = 0;
                 boolean first = true;
                 while (!closed && token == generation) {
-                    boolean paused = pauseWithMusic && !playing && frame.get() != null;
+                    boolean paused = paused();
                     if (!visible() || paused) {
                         if (paused) status = "Video paused";
                         if (!visible()) {
@@ -156,7 +165,7 @@ public final class VideoLoop implements AutoCloseable {
                     }
                     nextFrame = Math.max(nextFrame + sourceStep, System.nanoTime() - sourceStep);
                     long now = System.nanoTime();
-                    if (pauseWithMusic && !playing && frame.get() != null) continue;
+                    if (paused()) continue;
                     if (!first && now < nextPublish) continue;
                     PixelFrame decoded = pixels(image, sequence.incrementAndGet());
                     if (closed || token != generation) break;

@@ -44,19 +44,28 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     private final ClientPreferences preferences;
     private final LyricsSettingsCatalog catalog;
     private final List<Row> rows = new ArrayList<>();
+    private final java.util.Map<String, Row> rowViews = new LinkedHashMap<>();
+    private final java.util.Map<AbstractWidget, Row> rowOwners = new java.util.IdentityHashMap<>();
+    private final SettingsListMotion listMotion = new SettingsListMotion();
     private final List<PanelButton> navigation = new ArrayList<>();
     private Category category = Category.GENERAL;
-    private String expandedChoice = "", searchQuery = "";
+    private String expandedChoice = "", searchQuery = "", revealChoice = "";
     private boolean confirmRestore, editing, dragging, resizing, peeking, selectingSearch;
     private int dragX, dragY, editX, editY, editWidth, editHeight;
     private boolean resizeSquareVideo;
     private double resizeVideoAspect;
+    private dev.relaylyrics.client.music.PopupResizeGesture.Start editorResizeStart;
     private int modalX, modalY, modalWidth, modalHeight, sidebarWidth, paneX, paneWidth;
     private int rowLeft, rowWidth, listTop, listBottom, totalHeight, scroll;
     private boolean compactNavigation, stacked;
     private int saveDelay;
     private String notice = "";
-    private SearchField searchField;
+    private SearchField searchField, selectionField;
+    private java.net.URI authorizationLink;
+    private java.nio.file.Path companionDirectory;
+    private String spicyKeyDraft;
+    private String translationKeyDraft = "";
+    private boolean connectingSpotify, installingCompanion;
     private PanelButton peekButton;
     private boolean probeSearch, drawingPanel;
     private int viewportWidth, viewportHeight;
@@ -113,11 +122,15 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     LyricsConfigScreen(Screen parent, ClientPreferences preferences) {
         super(Component.translatable("config.relaylyrics.settings.title")); this.parent = parent;
         this.preferences = preferences; this.catalog = new LyricsSettingsCatalog(preferences, this);
+        if (RelayLyricsClient.music() != null && !RelayLyricsClient.music().support().availableVersion().isBlank()) notice = status("updates");
     }
     private void savePreferences() { if (preferences == RelayLyricsClient.preferences()) preferences.save(); }
     @Override protected void init() {
         viewportWidth = width; viewportHeight = height;
-        uiScale = ResponsiveLyricsLayout.scale(viewportWidth, viewportHeight);
+        applyUiScale();
+    }
+    private void applyUiScale() {
+        uiScale = ResponsiveLyricsLayout.scale(viewportWidth, viewportHeight) * preferences.getSettingsUiScale();
         width = (int) Math.ceil(viewportWidth / uiScale); height = (int) Math.ceil(viewportHeight / uiScale);
         rebuild();
     }
@@ -125,9 +138,9 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     private void rebuild() {
         boolean keepSearchFocus = searchField != null && searchField.isFocused();
         int searchCursor = searchField == null ? searchQuery.length() : searchField.getCursorPosition();
-        clearWidgets(); rows.clear(); navigation.clear(); searchField = null; peekButton = null;
-        modalWidth = Math.max(190, Math.min(940, (int) Math.floor(width * .94)));
-        modalHeight = Math.max(130, Math.min(700, (int) Math.floor(height * .88)));
+        clearWidgets(); rows.clear(); rowViews.clear(); rowOwners.clear(); listMotion.clear(); navigation.clear(); searchField = null; peekButton = null;
+        modalWidth = Math.max(190, Math.min((int) Math.floor(width * .94), Math.min(940, (int) Math.floor(viewportWidth / ResponsiveLyricsLayout.scale(viewportWidth, viewportHeight) * .94))));
+        modalHeight = Math.max(130, Math.min((int) Math.floor(height * .88), Math.min(700, (int) Math.floor(viewportHeight / ResponsiveLyricsLayout.scale(viewportWidth, viewportHeight) * .88))));
         modalX = (width - modalWidth) / 2; modalY = (height - modalHeight) / 2;
         compactNavigation = modalWidth < 560;
         sidebarWidth = compactNavigation ? 46 : modalWidth < 900 ? 184 : 216;
@@ -149,7 +162,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         searchField.setValue(searchQuery);
         searchField.moveCursorTo(Math.clamp(searchCursor, 0, searchQuery.length()), false);
         searchField.setResponder(value -> {
-            searchQuery = value; expandedChoice = ""; scroll = 0; rebuild();
+            searchQuery = value; expandedChoice = ""; scroll = 0; rebuildRows(false, true);
         });
         if (keepSearchFocus) { setFocused(searchField); searchField.setFocused(true); }
         List<Category> categories = catalog.categories();
@@ -170,13 +183,23 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
                 30, 30, () -> { }, ButtonKind.PEEK, null);
         peekButton.setTooltip(Tooltip.create(Component.translatable("config.relaylyrics.settings.peek")));
 
+        rebuildRows(false, true);
+    }
+
+    private void rebuildRows(boolean animate, boolean replace) {
+        if (replace) {
+            for (Row old : rowViews.values()) discardRow(old);
+            rowViews.clear(); rows.clear(); listMotion.clear();
+        }
+        for (PanelButton tab : navigation) tab.selected = tab.navigationCategory == category && searchQuery.isBlank();
+        List<Row> desired = new ArrayList<>();
         List<Entry> entries;
         var sections = new LinkedHashMap<String, Category>();
         if (searchQuery.isBlank()) entries = catalog.entries(category);
         else {
             var matches = new LinkedHashMap<String, Entry>();
             String[] query = normalize(searchQuery).split("\\s+");
-            for (Category source : categories) for (Entry entry : catalog.searchEntries(source)) {
+            for (Category source : catalog.categories()) for (Entry entry : catalog.searchEntries(source)) {
                 if (entry.kind == Kind.GROUP) continue;
                 String haystack = normalize(I18n.get(entry.key) + " " + description(entry) + " " + I18n.get(source.key));
                 boolean found = true;
@@ -185,7 +208,9 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             }
             entries = List.copyOf(matches.values());
         }
+        var sectionCounts = entries.stream().collect(java.util.stream.Collectors.groupingBy(entry -> entry.section,java.util.stream.Collectors.counting()));
         int offset = 0;
+        String previousSection = "";
         for (Entry entry : entries) {
             boolean toggle = entry.kind == Kind.TOGGLE;
             int labelWidth = entry.kind == Kind.INFO ? rowWidth - 32 : entry.kind == Kind.GROUP ? rowWidth - 74
@@ -198,17 +223,35 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             int labelStep = compactNavigation ? 12 : 16, detailStep = compactNavigation ? 10 : 14;
             int textHeight = Math.max(labelStep, labelLines * labelStep) + (detailLines == 0 ? 0 : (compactNavigation ? 3 : 4) + detailLines * detailStep);
             if (entry.kind == Kind.INFO) textHeight += Math.min(3, Math.max(1, font.split(ui(text(entry.value.get())), rowWidth - 32).size())) * (compactNavigation ? 10 : 14) + 5;
-            boolean below = stacked && !toggle && entry.kind != Kind.GROUP && entry.kind != Kind.INFO;
+            boolean below = entry.kind == Kind.TEXT || stacked && !toggle && entry.kind != Kind.GROUP && entry.kind != Kind.INFO;
             int rowHeight = Math.max(compactNavigation ? 40 : entry.kind == Kind.GROUP ? 46 : 54,
                     textHeight + (compactNavigation ? 18 : 26) + (below ? compactNavigation ? 32 : 36 : 0));
             boolean expanded = entry.kind == Kind.CHOICE && entry.key.equals(expandedChoice);
             Row row = new Row(entry, offset, rowHeight, expanded ? entry.options.size() * 30 + 10 : 0,
                     labelWidth, detail, below);
-            rows.add(row); createControl(row); offset += row.height + (entry.kind == Kind.GROUP ? 8 : 1);
+            row.id = entry.section + "|" + entry.key;
+            row.sectionStart = !entry.section.equals(previousSection);
+            row.caption = row.sectionStart && entry.kind != Kind.GROUP && sectionCounts.getOrDefault(entry.section,0L) > 1 && hasTranslation("config.relaylyrics.section." + entry.section)
+                    ? "config.relaylyrics.section." + entry.section : "";
+            row.inset = row.sectionStart ? row.caption.isEmpty() ? (desired.isEmpty() ? 0 : 12) : 26 : 0;
+            Row old = rowViews.get(row.id);
+            if (old != null && old.baseHeight == row.baseHeight && old.height == row.height
+                    && old.entry.kind == entry.kind && old.entry.options.equals(entry.options) && old.below == row.below
+                    && old.labelWidth == row.labelWidth && old.detail.equals(row.detail)) {
+                old.entry.refreshFrom(entry);
+                old.offset = offset; old.sectionStart = row.sectionStart; old.caption = row.caption; old.inset = row.inset;
+                row = old;
+            } else {
+                if (old != null) discardRow(old);
+                createControl(row);
+                for (var control : row.widgets) rowOwners.put(control,row);
+                rowViews.put(row.id,row);
+            }
+            desired.add(row); previousSection = entry.section; offset += row.height + row.inset;
         }
-        totalHeight = offset;
-        scroll = Math.clamp(scroll, 0, maxScroll());
-        positionRows();
+        listMotion.retarget(desired.stream().map(row -> new SettingsListMotion.Item(row.id,row.height + row.inset)).toList(), now(), animate && motionEnabled(), replace);
+        updateRowMotion();
+        refreshValues();
     }
 
     private static boolean hasTranslation(String key) { return !I18n.get(key).equals(key); }
@@ -228,6 +271,14 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     }
     private void createControl(Row row) {
         Entry entry = row.entry;
+        if (entry.kind == Kind.TEXT) {
+            SearchField field = new SearchField(rowLeft + 16, 0, rowWidth - 32, 28, entry);
+            field.setMaxLength(entry.masked ? 256 : entry.key.endsWith("gemini.direction") ? 500 : 100);
+            field.setValue(entry.value.get());
+            field.setResponder(value -> { entry.setText.accept(value); if (!entry.masked) saveDelay = 10; });
+            row.add(addRenderableWidget(field), 0);
+            return;
+        }
         if (entry.kind == Kind.INFO) {
             PanelButton info = addPanelButton(text(entry.value.get()), rowLeft + 12, 0, rowWidth - 24,
                     Math.max(24, row.baseHeight - 16), () -> { }, ButtonKind.INFO, entry);
@@ -247,7 +298,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             ButtonKind kind = entry.kind == Kind.TOGGLE ? ButtonKind.TOGGLE : entry.kind == Kind.GROUP ? ButtonKind.GROUP : ButtonKind.ACTION;
             PanelButton control = addPanelButton(valueText(entry), x, 0, controlWidth, entry.kind == Kind.TOGGLE ? 24 : 28, () -> {
                 if (entry.kind == Kind.CHOICE) openChoice(entry);
-                else { if (entry.kind == Kind.GROUP) enterPane(); entry.activate.run(); changed(entry, true); }
+                else { entry.activate.run(); changed(entry, true); }
             }, kind, entry);
             row.add(control, 0);
         }
@@ -256,7 +307,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             for (int index = 0; index < entry.options.size(); index++) {
                 int choice = index;
                 PanelButton control = addPanelButton(text(entry.options.get(index)), x, 0, controlWidth, 28, () -> {
-                    expandedChoice = ""; entry.select.accept(choice); changed(entry, true); rebuild();
+                    expandedChoice = ""; entry.select.accept(choice); changed(entry, true); rebuildRows(true, false);
                 }, ButtonKind.OPTION, entry);
                 control.selected = index == entry.selected.getAsInt();
                 row.add(control, row.baseHeight + 5 + index * 30);
@@ -273,25 +324,68 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     }
     private Component ui(Component value) { return PlatformTextStyles.withFont(value, compactNavigation ? UI_COMPACT : UI_FONT); }
     private Component bold(Component value) { return PlatformTextStyles.withFont(value, compactNavigation ? UI_COMPACT_BOLD : UI_BOLD); }
+    private void discardRow(Row row) {
+        for (var control : row.widgets) { if (getFocused() == control) setFocused(null); removeWidget(control); rowOwners.remove(control); }
+    }
+    private void updateRowMotion() {
+        var frames = listMotion.sample(now(),motionEnabled());
+        var retained = new java.util.HashSet<String>(); rows.clear();
+        double height = 0;
+        for (var frame : frames) {
+            Row row = rowViews.get(frame.id()); if (row == null) continue;
+            retained.add(frame.id()); row.visualOffset = frame.y(); row.visualHeight = frame.height(); row.opacity = frame.opacity();
+            if (frame.leaving() != row.leaving) {
+                if (frame.leaving()) {
+                    for (var control : row.widgets) { row.enabled.put(control,control.active); control.active = false; if (getFocused() == control) setFocused(null); }
+                } else for (var control : row.widgets) control.active = row.enabled.getOrDefault(control,true);
+                row.leaving = frame.leaving();
+            }
+            rows.add(row); height = frame.y() + frame.height();
+        }
+        var iterator = rowViews.entrySet().iterator();
+        while (iterator.hasNext()) { var entry = iterator.next(); if (!retained.contains(entry.getKey())) { discardRow(entry.getValue()); iterator.remove(); } }
+        totalHeight = (int) Math.ceil(height);
+        scroll = Math.clamp(scroll,0,maxScroll());
+        if (!revealChoice.isEmpty()) for (Row row : rows) if (row.entry.key.equals(revealChoice) && !row.leaving) {
+            int wanted = Math.max(0,row.offset+row.inset+row.baseHeight+34-(listBottom-listTop));
+            scroll = Math.clamp(Math.max(scroll,wanted),0,maxScroll());
+            if (row.visualHeight >= row.height+row.inset-.1) revealChoice = "";
+            break;
+        }
+        positionRows();
+    }
+    private int rowTop(Row row) { return listTop + (int) Math.round(row.visualOffset) - scroll; }
+    private int contentTop(Row row) { return rowTop(row) + row.inset - (int) Math.round((1-row.opacity)*8); }
+    private int rowBottom(Row row) { return rowTop(row) + (int) Math.ceil(row.visualHeight); }
+    private double rowOpacity(AbstractWidget widget) { Row row = rowOwners.get(widget); return row == null ? 1 : row.opacity; }
+    private boolean clipRowWidget(GuiGraphicsExtractor context, AbstractWidget widget) {
+        Row row = rowOwners.get(widget); if (row == null) return false;
+        int top = Math.clamp(rowTop(row) + row.inset,listTop,listBottom);
+        int bottom = Math.clamp(rowBottom(row),top,listBottom);
+        GuiTransform.enableScissor(context,rowLeft,top,rowLeft+rowWidth,bottom); return true;
+    }
     private void positionRows() {
         for (Row row : rows) {
-            int top = listTop + row.offset - scroll;
+            int top = contentTop(row);
             for (int index = 0; index < row.widgets.size(); index++) {
                 AbstractWidget widget = row.widgets.get(index);
                 int localY = row.widgetOffsets.get(index);
                 int y = top + (localY == 0 ? row.below ? row.baseHeight - 40 : 13 : localY);
                 widget.setY(y);
-                widget.visible = y >= listTop && y + widget.getHeight() <= listBottom;
+                widget.visible = row.opacity > .001 && y >= listTop && y + widget.getHeight() <= listBottom && y < rowBottom(row) && y + widget.getHeight() > rowTop(row) + row.inset;
             }
         }
     }
     private int maxScroll() { return Math.max(0, totalHeight - (listBottom - listTop)); }
     private void changeCategory(Category next) {
-        enterPane(); category = next; searchQuery = ""; scroll = 0; expandedChoice = ""; notice = ""; rebuild();
+        category = next; searchQuery = ""; scroll = 0; expandedChoice = "";
+        if (!notice.isEmpty()) { notice = ""; listBottom = modalY + modalHeight - 20; }
+        if (searchField != null) searchField.setValue("");
+        rebuildRows(true, true);
     }
     private void openChoice(Entry entry) {
-        enterPane(); expandedChoice = entry.key.equals(expandedChoice) ? "" : entry.key;
-        rebuild();
+        expandedChoice = entry.key.equals(expandedChoice) ? "" : entry.key; revealChoice = expandedChoice;
+        rebuildRows(true, false);
         if (!expandedChoice.isEmpty()) {
             for (Row row : rows) if (row.entry.key.equals(expandedChoice)) {
                 int wanted = row.offset + row.baseHeight + 34 - (listBottom - listTop);
@@ -336,16 +430,23 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     }
     private void changed(Entry entry, boolean immediate) {
         if (immediate) { savePreferences(); saveDelay = 0; } else saveDelay = 10;
-        if (entry.changesStructure) rebuild(); else refreshValues();
+        if (entry.changesStructure) rebuildRows(true, false); else refreshValues();
     }
     private void refreshValues() {
         for (Row row : rows) {
+            if (row.leaving) continue;
             if (row.entry.kind == Kind.INFO) {
                 if (!row.widgets.isEmpty()) row.widgets.get(0).setTooltip(Tooltip.create(text(row.entry.value.get())));
                 continue;
             }
-            if (row.entry.kind == Kind.SLIDER || row.widgets.isEmpty()) continue;
+            if (row.entry.kind == Kind.SLIDER) { for (var widget : row.widgets) if (widget instanceof SettingSlider slider) slider.refresh(); continue; }
+            if (row.entry.kind == Kind.TEXT || row.widgets.isEmpty()) continue;
             row.widgets.get(0).setMessage(valueText(row.entry));
+            String key = row.entry.key;
+            if (key.endsWith(".spotify.connect")) row.widgets.get(0).active = !connectingSpotify;
+            if (key.endsWith(".spotify.disconnect")) row.widgets.get(0).active = RelayLyricsClient.music() != null && RelayLyricsClient.music().spotifyAccountConnected();
+            if (key.endsWith(".spotify.setup.reopen")) row.widgets.get(0).active = authorizationLink != null;
+            if (key.endsWith(".youtube.setup.prepare")) row.widgets.get(0).active = !installingCompanion;
         }
     }
     @Override public void tick() {
@@ -356,6 +457,23 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     @Override public void run(String action) {
         MusicService music = RelayLyricsClient.music();
         switch (action) {
+            case "languages_open" -> { category = Category.CUSTOM; scroll = 0; expandedChoice = ""; rebuild(); }
+            case "translation_provider" -> { translationKeyDraft = ""; rebuild(); }
+            case "translation_now" -> { if (music != null) music.translations().request(); }
+            case "translation_key_save" -> {
+                boolean saved = music != null && music.translations().saveKey(translationKeyDraft);
+                if (saved) translationKeyDraft = "";
+                notice = "@config.relaylyrics.translation." + (saved ? "key_saved" : "key_failed"); rebuild();
+            }
+            case "translation_key_remove" -> {
+                boolean removed = music != null && music.translations().removeKey();
+                if (removed) translationKeyDraft = "";
+                notice = "@config.relaylyrics.translation." + (removed ? "key_removed" : "key_failed"); rebuild();
+            }
+            case "updates_check" -> { if (music != null) music.support().check(); }
+            case "updates_open" -> browse(music == null ? java.net.URI.create("https://github.com/fakemaluco/lyrica-mod/releases") : music.support().releasePage());
+            case "diagnostics_copy" -> { if (music != null) { copy(music.diagnosticReport()); notice = "@config.relaylyrics.support.copied"; } }
+            case "bug_report" -> browse(java.net.URI.create("https://github.com/fakemaluco/lyrica-mod/issues/new"));
             case "font" -> Minecraft.getInstance().gui.setScreen(new GoogleFontScreen(this, preferences, this::fontChanged));
             case "weight" -> {
                 String family = preferences.getGoogleFontFamily();
@@ -372,9 +490,38 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
                     scroll = Math.clamp(row.offset, 0, maxScroll()); positionRows(); break;
                 }
             }
-            case "source" -> { if (music != null) music.syncMusicSource(); }
-            case "spotify" -> { if (music != null) Minecraft.getInstance().gui.setScreen(new SpotifyAccountScreen(this, preferences, music)); }
-            case "youtube" -> Minecraft.getInstance().gui.setScreen(new YouTubeMusicConnectionScreen(this, preferences, music));
+            case "source" -> { if (music != null) music.syncMusicSource(); if (preferences.getMusicSource() == MusicSource.SPOTIFY_ACCOUNT) catalog.expand("spotify_account"); if (preferences.getMusicSource() == MusicSource.YOUTUBE_MUSIC) catalog.expand("youtube_account"); }
+            case "spotify" -> openConnectionGroup("spotify_account");
+            case "youtube" -> openConnectionGroup("youtube_account");
+            case "connection_auto" -> { preferences.setMusicSource(MusicSource.AUTOMATIC); if (music != null) music.syncMusicSource(); notice = "@config.relaylyrics.connection.auto.ready"; rebuild(); }
+            case "spotify_connect" -> connectSpotify();
+            case "spotify_disconnect" -> { if (music != null) music.disconnectSpotifyAccount(); authorizationLink = null; notice = "@config.relaylyrics.spotify.disconnected"; rebuild(); }
+            case "spotify_reopen" -> { if (authorizationLink != null) browse(authorizationLink); else notice = "@config.relaylyrics.spotify.no_link"; rebuild(); }
+            case "spotify_dashboard" -> browse(java.net.URI.create("https://developer.spotify.com/dashboard"));
+            case "spotify_redirect" -> copy(dev.relaylyrics.client.music.SpotifyAccountClient.REDIRECT_URI);
+            case "youtube_install" -> installCompanion();
+            case "youtube_folder" -> { if (companionDirectory != null) copy(companionDirectory.toString()); else run("youtube_install"); }
+            case "youtube_chrome" -> copy("chrome://extensions");
+            case "youtube_edge" -> copy("edge://extensions");
+            case "youtube_open" -> { if (preferences.getMusicSource() != MusicSource.AUTOMATIC) preferences.setMusicSource(MusicSource.YOUTUBE_MUSIC); if (music != null) music.syncMusicSource(); browse(java.net.URI.create("https://music.youtube.com/")); }
+            case "youtube_pair" -> { if (music != null && music.pairingCode() != null) copy(music.pairingCode()); }
+            case "gemini_key_save" -> {
+                if (music == null) notice = "@config.relaylyrics.gemini.state.offline";
+                else if (music.geminiShaders().saveKey(geminiKeyDraft)) { geminiKeyDraft = ""; notice = "@config.relaylyrics.gemini.key_saved"; }
+                else notice = "@config.relaylyrics.gemini.state.key_invalid";
+                rebuild();
+            }
+            case "gemini_key_remove" -> { geminiKeyDraft = ""; if (music != null) music.geminiShaders().removeKey(); savePreferences(); rebuild(); }
+            case "gemini_regenerate" -> { if (music != null) music.geminiShaders().regenerate(); }
+            case "gemini_clear_cache" -> { if (music != null) music.geminiShaders().clearCache(); }
+            case "spicy_get" -> browse(java.net.URI.create("https://developers.spicylyrics.org/catalog/spicy-player"));
+            case "spicy_apply" -> {
+                String key = spicyKeyDraft == null ? preferences.getSpicyLyricsApiKey() : spicyKeyDraft.strip();
+                if (!dev.relaylyrics.client.music.SpicyLyricsApiClient.isPublishableKey(key)) notice = "@config.relaylyrics.spicy.key_invalid";
+                else { preferences.setSpicyLyricsApiKey(key); savePreferences(); if (music != null) music.refreshLyricsApiKey(); notice = "@config.relaylyrics.spicy.key_saved"; }
+                rebuild();
+            }
+            case "spicy_remove" -> { spicyKeyDraft = ""; preferences.setSpicyLyricsApiKey(""); savePreferences(); if (music != null) music.refreshLyricsApiKey(); notice = "@config.relaylyrics.spicy.key_removed"; rebuild(); }
             case "connection_setup" -> {
                 if (preferences.getMusicSource() == MusicSource.YOUTUBE_MUSIC) run("youtube");
                 else if (preferences.getMusicSource() == MusicSource.AUTOMATIC || preferences.getMusicSource() == MusicSource.WINDOWS_MEDIA || preferences.getMusicSource() == MusicSource.SPICETIFY_BRIDGE) {
@@ -389,10 +536,90 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             default -> throw new IllegalArgumentException("Unknown settings action: " + action);
         }
     }
+    private String geminiKeyDraft = "";
+    private boolean probeControl;
+    private boolean controlDown() {
+        if (probeControl && Boolean.getBoolean("lyrica.configSelfTest")) return true;
+        long window = Minecraft.getInstance().getWindow().handle();
+        return GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS
+                || GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
+    }
+    private void openConnectionGroup(String group) {
+        category = Category.CONNECTION; searchQuery = ""; expandedChoice = ""; catalog.expand(group); enterPane(); rebuild();
+        for (Row row : rows) if (row.entry.key.endsWith("group." + group)) { scroll = Math.clamp(row.offset,0,maxScroll()); positionRows(); break; }
+    }
+    private void copy(String value) {
+        Minecraft.getInstance().keyboardHandler.setClipboard(value);
+        notice = "@config.relaylyrics.connection.copied"; rebuild();
+    }
+    private void browse(java.net.URI link) {
+        copy(link.toString());
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try { if (java.awt.Desktop.isDesktopSupported() && java.awt.Desktop.getDesktop().isSupported(java.awt.Desktop.Action.BROWSE)) java.awt.Desktop.getDesktop().browse(link); }
+            catch (Exception ignored) { /* The copied link remains available. */ }
+        });
+    }
+    private void connectSpotify() {
+        if (connectingSpotify) return;
+        if (!preferences.getSpotifyClientId().matches("[A-Za-z0-9]{16,64}")) {
+            catalog.expand("spotify_setup"); notice = "@config.relaylyrics.spotify.client_invalid"; rebuild(); return;
+        }
+        var music = RelayLyricsClient.music(); if (music == null) return;
+        connectingSpotify = true; notice = "@config.relaylyrics.spotify.opening"; rebuild();
+        music.connectSpotifyAccount(preferences.getSpotifyClientId()).whenComplete((link,error) -> Minecraft.getInstance().execute(() -> {
+            connectingSpotify = false;
+            if (error == null) { authorizationLink = link; Minecraft.getInstance().keyboardHandler.setClipboard(link.toString()); notice = "@config.relaylyrics.spotify.waiting"; }
+            else notice = "@config.relaylyrics.spotify.failed";
+            rebuild();
+        }));
+    }
+    private void installCompanion() {
+        if (installingCompanion) return;
+        installingCompanion = true; notice = "@config.relaylyrics.youtube.preparing"; rebuild();
+        java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try { return dev.relaylyrics.client.music.YouTubeMusicCompanion.installAndOpen(); }
+            catch (Exception error) { throw new IllegalStateException(error); }
+        }).whenComplete((directory,error) -> Minecraft.getInstance().execute(() -> {
+            installingCompanion = false;
+            if (error == null) { companionDirectory = directory; copy(directory.toString()); notice = "@config.relaylyrics.youtube.setup.folder_ready"; }
+            else notice = "@config.relaylyrics.youtube.guide_failed";
+            rebuild();
+        }));
+    }
+    @Override public void input(String name, String value) { if (name.equals("translation_key")) translationKeyDraft = value; else if (name.equals("spicy_key")) spicyKeyDraft = value; else if (name.equals("gemini_key")) geminiKeyDraft = value; }
     private void fontChanged() {
         if (RelayLyricsClient.overlay() != null) RelayLyricsClient.overlay().fontChanged();
     }
     @Override public String status(String name) {
+        if (name.equals("update_available")) return RelayLyricsClient.music() == null ? "" : RelayLyricsClient.music().support().availableVersion();
+        if (name.equals("translation_key_input")) return translationKeyDraft;
+        if (name.equals("translation_key_status")) return "@config.relaylyrics.translation." +
+                (RelayLyricsClient.music() != null && RelayLyricsClient.music().translations().keyConfigured() ? "key_configured" : "key_missing");
+        if (name.equals("translation")) return "@config.relaylyrics.translation.state." +
+                (RelayLyricsClient.music() == null ? "idle" : RelayLyricsClient.music().translations().status());
+        if (name.equals("updates")) {
+            var service = RelayLyricsClient.music();
+            if (service == null) return "@config.relaylyrics.updates.state.idle";
+            String key = "config.relaylyrics.updates.state." + service.support().status();
+            return net.minecraft.network.chat.Component.translatable(key, service.support().availableVersion()).getString();
+        }
+
+        if (name.equals("gemini_key_input")) return geminiKeyDraft;
+        if (name.equals("gemini_key_status")) return "@config.relaylyrics.gemini." +
+                (RelayLyricsClient.music() != null && RelayLyricsClient.music().geminiShaders().keyConfigured() ? "key_configured" : "key_missing");
+        if (name.equals("gemini_status")) return "@config.relaylyrics.gemini.state." +
+                (RelayLyricsClient.music() == null ? "offline" : RelayLyricsClient.music().geminiShaders().status());
+        if (name.equals("gemini_design")) {
+            var music = RelayLyricsClient.music();
+            return music == null || music.geminiShaders().shaderName().isBlank() ? "—"
+                    : music.geminiShaders().shaderName() + " · " + music.geminiShaders().shaderDescription();
+        }
+        if (name.equals("spicy_key_input")) return spicyKeyDraft == null ? preferences.getSpicyLyricsApiKey() : spicyKeyDraft;
+        if (name.equals("spicy_status")) return dev.relaylyrics.client.music.SpicyLyricsApiClient.configuredKey(preferences.getSpicyLyricsApiKey()).isBlank()
+                ? "@config.relaylyrics.spicy.key_missing" : "@config.relaylyrics.spicy.key_configured";
+        if (name.equals("spotify_status")) return connectingSpotify ? "@config.relaylyrics.spotify.opening" : RelayLyricsClient.music() == null ? "@config.relaylyrics.offline" : RelayLyricsClient.music().spotifyAccountConnected() ? "@config.relaylyrics.connected" : RelayLyricsClient.music().spotifyAccountStatus();
+        if (name.equals("youtube_status")) return installingCompanion ? "@config.relaylyrics.youtube.preparing" : RelayLyricsClient.music() != null && RelayLyricsClient.music().youtubeMusicConnected() ? "@config.relaylyrics.connected" : "@config.relaylyrics.youtube.waiting";
+        if (name.equals("music_presence")) return "@config.relaylyrics.music_presence.status." + dev.relaylyrics.client.MusicPresence.statusKey();
         MusicService music = RelayLyricsClient.music();
         if (music == null) return "@config.relaylyrics.offline";
         var playback = music.snapshot();
@@ -438,6 +665,32 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     }
 
 
+    private void drawCards(GuiGraphicsExtractor context) {
+        for (int start = 0; start < rows.size();) {
+            int end = start + 1;
+            Row first = rows.get(start);
+            while (end < rows.size() && rows.get(end).entry.section.equals(first.entry.section)) end++;
+            Row last = rows.get(end-1);
+            int top = rowTop(first) + first.inset, bottom = rowBottom(last);
+            paintAlpha = modalAlpha * paneAlpha;
+            if (bottom > listTop && top < listBottom && bottom > top) {
+                RoundedGui.smoothFill(context,rowLeft,top,rowWidth,bottom-top,12,ink(0x14D9CAFF));
+                RoundedGui.smoothOutline(context,rowLeft,top,rowWidth,bottom-top,12,ink(0x12D9CAFF));
+                for (int i = start+1; i < end; i++) {
+                    Row row = rows.get(i); paintAlpha = modalAlpha*paneAlpha*row.opacity;
+                    int y = rowTop(row);
+                    if (row.entry.kind != Kind.GROUP && y >= listTop && y < listBottom)
+                        context.fill(rowLeft+16,y,rowLeft+rowWidth-16,y+1,ink(0x12D9CAFF));
+                }
+            }
+            if (!first.caption.isEmpty()) {
+                paintAlpha = modalAlpha*paneAlpha*first.opacity;
+                drawUi(context,Component.translatable(first.caption),rowLeft+4,rowTop(first)+6,MUTED,.85,true);
+            }
+            start = end;
+        }
+        paintAlpha = modalAlpha*paneAlpha;
+    }
     private void drawPopup(GuiGraphicsExtractor context) {
         var overlay = RelayLyricsClient.overlay();
         if (overlay == null || !overlay.hasCurrentSong()) return;
@@ -479,14 +732,15 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         }
         paintAlpha = modalAlpha * paneAlpha;
         GuiTransform.enableScissor(context, rowLeft, listTop, rowLeft + rowWidth, listBottom);
+        drawCards(context);
         for (int index = 0; index < rows.size(); index++) {
-            if (paintAlpha <= 0) break;
+            paintAlpha = modalAlpha * paneAlpha * rows.get(index).opacity;
+            if (paintAlpha <= 0) continue;
             Row row = rows.get(index);
-            int top = listTop + row.offset - scroll;
+            int top = contentTop(row);
             if (top + row.height < listTop || top > listBottom) continue;
-            if (row.entry.kind != Kind.GROUP) {
-                RoundedGui.smoothFill(context, rowLeft, top, rowWidth, row.height, 10, ink(0x14D9CAFF));
-            }
+            int clipTop = Math.clamp(rowTop(row)+row.inset,listTop,listBottom);
+            GuiTransform.enableScissor(context,rowLeft,clipTop,rowLeft+rowWidth,Math.clamp(rowBottom(row),clipTop,listBottom));
             int y = top + (compactNavigation ? 10 : 13);
             for (var line : font.split(ui(Component.translatable(row.entry.key)), row.labelWidth)) {
                 drawOrdered(context, line, rowLeft + 16, y, row.entry.kind == Kind.GROUP ? MUTED : INK, 1); y += compactNavigation ? 12 : 16;
@@ -510,7 +764,9 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
                 RoundedGui.smoothFill(context, x - 3, top + row.baseHeight, controlWidth() + 6,
                         row.height - row.baseHeight, 9, ink(0xFF2A1B46));
             }
+            context.disableScissor();
         }
+        paintAlpha = modalAlpha * paneAlpha;
         if (rows.isEmpty()) drawUi(context, Component.translatable("config.relaylyrics.settings.empty"), rowLeft + 16, listTop + 22, MUTED, 1, false);
         context.disableScissor();
         paintAlpha = modalAlpha;
@@ -534,6 +790,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         double oldDensity = PlatformTextures.beginUiScale(uiScale);
         try {
             frameNanos = now();
+            updateRowMotion();
             if (probeMouseX >= 0) { mouseX = probeMouseX; mouseY = probeMouseY; }
             modalAlpha = modalMotion.to(1, SettingsMotion.MODAL, SettingsMotion.Curve.OUT, frameNanos, motionEnabled());
             paneAlpha = paneMotion.to(1, SettingsMotion.PANE, SettingsMotion.Curve.OUT, frameNanos, motionEnabled());
@@ -583,10 +840,19 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
 
     @Override protected boolean handleMouseScrolled(double x, double y, double horizontal, double vertical) {
         if (peeking || vertical == 0) return false;
+        revealChoice = "";
+        if (controlDown() && !editing) {
+            preferences.setSettingsUiScale(preferences.getSettingsUiScale() * Math.pow(1.08, Math.clamp(vertical, -4, 4)));
+            savePreferences(); setFocused(null); selectingSearch = false; selectionField = null;
+            applyUiScale(); return true;
+        }
         if (editing || x < rowLeft || x > rowLeft + rowWidth + 10 || y < listTop || y > listBottom) return false;
         scroll = Math.clamp(scroll + (vertical > 0 ? -40 : 40), 0, maxScroll()); setFocused(null); positionRows(); return true;
     }
     @Override protected boolean handleKeyPressed(int key, int scanCode, int modifiers) {
+        if (controlDown() && key == GLFW.GLFW_KEY_0 && !editing) {
+            preferences.setSettingsUiScale(1); savePreferences(); applyUiScale(); return true;
+        }
         if (!editing && !confirmRestore && key == GLFW.GLFW_KEY_F && (modifiers & (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SUPER)) != 0 && searchField != null) {
             setFocused(searchField); searchField.setFocused(true); return true;
         }
@@ -607,13 +873,21 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             else { editX += dx; editY += dy; }
             persistEdit(); return true;
         }
-        if (searchField != null && searchField.isFocused() && key != GLFW.GLFW_KEY_ESCAPE) return false;
+        if (getFocused() instanceof SearchField && key != GLFW.GLFW_KEY_ESCAPE) return false;
         if (!editing && (key == GLFW.GLFW_KEY_PAGE_UP || key == GLFW.GLFW_KEY_PAGE_DOWN)) {
             scroll = Math.clamp(scroll + (key == GLFW.GLFW_KEY_PAGE_UP ? -120 : 120), 0, maxScroll()); setFocused(null); positionRows(); return true;
         }
         return false;
     }
     @Override protected boolean handleMouseClicked(double x, double y, int button) {
+        for (Row row : rows) for (var control : row.widgets) {
+            if (control.visible && control.isMouseOver(x,y) && (row.leaving || y < rowTop(row)+row.inset || y >= rowBottom(row))) return true;
+        }
+        if (!editing && button == 0) for (Row row : rows) {
+            if (row.entry.kind == Kind.GROUP && !row.leaving && x >= rowLeft && x < rowLeft+rowWidth
+                    && y >= Math.max(listTop,contentTop(row)) && y < Math.min(listBottom,rowBottom(row))
+                    && row.widgets.get(0) instanceof PanelButton control) { setFocused(control); control.setFocused(true); control.invoke.run(); return true; }
+        }
         if (!editing && button == 0) {
             pointerHeld = true;
             pressedKey = "";
@@ -621,10 +895,11 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
                 pressedKey = control.key; break;
             }
         }
-        if (!editing && button == 0 && searchField != null && searchField.isMouseOver(x, y)) {
-            setFocused(searchField); searchField.setFocused(true); selectingSearch = true;
-            searchField.moveCursorTo(searchField.cursorAt(x), false);
-            return true;
+        if (!editing && button == 0) for (var child : children()) {
+            if (child instanceof SearchField field && field.visible && field.isMouseOver(x, y)) {
+                setFocused(field); field.setFocused(true); selectingSearch = true; selectionField = field;
+                field.moveCursorTo(field.cursorAt(x), false); return true;
+            }
         }
         if (!editing && button == 0 && peekButton != null && peekButton.isMouseOver(x, y)) {
             peeking = true; return true;
@@ -633,30 +908,27 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             onClose(); return true;
         }
         if (!editing || button != 0 || x < editX || y < editY || x > editX + editSurfaceWidth() || y > editY + editHeight) return false;
-        resizing = x > editX + editSurfaceWidth() - 18 && y > editY + editHeight - 18;
+        int resizeEdges = dev.relaylyrics.client.music.PopupResizeGesture.edgesAt(x, y, editX, editY, editSurfaceWidth(), editHeight, 6);
+        resizing = resizeEdges != 0;
+        if (resizing) editorResizeStart = new dev.relaylyrics.client.music.PopupResizeGesture.Start(editX, editY, editSurfaceWidth(), editHeight, x, y, resizeEdges);
         if (resizing) { var overlay = RelayLyricsClient.overlay(); resizeSquareVideo = overlay != null && overlay.isSquareVideo(); resizeVideoAspect = overlay == null ? 0 : overlay.popupVideoAspect(); }
         dragging = !resizing; dragX = (int) x; dragY = (int) y; return true;
     }
     @Override protected boolean handleMouseDragged(double x, double y, int button, double dx, double dy) {
-        if (selectingSearch && searchField != null && button == 0) { searchField.moveCursorTo(searchField.cursorAt(x), true); return true; }
+        if (selectingSearch && selectionField != null && button == 0) { selectionField.moveCursorTo(selectionField.cursorAt(x), true); return true; }
         if (!editing || (!resizing && !dragging)) return false;
         int mx = (int) x, my = (int) y;
         if (resizing) {
-            var overlay = RelayLyricsClient.overlay();
-            int dxMove = mx - dragX, dyMove = my - dragY;
-            int targetWidth = editSurfaceWidth() + dxMove, targetHeight = editHeight + dyMove;
-            if (resizeSquareVideo) targetWidth = targetHeight = editHeight + (Math.abs(dxMove) > Math.abs(dyMove) ? dxMove : dyMove);
-            if (overlay != null) {
-                var size = dev.relaylyrics.client.music.CanvasPopupLayout.resize(Math.min(targetWidth, width - editX - 12), Math.min(targetHeight, height - editY - 44), resizeVideoAspect, resizeSquareVideo, editWidth);
-                editWidth = size.width(); editHeight = size.height();
-            } else { editWidth += dxMove; editHeight += dyMove; }
+            int top = height < 240 ? 30 : 52;
+            var frame = editorResizeStart.resize(x, y, 12, top, width - 12, height - 44);
+            editX = frame.x(); editY = frame.y(); editWidth = frame.width(); editHeight = frame.height();
         }
         else { editX += mx - dragX; editY += my - dragY; }
         dragX = mx; dragY = my; persistEdit(); return true;
     }
     private int editSurfaceWidth() {
         var overlay = RelayLyricsClient.overlay();
-        if (resizing) return resizeSquareVideo ? editHeight : dev.relaylyrics.client.music.CanvasPopupLayout.expandedWidth(editWidth, editHeight, resizeVideoAspect);
+        if (resizing) return editWidth;
         return overlay == null ? editWidth : overlay.expandedPopupWidth(editWidth, editHeight);
     }
     private void persistEdit() {
@@ -702,27 +974,103 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     }
     /** Called only by the opt-in screenshot fixture, using disposable preferences. */
     void configureProbe(String stage) {
+        if (Boolean.getBoolean("lyrica.configAccordionSelfTest")) {
+            preferences.setLyricsAnimations(true); probeTime = 1_000_000_000L;
+            modalMotion.snap(1); paneMotion.snap(1);
+            category = stage.equals("cards_style") ? Category.APPEARANCE : Category.CUSTOM;
+            rebuild();
+            if (stage.equals("cards_style")) return;
+            var sidebar = navigation.get(0); var search = searchField;
+            Row header = rows.stream().filter(row -> row.entry.key.endsWith(".group.typography")).findFirst().orElseThrow();
+            PanelButton toggle = (PanelButton) header.widgets.get(0);
+            if (stage.equals("reduced")) preferences.setLyricsAnimations(false);
+            if (stage.equals("category_60")) {
+                changeCategory(Category.APPEARANCE); probeTime += 60_000_000L;
+            } else {
+                toggle.invoke.run();
+                if (stage.startsWith("collapse_") || stage.equals("reverse_40")) {
+                    probeTime += 300_000_000L; updateRowMotion(); toggle.invoke.run();
+                    probeTime += 60_000_000L; updateRowMotion();
+                    if (stage.equals("reverse_40")) { toggle.invoke.run(); probeTime += 40_000_000L; }
+                } else if (stage.startsWith("accordion_")) probeTime += Long.parseLong(stage.substring(10))*1_000_000L;
+                else probeTime += 270_000_000L;
+            }
+            updateRowMotion();
+            if (navigation.get(0) != sidebar || searchField != search) throw new IllegalStateException("Expansion rebuilt the settings chrome");
+            if (!stage.equals("category_60") && rowViews.get(header.id).widgets.get(0) != toggle) throw new IllegalStateException("Disclosure trigger was recreated");
+            if (paneMotion.value(probeTime) != 1) throw new IllegalStateException("Accordion faded the whole pane");
+            if (stage.equals("accordion_80") && rows.stream().noneMatch(row -> row.opacity>0 && row.opacity<1)) throw new IllegalStateException("Missing intermediate item fade");
+            if (stage.equals("collapse_60") && rows.stream().noneMatch(row -> row.leaving)) throw new IllegalStateException("Collapse removed content before its exit");
+            if (stage.equals("reduced") && rows.stream().anyMatch(row -> row.opacity != 1)) throw new IllegalStateException("Reduced motion did not settle");
+            return;
+        }
+        if (Boolean.getBoolean("lyrica.configConnectionSelfTest")) {
+            preferences.setSettingsUiScale(1); applyUiScale();
+            if (stage.equals("spicy_key")) {
+                category = Category.SOURCES; catalog.expand("spicy_account"); rebuild();
+                SearchField field = rows.stream().filter(row -> row.entry.kind == Kind.TEXT).flatMap(row -> row.widgets.stream()).filter(widget -> widget instanceof SearchField).map(widget -> (SearchField) widget).findFirst().orElseThrow();
+                field.setValue("sl_pk_fixture_client_123");
+                if (field.displayInput().contains("fixture") || !"sl_pk_fixture_client_123".equals(spicyKeyDraft)) throw new IllegalStateException("Key field masking or draft update failed");
+                rebuild();
+                if (!"sl_pk_fixture_client_123".equals(spicyKeyDraft)) throw new IllegalStateException("Rebuilding lost the key draft");
+                return;
+            }
+            category = Category.CONNECTION;
+            String group = stage.startsWith("youtube") ? "youtube_account" : "spotify_account";
+            if (stage.equals("spotify_setup")) catalog.expand("spotify_setup");
+            openConnectionGroup(group);
+            if (stage.equals("spotify_setup")) {
+                for (Row row : rows) if (row.entry.key.endsWith(".group.spotify_setup")) { scroll = Math.clamp(row.offset,0,maxScroll()); positionRows(); break; }
+            }
+            if (stage.equals("zoom_small") || stage.equals("zoom_large")) {
+                double old = uiScale;
+                probeControl = true;
+                try {
+                    handleMouseScrolled(rowLeft + 2,listTop + 2,0,stage.equals("zoom_small") ? -4 : 4);
+                } finally { probeControl = false; }
+                if (stage.equals("zoom_small") ? uiScale >= old : uiScale <= old) throw new IllegalStateException("Control-wheel did not zoom settings");
+            }
+            return;
+        }
         probeSearch = stage.equals("search");
         searchQuery = probeSearch ? "Canvas" : "";
         category = switch (stage) {
             case "appearance", "choices", "motion_artwork", "quality_choices" -> Category.APPEARANCE;
             case "connection" -> Category.CONNECTION;
             case "sources", "sources_end", "source_priority", "priority_choices", "compact_priority" -> Category.SOURCES;
-            case "advanced", "experimental" -> Category.ADVANCED;
-            case "custom", "effects" -> Category.CUSTOM;
+            case "updates", "support", "advanced", "experimental", "gemini_controls", "gemini_controls_lower", "gemini_controls_creative", "gemini_controls_art", "gemini_controls_actions" -> Category.ADVANCED;
+            case "custom", "effects", "languages", "translation_provider" -> Category.CUSTOM;
             case "world", "world_fixed" -> Category.WORLD;
             default -> Category.GENERAL;
         };
         if (stage.equals("motion_artwork")) catalog.expand("motion_artwork");
         if (stage.contains("priority")) catalog.expand("source_priority");
         if (stage.equals("experimental")) catalog.expand("experimental");
+        if (stage.startsWith("gemini_controls")) { catalog.expand("experimental"); catalog.expand("gemini_shader"); }
         if (stage.equals("effects")) catalog.expand("effects");
+        if (stage.equals("languages") || stage.equals("translation_provider")) catalog.expand("languages");
+        if (stage.equals("translation_provider")) { catalog.expand("translation_provider"); preferences.setTranslationProvider("Gemini"); }
+        if (stage.equals("updates")) catalog.expand("updates");
+        if (stage.equals("support")) catalog.expand("support");
         if (stage.equals("world") || stage.equals("world_fixed")) {
             preferences.setWorldLyrics(true); preferences.setWorldLyricsAutomatic(!stage.equals("world_fixed"));
         }
-        editing = stage.equals("editor") || stage.equals("compact_tiny") || java.util.Set.of("kawarp", "kawarp_later", "artist", "artist_fallback", "static", "paused").contains(stage);
+        editing = stage.equals("languages_preview") || stage.equals("languages_replace") || stage.startsWith("gemini_visual_") || stage.equals("editor") || stage.equals("compact_tiny") || java.util.Set.of("kawarp", "kawarp_later", "artist", "artist_fallback", "static", "paused").contains(stage);
         rebuild();
+        if (stage.equals("translation_provider")) {
+            for (Row row : rows) if (row.entry.key.endsWith("group.translation_provider")) { scroll = Math.clamp(row.offset, 0, maxScroll()); positionRows(); break; }
+        }
         if (stage.equals("sources_end")) { scroll = maxScroll(); positionRows(); }
+        if (stage.equals("gemini_controls_creative")) {
+            for(Row row:rows)if(row.entry.key.endsWith("gemini.song_context")){scroll=Math.clamp(row.offset,0,maxScroll());positionRows();break;}
+        }
+        if (stage.equals("gemini_controls_art") || stage.equals("gemini_controls_actions")) {
+            String target=stage.equals("gemini_controls_art")?"gemini.art_recipe":"gemini.direction";
+            for(Row row:rows)if(row.entry.key.endsWith(target)){scroll=Math.clamp(row.offset,0,maxScroll());positionRows();break;}
+        }
+        if (stage.equals("gemini_controls_lower")) {
+            for (Row row : rows) if (row.entry.key.endsWith("gemini.model")) { scroll = Math.clamp(row.offset, 0, maxScroll()); positionRows(); break; }
+        }
         if (stage.equals("motion_artwork")) {
             for (Row row : rows) if (row.entry.key.endsWith(".group.motion_artwork")) {
                 scroll = Math.clamp(row.offset, 0, maxScroll()); positionRows(); break;
@@ -817,7 +1165,11 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         }
     }
     private static final class Row {
-        final Entry entry; final int offset, baseHeight, height, labelWidth; final String detail; final boolean below;
+        final Entry entry; int offset; final int baseHeight, height, labelWidth; final String detail; final boolean below;
+        String id = "", caption = ""; int inset;
+        boolean sectionStart, leaving;
+        double visualOffset, visualHeight, opacity = 1;
+        final java.util.Map<AbstractWidget, Boolean> enabled = new java.util.IdentityHashMap<>();
         final List<AbstractWidget> widgets = new ArrayList<>();
         final List<Integer> widgetOffsets = new ArrayList<>();
         Row(Entry entry, int offset, int baseHeight, int extensionHeight, int labelWidth, String detail, boolean below) {
@@ -844,8 +1196,13 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             this.invoke = () -> activate(key, entry, action);
         }
         @Override protected void extractContents(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+            boolean clipped = clipRowWidget(context,this);
+            try { drawAnimatedControl(context,mouseX,mouseY,delta); }
+            finally { if (clipped) context.disableScissor(); }
+        }
+        private void drawAnimatedControl(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
             if (peeking || kind == ButtonKind.INFO) return;
-            paintAlpha = modalAlpha * (kind == ButtonKind.NAV || kind == ButtonKind.CLOSE || kind == ButtonKind.PEEK ? 1 : paneAlpha);
+            paintAlpha = modalAlpha * (kind == ButtonKind.NAV || kind == ButtonKind.CLOSE || kind == ButtonKind.PEEK ? 1 : paneAlpha) * rowOpacity(this);
             if (paintAlpha <= 0) return;
             boolean over = isHovered() || isFocused();
             double hover = motion.hover.to(over ? 1 : 0, SettingsMotion.FAST, SettingsMotion.Curve.STANDARD, frameNanos, motionEnabled());
@@ -930,10 +1287,15 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         @Override protected void applyValue() { setNumber(entry, entry.min + value * (entry.max - entry.min), false); }
         void refresh() { value = (entry.number.getAsDouble() - entry.min) / (entry.max - entry.min); updateMessage(); }
         @Override public void extractWidgetRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+            boolean clipped = clipRowWidget(context,this);
+            try { drawAnimatedControl(context,mouseX,mouseY,delta); }
+            finally { if (clipped) context.disableScissor(); }
+        }
+        private void drawAnimatedControl(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
             if (peeking) return;
             int x = getX(), y = getY(), w = getWidth();
             Component label = ui(getMessage());
-            paintAlpha = modalAlpha * paneAlpha;
+            paintAlpha = modalAlpha * paneAlpha * rowOpacity(this);
             if (paintAlpha <= 0) return;
             drawUi(context, label, x + (int) ((w - font.width(label) * .8) / 2), textY(y + 6, .8), MUTED, .8, false);
             RoundedGui.smoothFill(context, x + 4, y + 20, w - 8, 4, 2, ink(0x3BD9CAFF));
@@ -949,20 +1311,33 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     }
     private final class SearchField extends EditBox {
         private int visibleStart;
+        private Entry binding;
         SearchField(int x, int y, int width, int height) {
             super(LyricsConfigScreen.this.font, x, y, width, height, Component.translatable("config.relaylyrics.settings.search"));
             setMaxLength(96); setBordered(false);
         }
+        SearchField(int x, int y, int width, int height, Entry binding) {
+            this(x,y,width,height); this.binding = binding;
+        }
+        private String displayInput() {
+            String raw = getValue();
+            return binding != null && binding.masked ? "•".repeat(raw.length()) : raw;
+        }
         @Override public void extractWidgetRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
+            boolean clipped = clipRowWidget(context,this);
+            try { drawAnimatedControl(context,mouseX,mouseY,delta); }
+            finally { if (clipped) context.disableScissor(); }
+        }
+        private void drawAnimatedControl(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
             if (peeking) return;
-            paintAlpha = modalAlpha;
+            paintAlpha = modalAlpha * (binding == null ? 1 : paneAlpha * rowOpacity(this));
             if (paintAlpha <= 0) return;
             int x = getX(), y = getY(), w = getWidth(), h = getHeight();
             RoundedGui.smoothFill(context, x, y, w, h, 9, ink(0x3D000000));
             RoundedGui.smoothOutline(context, x, y, w, h, 9, ink(isFocused() ? 0x6BD9CAFF : 0x1FD9CAFF));
-            SettingsTypography.icon(context, "search", x + 8, y + h / 2 - 8, 16, ink(MUTED));
+            SettingsTypography.icon(context, binding == null ? "search" : "CONNECTION", x + 8, y + h / 2 - 8, 16, ink(MUTED));
             int available = Math.max(20, (int) ((w - 40) / .9));
-            String input = getValue();
+            String input = displayInput();
             int cursor = getCursorPosition();
             visibleStart = Math.clamp(visibleStart, 0, input.length());
             if (cursor < visibleStart) visibleStart = cursor;
@@ -970,11 +1345,11 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             int end = visibleStart;
             while (end < input.length() && font.width(ui(Component.literal(input.substring(visibleStart, end + 1)))) <= available) end++;
             String visible = input.substring(visibleStart, end);
-            Component shown = input.isEmpty() ? net.minecraft.network.chat.Component.translatable("config.relaylyrics.settings.search") : net.minecraft.network.chat.Component.literal(visible);
+            Component shown = input.isEmpty() ? net.minecraft.network.chat.Component.translatable(binding == null ? "config.relaylyrics.settings.search" : binding.key + ".placeholder") : net.minecraft.network.chat.Component.literal(visible);
             String trimmed = font.substrByWidth(ui(shown), available).getString();
             String selected = getHighlighted();
             if (!selected.isEmpty()) {
-                int selectionStart = input.startsWith(selected, cursor) ? cursor : cursor - selected.length();
+                int selectionStart = getValue().startsWith(selected, cursor) ? cursor : cursor - selected.length();
                 int selectionEnd = selectionStart + selected.length();
                 int a = Math.clamp(selectionStart, visibleStart, end), b = Math.clamp(selectionEnd, visibleStart, end);
                 int left = x + 29 + (int) Math.round(font.width(ui(net.minecraft.network.chat.Component.literal(input.substring(visibleStart, a)))) * .9);
@@ -988,7 +1363,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             }
         }
         int cursorAt(double mouseX) {
-            String value = getValue();
+            String value = displayInput();
             int start = Math.clamp(visibleStart, 0, value.length());
             double target = (mouseX - getX() - 29) / .9;
             for (int index = start; index < value.length(); index++) {

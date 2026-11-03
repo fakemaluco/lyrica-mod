@@ -50,10 +50,12 @@ public final class WorldLyricsPlacement {
     /** A page remains fixed until the player is about to consume its reading runway. */
     public static boolean shouldRelocate(double distanceToAnchor, double placedDistance, double closingSpeed,
                                          double remainingSeconds, double secondsSinceAnchor, boolean flying) {
-        if (remainingSeconds < 1.2 || closingSpeed < 4) return false;
+        if (!Double.isFinite(distanceToAnchor) || !Double.isFinite(placedDistance)
+                || !Double.isFinite(closingSpeed) || placedDistance <= 0
+                || remainingSeconds < 1.2 || closingSpeed < 4) return false;
         double cooldown = flying ? Math.clamp(placedDistance / closingSpeed * .45, .45, 1.4) : 1.0;
         if (secondsSinceAnchor < cooldown) return false;
         double runway = Math.max(flying ? 16 : 5, closingSpeed * (flying ? 1.45 : 1.1));
-        return distanceToAnchor > 0 && distanceToAnchor <= runway;
+        return distanceToAnchor > 0 && distanceToAnchor <= Math.min(runway, placedDistance * .65);
     }
 }

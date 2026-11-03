@@ -60,6 +60,31 @@ class MusicPlaybackClockTest {
         assertThat(clock.positionMillis()).isEqualTo(9_000);
     }
 
+    @Test
+    void repeatedReportsCannotCancelACorrectionForLyricsThatAreAhead() {
+        AtomicLong nanos = new AtomicLong();
+        MusicPlaybackClock clock = new MusicPlaybackClock(nanos::get, () -> NOW);
+        clock.update(snapshot(1_000, true));
+        nanos.addAndGet(500_000_000);
+        clock.update(snapshot(1_100, true));
+        for (int index = 0; index < 20; index++) {
+            nanos.addAndGet(50_000_000);
+            clock.update(snapshot(1_100, true));
+        }
+        assertThat(clock.positionMillis()).isBetween(2_100L, 2_115L);
+    }
+
+    @Test
+    void pausingOnARepeatedRawPositionCannotPreserveAnAdvancedLyricClock() {
+        AtomicLong nanos = new AtomicLong();
+        MusicPlaybackClock clock = new MusicPlaybackClock(nanos::get, () -> NOW);
+        clock.update(snapshot(1_000, true));
+        nanos.addAndGet(600_000_000);
+        clock.update(snapshot(1_000, false));
+        nanos.addAndGet(1_000_000_000);
+        assertThat(clock.positionMillis()).isEqualTo(1_000);
+    }
+
     private static PlaybackSnapshot snapshot(long position, boolean playing) {
         return new PlaybackSnapshot("Track", "Artist", "Album", null,
                 "spotify:track:1234567890123456789012", null, position, 20_000,

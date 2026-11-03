@@ -1,0 +1,12 @@
+// Offline fixture. No Google requests or user credentials are used.
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        if (name == 'runClient') {
+            systemProperty 'lyrica.configSelfTest', 'true'
+            systemProperty 'lyrica.geminiShaderSelfTest', 'true'
+            systemProperty 'lyrica.configProbeOutput', rootProject.layout.buildDirectory.dir('gemini-shader-qa').get().asFile.absolutePath
+            systemProperty 'lyrica.geminiProbeOutput', rootProject.layout.buildDirectory.dir('gemini-shader-qa').get().asFile.absolutePath
+            args '--width', '1280', '--height', '720'
+        }
+    }
+}

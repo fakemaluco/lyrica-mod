@@ -66,6 +66,23 @@ public class VideoLoopTest {
         }
     }
 
+    @Test public void visibleAutoplayResumesPausedVideoAndOrdinaryRenderingRevokesIt() throws Exception {
+        Path fixture=Path.of("..","build","motion-autoplay-fixture.mp4").toAbsolutePath().normalize();
+        Files.createDirectories(fixture.getParent());makeFixture(fixture);
+        try(var loop=new VideoLoop(true)){
+            loop.setPlaying(false,true);loop.setSource(fixture.toUri().toString());awaitFrames(loop,1);
+            long first=loop.latest().sequence();
+            for(int i=0;i<12;i++){loop.setPlaying(false,true);loop.touchVisible(true);Thread.sleep(50);}
+            assertTrue("Autoplay must win over repeated paused music updates",loop.latest().sequence()>first+2);
+            loop.touchVisible(false);Thread.sleep(150);long paused=loop.latest().sequence();
+            for(int i=0;i<5;i++){loop.touchVisible(false);Thread.sleep(50);}
+            assertEquals("Ordinary rendering must restore pause",paused,loop.latest().sequence());
+            for(int i=0;i<8;i++){loop.touchVisible(true);Thread.sleep(50);}
+            assertTrue("A later collapsed view must resume the same stream",loop.latest().sequence()>paused+1);
+            Thread.sleep(1100);long hidden=loop.latest().sequence();Thread.sleep(200);
+            assertEquals("Autoplay must expire when no view is visible",hidden,loop.latest().sequence());
+        }
+    }
     @Test public void sourceProtocolsAreRestrictedOutsideOptInFixtures() {
         assertFalse(VideoLoop.validSource("file:///C:/private/file.mp4", false));
         assertFalse(VideoLoop.validSource("http://example.com/a.mp4", false));

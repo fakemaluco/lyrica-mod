@@ -23,7 +23,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
     private static int effectsProbeTicks;
 
     public static ClientPreferences preferences() {
-        if (preferences == null) preferences = Boolean.getBoolean("lyrica.worldExperienceSelfTest") ? new ClientPreferences() : ClientPreferences.load();
+        if (preferences == null) preferences = (Boolean.getBoolean("lyrica.worldExperienceSelfTest") || Boolean.getBoolean("lyrica.geminiWorldSelfTest")) ? new ClientPreferences() : ClientPreferences.load();
         return preferences;
     }
 
@@ -43,11 +43,12 @@ public final class RelayLyricsClient implements ClientModInitializer {
         CompatibilityManager.initialize();
 
         overlay = new LyricsOverlay(preferences());
-        if (!Boolean.getBoolean("lyrica.worldExperienceSelfTest") && !Boolean.getBoolean("lyrica.worldMeshSelfTest") && !Boolean.getBoolean("lyrica.effectsSelfTest") && !Boolean.getBoolean("lyrica.configSelfTest") && !Boolean.getBoolean("lyrica.motionArtworkSelfTest"))
+        if (!Boolean.getBoolean("lyrica.geminiWorldSelfTest") && !Boolean.getBoolean("lyrica.worldExperienceSelfTest") && !Boolean.getBoolean("lyrica.worldMeshSelfTest") && !Boolean.getBoolean("lyrica.effectsSelfTest") && !Boolean.getBoolean("lyrica.configSelfTest") && !Boolean.getBoolean("lyrica.motionArtworkSelfTest"))
             music = new MusicService(overlay, preferences());
         GoogleFontManager.restore(preferences().getGoogleFontFamily(),
                 preferences().getLyricsFontWeight().cssWeight(), overlay::fontChanged);
         InventoryLyricsInteraction.register();
+        MusicPresence.initialize();
         WorldLyricsRenderHook.register();
         net.fabricmc.fabric.api.resource.ResourceManagerHelper.get(net.minecraft.server.packs.PackType.CLIENT_RESOURCES)
                 .registerReloadListener(new net.fabricmc.fabric.api.resource.SimpleSynchronousResourceReloadListener() {
@@ -56,6 +57,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
                         Minecraft.getInstance().execute(() -> {
                             dev.relaylyrics.client.ui.WorldTextMesh.clear();
                             overlay.fontChanged();
+                            dev.relaylyrics.client.music.WorldGeminiRenderer.close();
                         });
                     }
                 });
@@ -84,7 +86,17 @@ public final class RelayLyricsClient implements ClientModInitializer {
                 }
                 finally { client.stop(); }
             }
+            dev.relaylyrics.client.ui.JadeIslandProbe.tick(client);
+            dev.relaylyrics.client.ui.GeminiWorldProbe.tick();
             overlay.tick();
+            if (music != null) {
+                music.tickGeminiShaders();
+                if (client.player != null) {
+                    String version = music.support().takeNotification();
+                    if (!version.isBlank()) client.gui.hud.getChat().addClientSystemMessage(net.minecraft.network.chat.Component.translatable("config.relaylyrics.updates.notification", version));
+                }
+            }
+            MusicPresence.tick();
             dev.relaylyrics.client.ui.WorldLyricsProbe.tick(client);
             dev.relaylyrics.client.ui.WorldLyricsRenderer.tickPlayerMotion(client);
             dev.relaylyrics.client.ui.WorldTextMesh.tick();
@@ -100,12 +112,16 @@ public final class RelayLyricsClient implements ClientModInitializer {
             var screen = Minecraft.getInstance().gui.screen();
             if (screen == null) {
                 InventoryLyricsController.renderWorldHud(context);
+                dev.relaylyrics.client.ui.GeminiWorldProbe.hud(context);
+                JadeIsland.render(context);
             }
         });
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
             preferences().save();
             if (overlay != null) overlay.close();
+            MusicPresence.close();
             if (music != null) music.close();
+            dev.relaylyrics.client.music.WorldGeminiRenderer.close();
         });
         FanDroidMod.LOGGER.info("Relay Lyrics standalone popup initialized");
     }

@@ -21,7 +21,7 @@ import java.util.function.Consumer;
 public final class WorldLyricsProbe {
     private static final boolean CINEMATIC = Boolean.getBoolean("lyrica.worldCinematicSelfTest");
     private static int cinematicBefore;
-    private static final String[] STAGES=CINEMATIC ? new String[]{"f1-world","ji-afk-caption","ji-afk-paused","ji-return"} : new String[]{"around","sky","glyph-lift-a","glyph-lift-b","popup-font-changed","duet",
+    private static final String[] STAGES=CINEMATIC ? new String[]{"f1-world","ji-afk-caption","ji-afk-elytra","ji-afk-paused","ji-return"} : new String[]{"around","sky","glyph-lift-a","glyph-lift-b","popup-font-changed","duet",
             "night-unlit","night-lit","night-removed","elytra-short","elytra-long","elytra-turn"};
     private static int total,ticks,stage;
     private static boolean initialized,capturePending;
@@ -30,7 +30,7 @@ public final class WorldLyricsProbe {
     private static java.awt.image.BufferedImage darkFrame;
     private WorldLyricsProbe() { }
     public static void tick(Minecraft client) {
-        if (!Boolean.getBoolean("lyrica.worldExperienceSelfTest")) return;
+        if (Boolean.getBoolean("lyrica.islandJadeSelfTest") || Boolean.getBoolean("lyrica.musicPresenceSelfTest") || !Boolean.getBoolean("lyrica.worldExperienceSelfTest")) return;
         if (++total>4000) throw new IllegalStateException("Spatial world probe timed out at "+STAGES[stage]);
         if (client.player==null && total%100==0) FanDroidMod.LOGGER.info("World fixture waiting: {}",client.gui.screen());
         if (client.player==null || client.level==null || client.gui.overlay()!=null || capturePending) return;
@@ -39,6 +39,7 @@ public final class WorldLyricsProbe {
         client.player.setDeltaMovement(Vec3.ZERO); client.player.setSprinting(false);
         if (!initialized) {
             initialized=true;
+            client.options.pauseOnLostFocus=false;
             var server=client.getSingleplayerServer();
             if (server==null) throw new IllegalStateException("Use the disposable integrated QA world");
             server.execute(() -> {
@@ -54,7 +55,7 @@ public final class WorldLyricsProbe {
         client.gui.hud.getChat().clearMessages(false);
         if (CINEMATIC) { tickCinematic(client); return; }
         if (stage==0 && ticks==39) apply();
-        if (stage==11 && ticks==25) WorldLyricsRenderer.probeFlight(new Vec3(-.7,-.06,.8),true);
+        if (stage==11 && ticks==25) WorldLyricsRenderer.probeFlight(new Vec3(-.95,-.06,.35),true);
         if (++ticks<100) return;
         if (!WorldLyricsRenderer.verifyProbe(stage==5 ? 3 : 1,false) || !WorldLyricsRenderer.probeHasVolume()) return;
         if (!WorldLyricsRenderer.probeFontMatchesPopup()) throw new IllegalStateException("World font differs from popup font");
@@ -76,25 +77,32 @@ public final class WorldLyricsProbe {
         var overlay = RelayLyricsClient.overlay();
         if (ticks == 0) {
             cinematicBefore = overlay.cinematicCaptionProbeFrames();
-            RelayLyricsClient.preferences().setWorldLyrics(stage == 0 || stage == 3);
+            // Keep 3D enabled: Ji must suspend it rather than drawing a second set of lyrics.
+            RelayLyricsClient.preferences().setWorldLyrics(true);
+            WorldLyricsRenderer.probeFlight(stage == 2 ? new Vec3(.5, -.08, 1.2) : null, stage == 2);
             if (client.gui.hud.isHidden() != (stage == 0)) client.gui.hud.toggle();
             overlay.setPlayback(new PlaybackSnapshot("AFK fixture", "Lyrica", "", null, "spotify:track:cinematic", "Local fixture",
-                    1900, 60000, stage != 2, .65, false, "off", false, .4, 0, 110, .5, new double[0], Instant.now(), MusicCapabilities.unavailable()));
+                    1900, 60000, stage != 3, .65, false, "off", false, .4, 0, 110, .5, new double[0], Instant.now(), MusicCapabilities.unavailable()));
             try {
                 var manager = Class.forName("com.ji.afkcinematic.cinematic.CinematicManager");
                 var state = Class.forName("com.ji.afkcinematic.cinematic.CinematicState");
-                var mode = java.util.Arrays.stream(state.getEnumConstants()).filter(x -> x.toString().equals(stage == 1 || stage == 2 ? "CINEMATIC_ACTIVE" : "IDLE")).findFirst().orElseThrow();
+                var mode = java.util.Arrays.stream(state.getEnumConstants()).filter(x -> x.toString().equals(stage >= 1 && stage <= 3 ? "CINEMATIC_ACTIVE" : "IDLE")).findFirst().orElseThrow();
                 manager.getMethod("setState", state).invoke(null, mode);
-                Class.forName("com.ji.afkcinematic.render.HUDController").getMethod("setHidden", boolean.class).invoke(null, stage == 1 || stage == 2);
-                Class.forName("com.ji.afkcinematic.render.LetterboxRenderer").getMethod(stage == 1 ? "fadeIn" : stage == 3 ? "reset" : "tick").invoke(null);
+                Class.forName("com.ji.afkcinematic.render.HUDController").getMethod("setHidden", boolean.class).invoke(null, stage >= 1 && stage <= 3);
+                Class.forName("com.ji.afkcinematic.render.LetterboxRenderer").getMethod(stage == 1 ? "fadeIn" : stage == 4 ? "reset" : "tick").invoke(null);
             } catch (ReflectiveOperationException error) { throw new IllegalStateException("Ji runtime API missing", error); }
         }
         if (++ticks < 100) return;
         if (stage == 0 && (!WorldLyricsRenderer.verifyProbe(1, false) || !WorldLyricsRenderer.probeHasVolume()))
             throw new IllegalStateException("F1 suppressed the world renderer");
         int frames = overlay.cinematicCaptionProbeFrames() - cinematicBefore;
-        if (stage == 1 && frames < 1) throw new IllegalStateException("Ji cancelled the lyric caption along with its HUD");
-        if (stage >= 2 && frames != 0) throw new IllegalStateException("Caption remained visible while paused or outside AFK");
+        if (stage >= 1 && stage <= 3 && !WorldLyricsRenderer.probeCinematicSuspended())
+            throw new IllegalStateException("Ji did not suspend world anchors during its camera shots");
+        if (stage == 4 && !WorldLyricsRenderer.verifyProbe(1, false))
+            throw new IllegalStateException("World lyrics did not resume after Ji returned control");
+        if ((stage == 1 || stage == 2) && frames < 1) throw new IllegalStateException("Ji cancelled the lyric caption along with its HUD");
+        if (stage == 1 && overlay.cinematicWordFillFrames() < 1) throw new IllegalStateException("AFK did not render progressive word fill");
+        if (stage >= 3 && frames != 0) throw new IllegalStateException("Caption remained visible while paused or outside AFK");
         FanDroidMod.LOGGER.info("Cinematic fixture {}: caption frames={}, Ji active={}", STAGES[stage], frames, CompatibilityManager.jiAfkCinematicActive());
         capturePending = true; capture(client);
     }

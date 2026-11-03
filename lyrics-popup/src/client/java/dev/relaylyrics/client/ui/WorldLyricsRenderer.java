@@ -61,7 +61,9 @@ public final class WorldLyricsRenderer {
     private static long trackRevision;
     private static long frameClock;
     private static int courseChanges;
+    private static boolean cinematicSuspended;
     static int probeCourseChanges() { return courseChanges; }
+    static boolean probeCinematicSuspended() { return cinematicSuspended && LINES.isEmpty() && drawnPieces == 0; }
     private static Vec3d probeVelocity;
     private static boolean probeGliding;
     static void probeFlight(Vec3d velocity, boolean gliding) {
@@ -121,8 +123,6 @@ public final class WorldLyricsRenderer {
 
     private static Vec3d travel(MinecraftClient client) {
         if (Boolean.getBoolean("lyrica.worldExperienceSelfTest") && probeVelocity!=null) return probeVelocity;
-        if (client.player != null && WorldLyricsRenderHook.cameraPosition(client).squaredDistanceTo(
-                new Vec3d(client.player.getX(), client.player.getEyeY(), client.player.getZ())) > 36) return Vec3d.ZERO;
         return travelWorld == client.world && previousPlayerPosition != null ? playerTravelPerTick : client.player.getVelocity();
     }
 
@@ -141,6 +141,14 @@ public final class WorldLyricsRenderer {
             clear(); wallMode = preferences.isWorldLyricsAutoWalls();
         }
         frameClock=System.nanoTime(); WorldLyricsLights.begin(client.world,frameClock);
+        // Ji moves and cuts its own camera. Its caption owns the lyrics until control returns.
+        if (CompatibilityManager.jiAfkCinematicActive()) {
+            if (!cinematicSuspended) { clear(); STATE.clear(); }
+            cinematicSuspended = true;
+            drawnPieces = drawnMeshes = drawnHalos = 0;
+            return;
+        }
+        cinematicSuspended = false;
         var playback = overlay.worldPlayback();
         long elapsedPreview = (System.nanoTime() - previewStartedNanos) / 1_000_000;
         boolean preview = previewStartedNanos != 0 && elapsedPreview >= 0 && elapsedPreview <= 15_450;
@@ -150,7 +158,7 @@ public final class WorldLyricsRenderer {
             clear(); STATE.clear(); return;
         }
         long now = preview ? elapsedPreview : playback.positionMillis();
-        if (trackIdentity != playback.track() || trackRevision != playback.revision()) {
+        if (!Objects.equals(trackIdentity,playback.track()) || trackRevision != playback.revision()) {
             trackIdentity = playback.track(); trackRevision = playback.revision();
             trackCache = playback.track() + "|seek=" + playback.revision();
         }
@@ -248,10 +256,18 @@ public final class WorldLyricsRenderer {
                             base.wall ? composition(planned.line(), planned.backing(), true, director, lastPreset) : composition);
                     slot = 0;
                 }
+                // A new phrase can reuse a stage that is still completing its previous move.
+                if (shared == null) for (SceneLine existing : LINES.values()) {
+                    if (existing.base == base) { shared = existing; break; }
+                }
                 lastPreset = selected.preset();
                 scene = new SceneLine(base, slot, selected, now,
                         measureGroup(sourceLines, planned.line(), preferences, base.distance, base.bands),
                         Math.clamp(client.world.getLightLevel(BlockPos.ofFloored(base.x, base.y, base.z)), 0, 15));
+                if (shared != null && shared.base == base) {
+                    scene.relocation = shared.relocation;
+                    scene.anchoredAt = shared.anchoredAt;
+                }
                 if (shared != null && shared.base == base && shared.from != null
                         && now - shared.moveStartedAt < shared.moveDuration) {
                     scene.from = shared.from;
@@ -264,11 +280,10 @@ public final class WorldLyricsRenderer {
             if (scene.layout == null) {
                 scene.layout = layout(planned.line(), preferences, scene.base);
                 scene.activePage = WorldLyricsPlacement.pageIndex(scene.layout.pages, now);
-                scene.pageAnchors.clear();
-                scene.pageAnchors.put(scene.activePage, scene.base);
             }
             if (playing && !scene.layout.pages.isEmpty()) {
-                advancePageAnchor(client, cameraPos, scene, planned.line(), now, director, preferences);
+                // Timed pages share the phrase's placement; only an exhausted runway can move it.
+                scene.activePage = WorldLyricsPlacement.pageIndex(scene.layout.pages, now);
                 keepReadingHorizon(client, cameraPos, scene, planned.line(), now, director,
                         preferences.isLyricsAnimations());
             }
@@ -312,92 +327,67 @@ public final class WorldLyricsRenderer {
                 Math.max(24,client.options.getViewDistance().getValue()*14));
     }
 
-    private static boolean reusable(MinecraftClient client, Vec3d camera, Anchor anchor) {
-        Vec3d to = new Vec3d(anchor.x, anchor.y, anchor.z).subtract(camera);
+    private static Vec3d placementDirection(MinecraftClient client) {
         double yaw = Math.toRadians(client.gameRenderer.getCamera().getYaw());
-        Vec3d facing = new Vec3d(-Math.sin(yaw), 0, Math.cos(yaw));
-        return to.length() >= Math.max(2.5, anchor.distance * .55) && to.length() <= anchor.distance * 1.6
-                && to.normalize().dotProduct(facing) > .72 && freePanel(client, camera, anchor);
+        double pitch = Math.toRadians(client.gameRenderer.getCamera().getPitch());
+        Vec3d look = new Vec3d(-Math.sin(yaw) * Math.cos(pitch), -Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+        Vec3d movement = travel(client);
+        if (gliding(client) && movement.length() > .05) return movement.normalize();
+        if (movement.length() > .1 && look.dotProduct(movement.normalize()) > .4)
+            return look.multiply(.7).add(movement.normalize().multiply(.3)).normalize();
+        return look;
     }
 
-    /** A long flying phrase receives its next fixed anchor at a timed page boundary. */
-    private static void advancePageAnchor(MinecraftClient client, Vec3d camera, SceneLine scene, LyricLine line,
-                                          long now, WorldLyricsDirector.Settings settings, ClientPreferences preferences) {
-        int next = WorldLyricsPlacement.pageIndex(scene.layout.pages, now);
-        if (next == scene.activePage) return;
-        if (next < scene.activePage) {
-            scene.activePage = next;
-            scene.base = scene.pageAnchors.getOrDefault(next, scene.base);
-            scene.from = null;
-            scene.anchoredAt = now;
-            return;
-        }
-        Anchor previous = scene.base;
-        scene.pageAnchors.put(scene.activePage, scene.display(now, preferences.isLyricsAnimations()));
-        if (!previous.wall && !previous.ground && (STATE.flying() || STATE.blocksPerSecond() > 5.1)) {
-            double speed = Math.max(STATE.blocksPerSecond(), travel(client).length() * 20);
-            double remaining = Math.max(0, scene.layout.pages.get(next).endMillis() - now) / 1000.0;
-            double target = readingDistance(line,now,scene.composition,settings);
-            Anchor replacement = createAnchor(client, camera, previous.bands, preferences,
-                    scene.composition, target, scene.bounds);
-            double oldDistance = camera.distanceTo(new Vec3d(previous.x, previous.y, previous.z));
-            if (replacement != null && replacement.distance > oldDistance + Math.max(6, speed * .35)) {
-                Anchor displayed = scene.display(now, preferences.isLyricsAnimations());
-                double rise = preferences.isLyricsAnimations()
-                        ? relocationRise(client, displayed, replacement, scene.composition.depth()) : 0;
-                if (!preferences.isLyricsAnimations() || clearRelocationPath(client, displayed, replacement, rise)) {
-                    scene.from = preferences.isLyricsAnimations() ? displayed : null;
-                    scene.base = replacement;
-                    scene.moveStartedAt = now;
-                    scene.moveDuration = Math.round(Math.clamp(300 + oldDistance * 4, 350, 850));
-                    scene.moveRise = rise;
-                    scene.anchoredAt = now;
-                    scene.worldLight = Math.clamp(client.world.getLightLevel(
-                            BlockPos.ofFloored(replacement.x, replacement.y, replacement.z)), 0, 15);
-                }
-            }
-        }
-        scene.activePage = next;
-        scene.pageAnchors.put(next, scene.base);
+    private static boolean reusable(MinecraftClient client, Vec3d camera, Anchor anchor) {
+        Vec3d to = new Vec3d(anchor.x, anchor.y, anchor.z).subtract(camera);
+        return to.length() >= Math.max(2.5, anchor.distance * .45) && to.length() <= anchor.distance * 1.8
+                && to.normalize().dotProduct(placementDirection(client)) > .55 && freePanel(client, camera, anchor);
     }
 
     private static void keepReadingHorizon(MinecraftClient client, Vec3d camera, SceneLine scene,
                                            LyricLine line, long now, WorldLyricsDirector.Settings settings,
                                            boolean animate) {
-        long pageEnd = Math.min(line.endMillis(), scene.layout.pages.get(scene.activePage).endMillis());
-        double remaining = (pageEnd - now) / 1000.0;
         if (scene.base.wall || scene.base.ground) return;
         Anchor previous = scene.base;
+        long pageEnd = Math.min(line.endMillis(), scene.layout.pages.get(scene.activePage).endMillis());
+        // Simultaneous voices share one decision, including at different timed page boundaries.
+        for (var entry : LINES.entrySet()) {
+            SceneLine sibling = entry.getValue();
+            if (sibling.base != previous || sibling.layout == null || sibling.layout.pages.isEmpty()) continue;
+            int page = WorldLyricsPlacement.pageIndex(sibling.layout.pages, now);
+            pageEnd = Math.max(pageEnd, Math.min(entry.getKey().line().endMillis(),
+                    sibling.layout.pages.get(page).endMillis()));
+        }
+        double remaining = (pageEnd - now) / 1000.0;
         Vec3d toAnchor = new Vec3d(previous.x, previous.y, previous.z).subtract(camera);
         double ahead = toAnchor.length();
         double closingSpeed = ahead > 0 ? travel(client).dotProduct(toAnchor.multiply(1 / ahead)) * 20 : 0;
-        double movementSpeed=travel(client).length()*20;
-        boolean courseChanged=WorldLyricsSpace.courseChanged(gliding(client),closingSpeed/Math.max(1,movementSpeed),
-                (now-scene.anchoredAt)/1000.0,remaining);
-        if (!courseChanged && !WorldLyricsDirector.shouldRelocate(ahead, previous.distance, closingSpeed, remaining,
-                (now - scene.anchoredAt) / 1000.0, STATE.flying())) return;
-        double speed = Math.max(STATE.blocksPerSecond(), travel(client).length() * 20);
+        double movementSpeed = travel(client).length() * 20;
+        var relocation = scene.relocation.evaluate(now, ahead, previous.distance, closingSpeed,
+                movementSpeed, remaining, (now - scene.anchoredAt) / 1000.0, STATE.flying(),
+                scene.from != null && now - scene.moveStartedAt < scene.moveDuration);
+        if (relocation == WorldLyricsSpace.Relocation.KEEP) return;
+        boolean courseChanged = relocation == WorldLyricsSpace.Relocation.TURN;
+        scene.relocation.attempted(now);
         double target = readingDistance(line,now,scene.composition,settings);
         // Move only when the current reading runway is nearly exhausted.
         Anchor replacement = createAnchor(client, camera, previous.bands, RelayLyricsClient.preferences(),
                 scene.composition, target, scene.bounds);
-        if (replacement == null) { scene.anchoredAt = now; return; }
-        if (!courseChanged && replacement.distance <= ahead + Math.max(8, closingSpeed * .45)) {
-            scene.anchoredAt = now;
-            return;
-        }
+        if (replacement == null) return;
+        if (!courseChanged && replacement.distance <= ahead + Math.max(8, closingSpeed * .45)) return;
         Anchor displayed = scene.display(now, animate);
         double span = new Vec3d(displayed.x, displayed.y, displayed.z)
                 .distanceTo(new Vec3d(replacement.x, replacement.y, replacement.z));
         long duration = Math.round(Math.clamp(Math.min(Math.min(300 + span * (STATE.flying() ? 5 : 12),
-                (pageEnd - now) * .55), ahead / closingSpeed * 800),
+                (pageEnd - now) * .55), closingSpeed > 0 ? ahead / closingSpeed * 800 : 850),
                 300, STATE.flying() ? 850 : 1100));
         double rise = animate && !courseChanged ? relocationRise(client, displayed, replacement, scene.composition.depth()) : 0;
         if (animate && !courseChanged && !clearRelocationPath(client, displayed, replacement, rise)) {
-            for (SceneLine sibling : LINES.values()) if (sibling.base == previous) sibling.anchoredAt = now;
             return;
         }
+        scene.relocation.placed();
         if (courseChanged) courseChanges++;
+        if (stageAnchor == previous) stageAnchor = replacement;
         for (SceneLine sibling : LINES.values()) if (sibling.base == previous) {
             sibling.from = animate && !courseChanged ? sibling.display(now, true) : null;
             sibling.handoffAt = courseChanged ? System.nanoTime() : 0;
@@ -471,6 +461,7 @@ public final class WorldLyricsRenderer {
                 for (var span : row.spans()) {
                     var token = span.token();
                     var segment = new WorldLyricsExperience.Motion(false);
+                    double motionCenter=span.x()+span.width()/2;
                     boolean glyphMotion = timed && !span.rtl() && LyricsAnimation.usesPerGlyphMotion(token.durationMillis());
                     if (glyphMotion) {
                         for (var glyph : LyricsRenderText.timedGraphemes(span.text(),token.startMillis(),token.endMillis())) {
@@ -478,10 +469,10 @@ public final class WorldLyricsRenderer {
                             double end = renderer.getWidth(styled(span.text().substring(0,glyph.endIndex()),preferences));
                             pieces.add(new Piece(styled(glyph.text(),preferences),token,span.x()+begin,end-begin,
                                     span.sourceX()+begin,span.sourceWidth(),(begin+end)/2/Math.max(1,span.width()),false,
-                                    span.x()+span.width()/2,segment,new WorldLyricsExperience.Motion(true),glyph.startMillis(),glyph.endMillis()));
+                                    motionCenter,segment,new WorldLyricsExperience.Motion(true),glyph.startMillis(),glyph.endMillis()));
                         }
                     } else pieces.add(new Piece(styled(span.text(),preferences),token,span.x(),span.width(),
-                            span.sourceX(),span.sourceWidth(),.5,span.rtl(),span.x()+span.width()/2,segment,null,
+                            span.sourceX(),span.sourceWidth(),.5,span.rtl(),motionCenter,segment,null,
                             token.startMillis(),token.endMillis()));
                 }
                 rows.add(new DrawRow(List.copyOf(pieces),row.width(),null,0));
@@ -714,13 +705,9 @@ public final class WorldLyricsRenderer {
                                               WorldLyricsDirector.Composition composition, double requestedDistance,
                                               PhraseBounds bounds, int attempt) {
         double yaw=Math.toRadians(client.gameRenderer.getCamera().getYaw());
-        double pitch=Math.toRadians(client.gameRenderer.getCamera().getPitch());
-        Vec3d look=new Vec3d(-Math.sin(yaw)*Math.cos(pitch),-Math.sin(pitch),Math.cos(yaw)*Math.cos(pitch));
         Vec3d movement=travel(client);
         boolean gliding=gliding(client) && movement.length()>.05;
-        Vec3d forward=gliding ? movement.normalize() : look;
-        if (!gliding && movement.length()>.1 && look.dotProduct(movement.normalize())>.4)
-            forward=look.multiply(.7).add(movement.normalize().multiply(.3)).normalize();
+        Vec3d forward=placementDirection(client);
         Vec3d right=new Vec3d(-forward.z,0,forward.x).normalize();
         if (right.lengthSquared()<.001) right=new Vec3d(-Math.cos(yaw),0,-Math.sin(yaw));
         boolean outdoors=client.world.isSkyVisible(BlockPos.ofFloored(camera));
@@ -740,7 +727,9 @@ public final class WorldLyricsRenderer {
             Vec3d across=new Vec3d(Math.cos(rotation),0,-Math.sin(rotation));
             Anchor anchor=new Anchor(center.x,center.y,center.z,normal.x,normal.y,normal.z,across.x,across.z,
                     (float)rotation,false,width,height,bands,camera.distanceTo(center));
-            if (freePanel(client,camera,anchor)) return anchor;
+            if (freePanel(client,camera,anchor)) {
+                return anchor;
+            }
         }
         // Stay outside the crosshair corridor even indoors; never fall back to a panel in the player's face.
         if (attempt<3 && requestedDistance>4)
@@ -960,13 +949,12 @@ public final class WorldLyricsRenderer {
         long moveStartedAt, moveDuration;
         double moveRise;
         int activePage;
-        final Map<Integer, Anchor> pageAnchors = new HashMap<>();
+        WorldLyricsSpace.RelocationState relocation = new WorldLyricsSpace.RelocationState();
         SceneLine(Anchor base, int slot, WorldLyricsDirector.Composition composition, long now,
                   PhraseBounds bounds, int worldLight) {
             this.base = base; this.slot = slot; this.composition = composition;
             this.bounds = bounds; this.worldLight = worldLight;
             this.anchoredAt = now;
-            this.pageAnchors.put(0, base);
         }
         SceneLine(Anchor base, int slot, WorldLyricsDirector.Composition composition, long now) {
             this(base, slot, composition, now, new PhraseBounds(base.width, base.height), 15);

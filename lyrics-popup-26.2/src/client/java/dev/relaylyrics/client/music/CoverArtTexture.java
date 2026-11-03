@@ -48,7 +48,10 @@ public final class CoverArtTexture implements AutoCloseable {
     private final Path cache = FabricLoader.getInstance().getConfigDir().resolve("relaylyrics/music/artwork");
     private final AtomicLong generation = new AtomicLong();
     private final long textureInstanceId = TEXTURE_INSTANCE_GENERATION.incrementAndGet();
-    private final FluidBackdrop fluidBackdrop = new FluidBackdrop();
+    private final FluidBackdrop fluidBackdrop = new FluidBackdrop(), islandBackdrop = new FluidBackdrop(true);
+    private final StaticIslandPanel islandStillPanel=new StaticIslandPanel();
+    private volatile boolean islandBackdropVideoSource;
+    public boolean islandBackdropUsesVideo() { return islandBackdropVideoSource; }
     private final GlassLens[] glassLenses = {new GlassLens(), new GlassLens(), new GlassLens(), new GlassLens(), new GlassLens()};
     private volatile CoverArtTexture artistArtwork;
     private final EnumMap<Fallback, TextureState> fallbackTextures = new EnumMap<>(Fallback.class);
@@ -59,6 +62,7 @@ public final class CoverArtTexture implements AutoCloseable {
     private volatile String status = "NO ARTWORK";
     private volatile Fallback fallback = Fallback.NONE;
     private volatile boolean closed;
+
     private volatile long enhancedBackdropRetryNanos;
     private volatile long lastAttemptNanos;
     private final ArrayList<CachedRoundedCover> roundedCovers = new ArrayList<>();
@@ -66,9 +70,11 @@ public final class CoverArtTexture implements AutoCloseable {
 
     private final MotionSurface canvasSurface = new MotionSurface("canvas");
     private final MotionSurface animatedSurface = new MotionSurface("album_video");
-    private volatile boolean canvasOnCover, animatedCoverEnabled, canvasBackdrop;
+    private volatile boolean canvasOnCover, animatedCoverEnabled, canvasBackdrop, islandMotionEnabled;
     private volatile boolean pauseMotionWithMusic = true, motionPlaying = true;
     private volatile String visibleMotionKind = "static";
+    private volatile long islandVideoSequence;
+    public long islandFrameSequence(){return islandVideoSequence;}
 
     /** Called from lookup/snapshot threads. Native decoding is asynchronous; GPU work stays in draw. */
     public void configureMotion(String canvasUrl, String animatedCoverUrl, boolean useCanvasOnCover,
@@ -77,10 +83,14 @@ public final class CoverArtTexture implements AutoCloseable {
         animatedCoverEnabled = useAnimatedCover;
         canvasBackdrop = useCanvasBackdrop;
         pauseMotionWithMusic = pauseWithMusic;
-        canvasSurface.setUrl(useCanvasOnCover || useCanvasBackdrop ? canvasUrl : null);
-        animatedSurface.setUrl(useAnimatedCover ? animatedCoverUrl : null);
+        canvasSurface.setUrl(useCanvasOnCover || useCanvasBackdrop || islandMotionEnabled ? canvasUrl : null);
+        animatedSurface.setUrl(useAnimatedCover || islandMotionEnabled ? animatedCoverUrl : null);
         setMotionPlaying(motionPlaying);
     }
+
+    public void setIslandMotionEnabled(boolean enabled) { islandMotionEnabled=enabled; }
+    public boolean isIslandMotionEnabled() { return islandMotionEnabled; }
+    public boolean islandVideoReady() { return islandMotionEnabled && (canvasSurface.uploadedSequence>0 || animatedSurface.uploadedSequence>0); }
 
     public void setMotionPlaying(boolean playing) {
         motionPlaying = playing;
@@ -162,6 +172,12 @@ public final class CoverArtTexture implements AutoCloseable {
     }
 
 
+    /** Existing GPU cover is shared with the world presence renderer. */
+    public Identifier presenceTexture() { TextureState value = texture; return value == null ? null : value.id(); }
+    public double presenceAspect() { TextureState value = texture; return value == null || value.height() <= 0 ? 1 : value.width() / (double)value.height(); }
+
+    public static CoverArtTexture forPresence() { return new CoverArtTexture(false); }
+
     public CoverArtTexture() { this(true); }
     private CoverArtTexture(boolean withFallbacks) {
         if (!withFallbacks) return;
@@ -238,6 +254,68 @@ public final class CoverArtTexture implements AutoCloseable {
         } catch (RuntimeException error) {
             return drawErrorFallback(context, x, y, width, height, cornerRadius, error);
         }
+    }
+
+    /** A rounded static cover with uniform alpha for transient presence cards. */
+    public boolean draw(GuiGraphicsExtractor context, int x, int y, int width, int height, int radius, double opacity) {
+        TextureState current = motionCoverTexture();
+        if (current == null || width <= 0 || height <= 0) return false;
+        try { return drawRoundedCover(context, current, x, y, width, height, radius, Math.clamp(opacity, 0, 1), 1); }
+        catch (RuntimeException error) { return false; }
+    }
+
+    /** A true album photo; never samples Canvas or animated-cover video surfaces. */
+    public boolean drawStaticCover(GuiGraphicsExtractor context, int x, int y, int width, int height, int radius) {
+        return drawStaticCover(context,x,y,width,height,radius,1);
+    }
+    public boolean drawStaticCover(GuiGraphicsExtractor context, int x, int y, int width, int height, int radius, double opacity) {
+        TextureState current = displayedTexture();
+        if (current == null || width <= 0 || height <= 0) return false;
+        try { return drawRoundedCover(context,current,x,y,width,height,radius,Math.clamp(opacity,0,1),1); }
+        catch (RuntimeException error) { return drawErrorFallback(context,x,y,width,height,radius,error); }
+    }
+
+    /** Reuses the same Canvas/animated-cover surfaces as the popup; static fallback is always available. */
+    public boolean drawIslandCover(GuiGraphicsExtractor context,int x,int y,int width,int height,int radius,double opacity) {
+        if(islandMotionEnabled) {
+            TextureState value=canvasSurface.sample(false);
+            if(value==null) value=animatedSurface.sample(false);
+            if(value!=null) {
+                try { if(drawRoundedCover(context,value,x,y,width,height,radius,Math.clamp(opacity,0,1),1)) return true; }
+                catch(RuntimeException unavailable) { /* Keep the cached photo when video cannot render. */ }
+            }
+        }
+        return drawStaticCover(context,x,y,width,height,radius,opacity);
+    }
+
+    /** Full-height left artwork, feathered into the player with the same mask as popup Canvas. */
+    public boolean drawIslandPanel(GuiGraphicsExtractor context,int x,int y,int width,int height,int feather,int radius,double opacity,boolean video) {
+        return drawIslandPanel(context,x,y,width,height,feather,radius,opacity,video,false);
+    }
+    public boolean drawIslandPanel(GuiGraphicsExtractor context,int x,int y,int width,int height,int feather,int radius,double opacity,boolean video,boolean autoplay) {
+        TextureState source=null;
+        islandVideoSequence=0;
+        if(video && islandMotionEnabled) { source=canvasSurface.sample(false,autoplay); if(source==null) source=animatedSurface.sample(false,autoplay); }
+        if(source!=null) {
+            MotionSurface owner=canvasSurface.owns(source)?canvasSurface:animatedSurface;
+            islandVideoSequence=owner.uploadedSequence;
+            return owner.drawRounded(context,source,x,y,width+feather,height,radius,opacity,1,feather>0);
+        }
+        source=displayedTexture();
+        return source!=null && islandStillPanel.draw(context,source,x,y,width+feather,height,radius,opacity,feather>0);
+    }
+
+    /** Stable backing storage and a rounded SDF avoid banded scissor clips during fades. */
+    public boolean drawIslandBackdrop(GuiGraphicsExtractor context,int x,int y,int width,int height,int radius,double speed,double opacity) {
+        TextureState source=null;
+        if(islandMotionEnabled || canvasOnCover) source=canvasSurface.sample(false);
+        if(source==null && (islandMotionEnabled || animatedCoverEnabled)) source=animatedSurface.sample(false);
+        islandBackdropVideoSource=source!=null;
+        if(source==null) source=displayedTexture();
+        if(source==null || width<=0 || height<=0 || opacity<=.001) return false;
+        if(CompatibilityManager.needsExplicitGuiFlush()) PlatformTextures.flush(context);
+        islandBackdrop.draw(context,x,y,width,height,source,2,speed,Math.clamp(opacity,0,1),radius,BackdropFx.plain(0,false,0));
+        return true;
     }
 
     /** Draws a two-cover slide, clipped strictly to the requested album-art rectangle. */
@@ -354,7 +432,12 @@ public final class CoverArtTexture implements AutoCloseable {
     public boolean drawBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
                                 int blurStrength, double speedMultiplier, double opacity,
                                 int cornerRadius, BackdropFx fx) {
-        TextureState canvas = canvasBackdrop ? canvasSurface.sample(true) : null;
+        return drawBackdrop(context,x,y,width,height,blurStrength,speedMultiplier,opacity,cornerRadius,fx,true);
+    }
+    public boolean drawBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
+                                int blurStrength, double speedMultiplier, double opacity,
+                                int cornerRadius, BackdropFx fx, boolean allowMotion) {
+        TextureState canvas = allowMotion && canvasBackdrop ? canvasSurface.sample(true) : null;
         if (canvas != null) {
             if (CompatibilityManager.needsExplicitGuiFlush()) PlatformTextures.flush(context);
             RoundedGui.scissor(context, x, y, width, height, () -> {
@@ -365,7 +448,7 @@ public final class CoverArtTexture implements AutoCloseable {
             });
             return true;
         }
-        TextureState animated = animatedCoverEnabled ? animatedSurface.sample(false) : null;
+        TextureState animated = allowMotion && animatedCoverEnabled ? animatedSurface.sample(false) : null;
         TextureState value = animated != null ? animated : displayedTexture();
         if (value == null) return false;
         int strength = Math.clamp(blurStrength, 0, 3);
@@ -968,6 +1051,8 @@ public final class CoverArtTexture implements AutoCloseable {
             fallbackTextures.values().forEach(CoverArtTexture::destroy);
             fallbackTextures.clear();
             fluidBackdrop.close();
+            islandBackdrop.close();
+            islandStillPanel.close();
             for (GlassLens lens : glassLenses) lens.close();
             if (artistArtwork != null) { artistArtwork.close(); artistArtwork = null; }
         });
@@ -1043,6 +1128,47 @@ public final class CoverArtTexture implements AutoCloseable {
     /** Reuses two GPU textures per stream (full frame + small blurred ambient frame).
      * Animated textures bypass the static rounded-composite cache entirely.
      */
+    /** Cached photo pixels use the video mask too, keeping fades crisp on every renderer. */
+    private final class StaticIslandPanel {
+        private Identifier sourceId;
+        private int width,height;
+        private int[] pixels;
+        private final java.util.LinkedHashMap<Shape,PanelFrame> frames=new java.util.LinkedHashMap<>(8,.75f,true);
+        private record Shape(int width,int height,int radius,double density,boolean feather) { }
+        private final class PanelFrame {
+            final RoundedVideoRaster plan;
+            final DynamicTexture texture;
+            final Identifier id;
+            PanelFrame(Shape shape) {
+                plan=new RoundedVideoRaster(width,height,shape.width(),shape.height(),shape.radius(),shape.density(),shape.feather(),false);
+                int[] output=new int[plan.width()*plan.height()];plan.render(pixels,output);
+                texture=PlatformTextures.empty("Island artwork",plan.width(),plan.height());
+                id=PlatformTextures.register("island_art_"+TEXTURE_INSTANCE_GENERATION.incrementAndGet(),texture);
+                NativeImage image=texture.getPixels();
+                for(int y=0;y<plan.height();y++) for(int x=0;x<plan.width();x++) PlatformTextures.setUiPixel(image,x,y,output[y*plan.width()+x]);
+                PlatformTextures.upload(texture);
+            }
+        }
+        boolean draw(GuiGraphicsExtractor context,TextureState source,int x,int y,int w,int h,int radius,double opacity,boolean feather) {
+            if(w<=0 || h<=0 || opacity<=.001) return false;
+            if(!source.id().equals(sourceId)) {
+                close();sourceId=source.id();
+                double ratio=Math.min(1,512.0/Math.max(source.width(),source.height()));
+                width=Math.max(1,(int)Math.ceil(source.width()*ratio));height=Math.max(1,(int)Math.ceil(source.height()*ratio));
+                pixels=new int[width*height];
+                for(int py=0;py<height;py++) for(int px=0;px<width;px++) pixels[py*width+px]=PlatformTextures.colorArgb(source.image(),
+                        Math.min(source.width()-1,(int)((px+.5)*source.width()/width)),Math.min(source.height()-1,(int)((py+.5)*source.height()/height)));
+            }
+            Shape shape=new Shape(w,h,radius,PlatformTextures.guiScale(),feather);
+            PanelFrame frame=frames.get(shape);
+            if(frame==null) { frame=new PanelFrame(shape);frames.put(shape,frame); }
+            PlatformTextures.draw(context,frame.id,x,y,w,h,0,0,frame.plan.width(),frame.plan.height(),frame.plan.width(),frame.plan.height(),opacity,1);
+            while(frames.size()>6) { var it=frames.entrySet().iterator();var old=it.next();it.remove();PlatformTextures.retireEffectMask(old.getValue().id); }
+            return true;
+        }
+        void close() { for(var frame:frames.values()) PlatformTextures.retireEffectMask(frame.id);frames.clear();pixels=null;sourceId=null; }
+    }
+
     private final class MotionSurface {
         private final String name;
         private final VideoLoop video = new VideoLoop(Boolean.getBoolean("lyrica.motionSelfTest"));
@@ -1110,12 +1236,13 @@ public final class CoverArtTexture implements AutoCloseable {
             return value != null && (state != null && value.id().equals(state.id())
                     || ambient != null && value.id().equals(ambient.id()));
         }
-        synchronized TextureState sample(boolean ambientWanted) {
+        synchronized TextureState sample(boolean ambientWanted) {return sample(ambientWanted,false);}
+        synchronized TextureState sample(boolean ambientWanted,boolean autoplay) {
             if (closed) return null;
             long expected = sourceVersion;
             if (gpuVersion != expected) { destroyGpu(); gpuVersion = expected; }
             if (url == null) return null;
-            video.touchVisible();
+            video.touchVisible(autoplay);
             VideoLoop.PixelFrame latest = video.latest();
             if (latest == null || expected != sourceVersion) return null;
             if (latest.sequence() != uploadedSequence) {
@@ -1322,12 +1449,18 @@ public final class CoverArtTexture implements AutoCloseable {
 
     private static final AtomicLong COVER_GENERATION = new AtomicLong();
 
+
     private static final class FluidBackdrop implements AutoCloseable {
         private static final int SIZE = KawarpRaster.SIZE, MAX_COMPOSITE = 1024;
+        private final boolean reuseStillFrames;
+        private BackdropFx lastFx;
+        private FluidBackdrop() { this(false); }
+        private FluidBackdrop(boolean reuseStillFrames) { this.reuseStillFrames=reuseStillFrames; }
         private static final AtomicLong COMPOSITE_GENERATION = new AtomicLong();
         private DynamicTexture composite;
         private Identifier compositeId, sourceId;
-        private int compositeWidth, compositeHeight, compositeRadius = -1, preparedBlur = -1;
+        private int compositeWidth, compositeHeight, visibleWidth, visibleHeight, paintedWidth, paintedHeight;
+        private int compositeRadius = -1, preparedBlur = -1;
         private BackdropSamplingPlan samplingPlan;
         private long lastFrame, lastSource, transitionStarted;
         private double motionTime, currentSpeed, hueShift, bloomGlow;
@@ -1352,7 +1485,8 @@ public final class CoverArtTexture implements AutoCloseable {
                 preparedBlur = blurStrength;
                 sourceId = source.id(); lastSource = now;
             }
-            boolean animate = changed || lastFrame == 0 || now - lastFrame >= 33_333_333L;
+            boolean changing=!reuseStillFrames || speedMultiplier>0 || currentSpeed>.001 || previous!=null || !fx.equals(lastFx);
+            boolean animate = changed || lastFrame == 0 || changing && now - lastFrame >= 33_333_333L;
             if (animate) {
                 double delta = lastFrame == 0 ? 0 : Math.clamp((now - lastFrame) / 1_000_000_000.0, 0, .1);
                 if (speedMultiplier <= 0) currentSpeed = 0;
@@ -1375,11 +1509,12 @@ public final class CoverArtTexture implements AutoCloseable {
                     }
                     frame[py * SIZE + px] = color;
                 }
-                lastFrame = now;
+                lastFrame = now; lastFx=fx;
             }
             resizeComposite(width, height);
-            if (animate || compositeRadius != cornerRadius) compositeField(width, height, cornerRadius);
-            PlatformTextures.draw(context, compositeId, x, y, width, height, 0, 0, compositeWidth, compositeHeight,
+            if (animate || compositeRadius != cornerRadius || paintedWidth!=visibleWidth || paintedHeight!=visibleHeight)
+                compositeField(width, height, cornerRadius);
+            PlatformTextures.draw(context, compositeId, x, y, width, height, 0, 0, visibleWidth, visibleHeight,
                     compositeWidth, compositeHeight, opacity, 1);
         }
 
@@ -1401,8 +1536,11 @@ public final class CoverArtTexture implements AutoCloseable {
         }
 
         private void resizeComposite(int width, int height) {
-            int compositeWidth = Math.clamp(width, 1, MAX_COMPOSITE);
-            int compositeHeight = Math.clamp(height, 1, MAX_COMPOSITE);
+            double density=reuseStillFrames?Math.min(Math.max(1,PlatformTextures.guiScale()),Math.min(384.0/Math.max(1,width),160.0/Math.max(1,height))):1;
+            visibleWidth=Math.clamp((int)Math.round(width*density),1,reuseStillFrames?384:MAX_COMPOSITE);
+            visibleHeight=Math.clamp((int)Math.round(height*density),1,reuseStillFrames?160:MAX_COMPOSITE);
+            int compositeWidth = reuseStillFrames?384:visibleWidth;
+            int compositeHeight = reuseStillFrames?160:visibleHeight;
             if (composite != null && this.compositeWidth == compositeWidth
                     && this.compositeHeight == compositeHeight) return;
             if (composite != null) {
@@ -1425,9 +1563,9 @@ public final class CoverArtTexture implements AutoCloseable {
         private void compositeField(int width, int height, int cornerRadius) {
             NativeImage target = composite.getPixels();
             if (target == null) return;
-            int outputWidth = compositeWidth;
-            int outputHeight = compositeHeight;
-            int radius = cornerRadius;
+            int outputWidth = visibleWidth;
+            int outputHeight = visibleHeight;
+            int radius = reuseStillFrames?(int)Math.round(cornerRadius*outputWidth/(double)Math.max(1,width)):cornerRadius;
             BackdropSamplingPlan plan = samplingPlan;
             if (plan == null || !plan.matches(outputWidth, outputHeight, radius)) {
                 plan = new BackdropSamplingPlan(outputWidth, outputHeight, radius, SIZE);
@@ -1456,8 +1594,10 @@ public final class CoverArtTexture implements AutoCloseable {
                                     | (int) Math.round(g) << 8 | (int) Math.round(r));
                 }
             }
+            if(outputWidth<compositeWidth) for(int py=0;py<outputHeight;py++) PlatformTextures.setUiPixel(target,outputWidth,py,0);
+            if(outputHeight<compositeHeight) for(int px=0;px<=Math.min(outputWidth,compositeWidth-1);px++) PlatformTextures.setUiPixel(target,px,outputHeight,0);
             composite.upload();
-            compositeRadius = radius;
+            compositeRadius = cornerRadius; paintedWidth=outputWidth; paintedHeight=outputHeight;
         }
 
         private static double bilinear(double a, double b, double c, double d,
@@ -1472,7 +1612,7 @@ public final class CoverArtTexture implements AutoCloseable {
             if (compositeId != null) PlatformTextures.retireEffectMask(compositeId);
             composite = null; compositeId = null; sourceId = null;
             current = null; previous = null; samplingPlan = null;
-            compositeWidth = compositeHeight = 0; compositeRadius = -1;
+            compositeWidth = compositeHeight = visibleWidth = visibleHeight = paintedWidth = paintedHeight = 0; compositeRadius = -1;
             lastFrame = lastSource = 0; motionTime = currentSpeed = hueShift = bloomGlow = 0;
         }
     }

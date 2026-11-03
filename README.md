@@ -3,7 +3,7 @@
 [![Latest release](https://img.shields.io/github/v/release/fakemaluco/lyrica-mod?label=release)](https://github.com/fakemaluco/lyrica-mod/releases)
 <a href="https://github.com/fakemaluco/lyrica-mod/stargazers"><img src="https://img.shields.io/github/stars/fakemaluco/lyrica-mod?style=flat&logo=github&label=Stars" height="18"></a>
 
-![Lyrica Banner](banner%20Lyrica%201.png)
+![Lyrica Banner](docs/media/banner.png)
 
 **A better way to experience music lyrics inside Minecraft.**
 
@@ -11,7 +11,10 @@ Lyrica brings beautifully animated, **Apple-inspired lyrics** directly into Mine
 
 The mod adapts to the way you play. Customize when and how lyrics appear, keeping them visible when you want them and out of the way when you don't.
 
-![Lyrica preview](gif%201.gif)
+![Lyrica preview](docs/media/preview.gif)
+
+Para desenvolver ou encontrar os arquivos do projeto, consulte o
+[guia da estrutura e compilação](docs/DEVELOPMENT.md).
 
 ## Como instalar
 
@@ -39,10 +42,41 @@ Os controles de reprodução ficam acima da barra de progresso. Com
 [Ji AFK Cinematic](https://modrinth.com/mod/ji-afk-cinematic), o modo AFK mostra
 apenas a letra atual centralizada embaixo, sem painel, acima das barras pretas.
 As letras 3D continuam funcionando com F1.
-Veja as mudanças e os limites em [0.8.61](docs/releases/0.8.61.md).
+O **Music Presence** mostra uma nota musical no Tab, abre um cartão com capa ao
+olhar para outro jogador por três segundos e permite consultar `/music <jogador>`.
+Funciona entre clientes com o mod, sem instalação no servidor Minecraft. Contas
+sem autenticação oficial podem visualizar; compartilhar exige conta verificada. Há controles em **Conexão > Music Presence** e
+`/music sharing off` para não compartilhar sua música.
+Veja as mudanças e os limites em [0.8.63](docs/releases/0.8.63.md).
 
 Para compilar os três JARs, instale JDK 21 e JDK 25 e execute
 `.\gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build :lyrics-popup-26.2:build`.
+
+## Shaders musicais experimentais para o mundo
+
+Em **Avançado → Experimentos → Gemini · shaders do mundo**, cadastre sua chave do
+Google AI Studio, o modelo e uma direção visual opcional. O recurso começa desligado.
+O Gemini gera GLSL para transformar **o mundo 3D real**: preto e branco, cores mais
+saturadas, tons de cinema e céu com outras cores ou atmosfera. O fundo do pop-up,
+o HUD e os menus mantêm suas cores. Não é necessário deixar as letras visíveis.
+
+O shader recebe as texturas de cor e profundidade da cena. A profundidade permite
+separar céu e terreno. A intensidade vai de 0 a 100%; tempo, energia e bandas de áudio
+ficam disponíveis para reações suaves. O efeito é visual e local, sem alterar blocos,
+clima ou horário do servidor. Desativar restaura a aparência original.
+
+A consulta ao Google envia título, artista, álbum, duração, BPM disponível e a direção
+visual; não envia áudio, letras ou imagens do jogo. Usa a cota/cobrança da sua chave.
+A chave fica em `config/lyrica/gemini-shaders/api-key.txt`, localmente e sem criptografia,
+separada das preferências exportadas e do cache. O modelo padrão é `gemini-flash-latest`;
+o campo aceita outro modelo de texto disponível na sua conta. Veja os
+[modelos oficiais](https://ai.google.dev/gemini-api/docs/models).
+
+Há geração automática/manual, botão para criar outro visual, cache de até 64 shaders
+válidos e intervalo mínimo de 20 segundos entre novas consultas. O código gerado usa
+`vec3 musicWorld(vec3 sceneColor, vec2 uv, float depth)` e é aplicado antes da mão e da
+interface. Falhas de API ou compilação preservam o mundo original. O contrato anterior
+do fundo do pop-up não é mais aceito pelo experimento.
 
 ## Configurações
 
@@ -62,7 +96,13 @@ com antialiasing nos contornos. Em **Aparência > Fundo do pop-up**, **Dinâmico
 do cabeçalho do perfil e retorna à capa quando essa foto não está disponível.
 
 Use **Geral > Posição e tamanho do pop-up > Ajustar na tela** para mover e
-redimensionar por arrasto. A visualização mostra a **música atual**, com sua capa
+redimensionar por qualquer borda ou canto, com largura e altura independentes. Os
+vídeos têm prioridade nos tamanhos menores e podem ser usados como área de arraste.
+Em **Geral > Atraso da letra**, ajuste de −5.000 a +5.000 ms em passos de 25 ms.
+Se a letra estiver adiantada, aumente o valor positivo; se estiver atrasada, diminua.
+O ajuste é salvo e também vale para as letras 3D, sem alterar o áudio, o vídeo ou a
+barra de progresso. **Zerar atraso da letra** volta a 0 ms.
+A visualização mostra a **música atual**, com sua capa
 e sincronização reais. Os detalhes de fonte, efeitos, fundo, posição e Mundo 3D
 ficam em grupos recolhíveis de **Personalizar**; desempenho e recursos
 experimentais ficam em **Avançado**. As opções se abrem abaixo do próprio
@@ -167,12 +207,29 @@ Nunca coloque uma chave secreta (`sl_sk_...`) no código, no JAR ou em commits.
 
 ## Sobre o projeto
 
+O experimento Gemini inclui uma [biblioteca artística para o mundo](docs/gemini-world-art.md): 18 técnicas GLSL, 17 receitas editáveis e [direção musical criativa](docs/gemini-creative-direction.md). No modo Automático, a IA pode inventar tratamentos próprios a partir do contexto da música, sem um cadastro de regras por faixa.
+
 Sempre gostei da forma como o **Spicy Lyrics** apresenta letras sincronizadas, então decidi trazer uma experiência parecida para dentro do Minecraft, adaptada para funcionar naturalmente durante o gameplay.
 
 > **Status:** Lyrica ainda está em desenvolvimento. Bugs, mudanças e recursos ainda não implementados são esperados.
 
-<!-- Adicione um preview aqui:
-![Mod Preview](./previews/preview.gif)
--->
-
 *Inspirado em [Spicy Lyrics](https://github.com/Spikerko/spicy-lyrics)*
+
+
+## Tradução, romanização e suporte
+
+Em **Personalizar > Romanização e tradução**, escolha mostrar a pronúncia abaixo
+ou no lugar do original, o idioma de destino e o provedor. **Traduzir esta música**
+faz uma consulta manual; **Traduzir automaticamente** começa desligado. Google
+Tradutor não exige chave; DeepL e Gemini exigem a sua chave. Serviços compatíveis
+com OpenAI usam endereço HTTPS e modelo configuráveis, com chave se exigida pelo serviço.
+O texto das letras é enviado ao provedor escolhido e pode consumir a cota/cobrança
+da conta. O cache é local. Falhas preservam o original; não há troca silenciosa de provedor.
+As chaves ficam em arquivos separados e sem criptografia em `config/lyrica/translation/`,
+fora das preferências e dos diagnósticos. Gemini usa `gemini-flash-latest` se o modelo ficar vazio.
+
+Em **Avançado > Atualizações**, a consulta ao GitHub oferece apenas releases que
+incluam um JAR para a versão atual do Minecraft. É possível incluir betas ou
+desligar a consulta automática. O download é aberto no navegador. **Ajuda e diagnóstico**
+copia versões, plataforma, mods de compatibilidade e opções técnicas, sem contas,
+chaves, caminhos locais, nomes de músicas ou texto das letras.

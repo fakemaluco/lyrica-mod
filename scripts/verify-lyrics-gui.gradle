@@ -3,6 +3,9 @@ allprojects {
     tasks.withType(JavaExec).configureEach {
         if (name == 'runClient') {
             systemProperty 'lyrica.configSelfTest', 'true'
+            systemProperty 'lyrica.configLanguageSupportSelfTest', providers.gradleProperty('languageSupportOnly').getOrElse('false')
+            systemProperty 'lyrica.configAccordionSelfTest', providers.gradleProperty('accordionOnly').getOrElse('false')
+            systemProperty 'lyrica.configConnectionSelfTest', providers.gradleProperty('connectionOnly').getOrElse('false')
             systemProperty 'lyrica.configRenderingSelfTest', providers.gradleProperty('renderOnly').getOrElse('false')
             systemProperty 'lyrica.configArtistOnlySelfTest', providers.gradleProperty('artistOnly').getOrElse('false')
             systemProperty 'lyrica.configArtistProbeUrl', providers.gradleProperty('artistProbeUrl').getOrElse('')

@@ -25,7 +25,10 @@ public final class MultiSourceLyricsClient implements AutoCloseable {
     private final SecureLrcParser lrc = new SecureLrcParser();
 
     public MultiSourceLyricsClient(Path cacheDirectory) {
-        engine = new DesktopLyricsEngine(cacheDirectory.toFile(), SpicyLyricsApiClient.configuredKey());
+        this(cacheDirectory, SpicyLyricsApiClient.configuredKey());
+    }
+    public MultiSourceLyricsClient(Path cacheDirectory, String key) {
+        engine = new DesktopLyricsEngine(cacheDirectory.toFile(), key);
     }
 
     public record Source(String id, String name, boolean defaultEnabled) { }

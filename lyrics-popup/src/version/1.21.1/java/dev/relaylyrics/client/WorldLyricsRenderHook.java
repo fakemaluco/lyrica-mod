@@ -12,7 +12,9 @@ public final class WorldLyricsRenderHook {
     public static boolean gliding(net.minecraft.client.network.ClientPlayerEntity player) { return player.isFallFlying(); }
 
     public static void register() {
-        WorldRenderEvents.AFTER_ENTITIES.register(context -> WorldLyricsRenderer.render(
-                context.matrixStack(), context.consumers(), context.camera().getPos()));
+        WorldRenderEvents.AFTER_ENTITIES.register(context -> {
+            dev.relaylyrics.client.ui.MusicPresenceRenderer.renderWorld(context.matrixStack(), context.consumers(), context.camera().getPos());
+            WorldLyricsRenderer.render(context.matrixStack(), context.consumers(), context.camera().getPos());
+        });
     }
 }

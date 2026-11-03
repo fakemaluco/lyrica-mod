@@ -44,6 +44,9 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
     dependsOn(":lyrics-popup-1.21.11:prepareStandaloneClientJava")
     from(rootProject.file("lyrics-popup/src/client/java")) {
         include("dev/relaylyrics/client/ClientPreferences.java")
+        include("dev/relaylyrics/client/MusicPresence.java")
+        include("dev/relaylyrics/client/presence/**")
+        include("dev/relaylyrics/client/compat/**")
         include("dev/relaylyrics/client/WorldLyricsLightAdapter.java")
         include("dev/relaylyrics/client/LyricsSettingsCatalog.java")
         include("dev/relaylyrics/client/LyricsSettingsPresets.java")
@@ -52,6 +55,7 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
         include("dev/relaylyrics/client/RelayLyricsModMenu.java")
         include("dev/relaylyrics/client/ui/WorldGlyphMesh.java")
         include("dev/relaylyrics/client/ui/SettingsMotion.java")
+        include("dev/relaylyrics/client/ui/SettingsListMotion.java")
         include("dev/relaylyrics/client/ui/SettingsTextRaster.java")
         include("dev/relaylyrics/client/ui/SettingsIconRaster.java")
     }
@@ -61,6 +65,7 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
         exclude("dev/fandroid/client/music/CoverArtTexture.java")
         exclude("dev/fandroid/client/music/MusicService.java")
         exclude("dev/fandroid/client/music/PlatformTextures.java")
+        exclude("dev/fandroid/client/music/WorldGeminiRenderer.java")
         include("dev/fandroid/client/CompatibilityManager.java")
         include("dev/fandroid/client/LyricsEffectsMode.java")
         include("dev/fandroid/client/LyricsFontWeight.java")
@@ -85,6 +90,7 @@ sourceSets.test {
 }
 
 dependencies {
+    compileOnly("maven.modrinth:jade:26.2.11+fabric") { isTransitive = false }
     compileOnly("dev.lambdaurora.lambdynamiclights:lambdynamiclights-api:4.12.4+26.2")
     implementation(project(":lyrics-engine"))
     include(project(":lyrics-engine"))

@@ -14,7 +14,10 @@ public final class PopupIcons {
     public static final Identifier NEXT = icon("next");
     public static final Identifier SHUFFLE = icon("shuffle");
     public static final Identifier REPEAT = icon("repeat");
-    public static final Identifier SETTINGS = icon("settings");
+    public static final Identifier CLOSE = icon("close");
+    public static final Identifier SETTINGS = icon("settings-lucide");
+    public static final Identifier WORLD_LYRICS = icon("world-lyrics");
+    public static final Identifier RESTORE = icon("restore-lucide");
     public static final Identifier ROMANIZATION_ON = icon("romanization-on");
     public static final Identifier ROMANIZATION_OFF = icon("romanization-off");
     public static final Identifier TRANSLATION = icon("translation");

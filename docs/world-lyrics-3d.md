@@ -31,11 +31,22 @@ arco são relativas à mira no instante em que a frase aparece, mantendo-se fixa
 mundo. A orientação considera a inclinação da câmera e a trajetória de voo. Quando
 uma posição lateral é bloqueada, usa-se a posição frontal segura. Paredes próximas
 não são escolhidas durante corrida ou voo na direção automática. Uma frase longa
-sincronizada pode colocar sua próxima página mais adiante na virada, enquanto a
-página anterior permanece fixa durante o cruzamento. Se uma aceleração fizer o
+sincronizada mantém a mesma âncora nas viradas de página. Se uma aceleração fizer o
 jogador alcançar a página atual, ela desliza até uma nova âncora. A trajetória
 considera o terreno entre os pontos;
 não acompanha a câmera a cada quadro. Pausar a música congela esse deslocamento.
+O deslocamento termina antes de outro começar, e tentativas bloqueadas pelo terreno
+aguardam 1,2 segundo antes de uma nova sondagem. Curvas com elytra só mudam a âncora
+após um desvio amplo sustentado por 450 ms, com tempo de leitura restante; pequenas
+correções, voo quase parado e mudanças de página preservam a posição. Novas frases
+podem reutilizar a âncora considerando a trajetória de voo e a inclinação completa,
+mesmo quando o jogador olha para o lado ou usa uma câmera afastada.
+
+Durante uma sessão ativa do **Ji AFK Cinematic**, as letras 3D ficam suspensas e a
+legenda cinematográfica assume a exibição, inclusive com elytra. As tomadas do Ji não
+recriam âncoras nem exibem letras duplicadas. Ao sair da sessão, o modo 3D retoma com
+uma nova âncora na posição atual; pausar a música também esconde a legenda do Ji.
+
 Ao criar uma âncora livre, o terreno sob o centro e as extremidades é medido e a
 composição sobe quando seu limite inferior encostaria no chão.
 O painel oferece preferência por contexto, superfícies ou horizonte. Com a primeira,
@@ -125,6 +136,14 @@ vozes, intervalos, romanização, RTL, UVs de preenchimento em planos rotacionad
 e compatibilidade das preferências antigas. A expansão cinematográfica acrescenta
 cobertura de quebra entre palavras, preservação de sílabas, paginação rápida,
 espaço de animação, texto RTL e seleção de retângulos sem buracos.
+
+A regressão de estabilidade cobre curvas breves e sustentadas, voo quase parado,
+pausa, seek, bloqueio de deslocamentos simultâneos, novas tentativas após obstáculos
+e aproximação em alta velocidade. A sonda OpenGL com Ji AFK Cinematic 2.3.1 passou
+em 1.21.1, 1.21.11 e 26.2, mantendo o modo 3D ligado durante o AFK, verificando a
+legenda com velocidade de elytra simulada, pausa e retorno ao mundo. A sonda espacial
+1.21.11 também passou nos cenários de frases curtas/longas e curva ampla com elytra;
+ela injeta a velocidade e não substitui a inspeção de um voo real.
 
 O layout (segmentação, textos estilizados e medidas) fica em cache por frase.
 Alterações de fonte/romanização invalidam o layout sem mover suas âncoras.

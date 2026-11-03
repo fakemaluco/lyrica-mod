@@ -4,6 +4,13 @@ allprojects {
         if (name == 'runClient') {
             systemProperty 'lyrica.motionArtworkSelfTest', 'true'
             systemProperty 'lyrica.motionSelfTest', 'true'
+            systemProperty 'lyrica.islandSpringOnly', providers.gradleProperty('islandSpringOnly').getOrElse('false')
+            systemProperty 'lyrica.islandVideoOnly', providers.gradleProperty('islandVideoOnly').getOrElse('false')
+            systemProperty 'lyrica.islandLiveDragOnly', providers.gradleProperty('islandLiveDragOnly').getOrElse('false')
+            systemProperty 'lyrica.islandIdleSelfTest', providers.gradleProperty('islandIdle').getOrElse('false')
+            systemProperty 'lyrica.popupDockSelfTest', providers.gradleProperty('popupDock').getOrElse('false')
+            systemProperty 'lyrica.islandControlsSelfTest', providers.gradleProperty('islandControlsOnly').getOrElse('false')
+            systemProperty 'lyrica.adaptivePopupSelfTest', providers.gradleProperty('adaptivePopup').getOrElse('false')
             systemProperty 'lyrica.canvasLayoutSelfTest', providers.gradleProperty('canvasLayout').getOrElse('false')
             systemProperty 'lyrica.glassButtonsSelfTest', providers.gradleProperty('glassButtons').getOrElse('false')
             systemProperty 'lyrica.toolbarSelfTest', providers.gradleProperty('toolbar').getOrElse('false')

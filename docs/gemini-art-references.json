@@ -1,0 +1,578 @@
+[
+  {
+    "id": "handdrawn_shader",
+    "name": "Handdrawn Shader",
+    "guidance": "Simular letras desenhadas manualmente. Criar bordas levemente irregulares, variações na espessura dos traços e pequenas imperfeições orgânicas. Usar ruído procedural de baixa amplitude e coordenadas estáveis para evitar tremulações exageradas.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "pencil_sketch_shader",
+    "name": "Pencil Sketch Shader",
+    "guidance": "Reproduzir grafite sobre papel, com linhas finas, granulação e diferentes intensidades de lápis. Sombras mais escuras devem receber mais traços.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "cross_hatching_shader",
+    "name": "Cross-Hatching Shader",
+    "guidance": "Construir sombreamento através de linhas diagonais sobrepostas. Aumentar o número de camadas de hachura conforme a região escurece.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "ink_drawing_shader",
+    "name": "Ink Drawing Shader",
+    "guidance": "Simular desenhos feitos com tinta preta, incluindo contornos fortes, preenchimentos irregulares e pequenas variações na densidade da tinta.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "ballpoint_pen_shader",
+    "name": "Ballpoint Pen Shader",
+    "guidance": "Reproduzir desenhos de caneta esferográfica azul, preta ou vermelha, com traços finos e acúmulo de tinta nas regiões mais escuras.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "chalk_shader",
+    "name": "Chalk Shader",
+    "guidance": "Fazer as letras parecerem desenhadas com giz, com bordas granuladas, falhas no preenchimento e partículas discretas de pó.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "crayon_shader",
+    "name": "Crayon Shader",
+    "guidance": "Simular giz de cera através de textura granulada, manchas de pigmento e preenchimento incompleto.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "scribble_shader",
+    "name": "Scribble Shader",
+    "guidance": "Preencher as letras com rabiscos aparentemente aleatórios, mas controlados por uma seed. Permitir que os rabiscos sejam animados.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "animated_sketch_shader",
+    "name": "Animated Sketch Shader",
+    "guidance": "Fazer os traços parecerem redesenhados continuamente, com mudanças discretas entre quadros, como animação tradicional.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "blueprint_shader",
+    "name": "Blueprint Shader",
+    "guidance": "Transformar as letras em desenhos técnicos, com linhas azuladas ou brancas, grids opcionais e detalhes geométricos.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "engraving_shader",
+    "name": "Engraving Shader",
+    "guidance": "Reproduzir gravuras antigas usando conjuntos densos de linhas e variações de espessura.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "stippling_shader",
+    "name": "Stippling Shader",
+    "guidance": "Construir o preenchimento com pequenos pontos. Controlar a concentração dos pontos pela luminosidade.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "watercolor_shader",
+    "name": "Watercolor Shader",
+    "guidance": "Simular aquarela, com pigmentos translúcidos, difusão irregular, bordas de tinta acumulada e pequenas manchas.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "oil_painting_shader",
+    "name": "Oil Painting Shader",
+    "guidance": "Criar aparência de tinta a óleo, com pinceladas grossas, variações de tonalidade e textura de tela.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "gouache_shader",
+    "name": "Gouache Shader",
+    "guidance": "Reproduzir tinta fosca e opaca, com preenchimento relativamente uniforme e imperfeições discretas.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "acrylic_paint_shader",
+    "name": "Acrylic Paint Shader",
+    "guidance": "Simular pinceladas de acrílico, com textura de cerdas e acúmulo de tinta em determinadas regiões.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "impressionist_shader",
+    "name": "Impressionist Shader",
+    "guidance": "Transformar o preenchimento em pequenas pinceladas coloridas, com direção e tamanho controláveis.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "palette_knife_shader",
+    "name": "Palette Knife Shader",
+    "guidance": "Simular pintura com espátula, criando manchas largas, bordas marcadas e áreas de cor sobrepostas.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "pastel_shader",
+    "name": "Pastel Shader",
+    "guidance": "Criar textura de pastel seco, com pigmentação granulada e transições suaves.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "wet_ink_shader",
+    "name": "Wet Ink Shader",
+    "guidance": "Simular tinta molhada espalhando-se lentamente, com difusão, absorção e pequenas ondulações.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "sumi_e_shader",
+    "name": "Sumi-e Shader",
+    "guidance": "Reproduzir pintura japonesa com tinta, usando pinceladas minimalistas e diferentes níveis de diluição.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "paint_drip_shader",
+    "name": "Paint Drip Shader",
+    "guidance": "Criar escorrimentos de tinta que nascem nas partes inferiores das letras e descem sob efeito de gravidade estilizada.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "cel_shading_shader",
+    "name": "Cel Shading Shader",
+    "guidance": "Dividir a iluminação em faixas discretas, produzindo aparência de animação 2D.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "anime_outline_shader",
+    "name": "Anime Outline Shader",
+    "guidance": "Desenhar contornos externos bem definidos, com espessura ajustável e cores adaptáveis ao preenchimento.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "comic_book_shader",
+    "name": "Comic Book Shader",
+    "guidance": "Reproduzir quadrinhos impressos com contornos, posterização e padrões gráficos.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "halftone_shader",
+    "name": "Halftone Shader",
+    "guidance": "Transformar valores de luminosidade em pontos de diferentes tamanhos, como impressão de histórias em quadrinhos.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "manga_shader",
+    "name": "Manga Shader",
+    "guidance": "Utilizar preenchimentos preto e branco, retículas, linhas de velocidade e sombras em padrões.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "pop_art_shader",
+    "name": "Pop Art Shader",
+    "guidance": "Aplicar paletas vibrantes, contrastes fortes e pontos decorativos inspirados em arte pop.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "rubber_hose_shader",
+    "name": "Rubber Hose Shader",
+    "guidance": "Simular desenhos animados antigos, com linhas orgânicas, pequenas deformações e movimentos elásticos.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "cutout_animation_shader",
+    "name": "Cutout Animation Shader",
+    "guidance": "Fazer as letras parecerem recortes de papel animados, com sombras discretas e movimentos segmentados.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "paper_collage_shader",
+    "name": "Paper Collage Shader",
+    "guidance": "Simular camadas de papel colorido sobrepostas, com bordas irregulares.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "stop_motion_shader",
+    "name": "Stop-Motion Shader",
+    "guidance": "Atualizar pequenas deformações visuais em intervalos discretos, simulando quadros fotografados.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "pixel_art_shader",
+    "name": "Pixel Art Shader",
+    "guidance": "Pixelizar o preenchimento das letras em uma resolução virtual configurável, preservando a silhueta geral.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "dithering_shader",
+    "name": "Dithering Shader",
+    "guidance": "Usar Bayer Matrix ou Blue Noise para simular tonalidades com padrões de pixels.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "1_bit_shader",
+    "name": "1-Bit Shader",
+    "guidance": "Reduzir o preenchimento a duas cores, com opção de dithering.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "game_boy_shader",
+    "name": "Game Boy Shader",
+    "guidance": "Aplicar uma paleta limitada, inspirada em consoles portáteis antigos, com contraste e níveis de luminosidade ajustáveis.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "crt_shader",
+    "name": "CRT Shader",
+    "guidance": "Reproduzir linhas de varredura, máscara RGB, curvatura opcional e pequenas distorções de monitores CRT.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "vhs_shader",
+    "name": "VHS Shader",
+    "guidance": "Simular ruído analógico, aberração de cores, deslocamentos horizontais e instabilidade temporal.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "glitch_shader",
+    "name": "Glitch Shader",
+    "guidance": "Produzir deslocamentos de fragmentos, separação de canais RGB e interferências breves.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "datamosh_shader",
+    "name": "Datamosh Shader",
+    "guidance": "Simular corrupção temporal da imagem, com arrastamento e persistência controlada de regiões anteriores.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "ascii_art_shader",
+    "name": "Ascii Art Shader",
+    "guidance": "Reconstruir o preenchimento das letras usando caracteres de diferentes densidades, sem comprometer excessivamente sua leitura.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "terminal_shader",
+    "name": "Terminal Shader",
+    "guidance": "Aplicar aparência de terminal antigo, com fósforo verde, brilho discreto e linhas de varredura.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "vaporwave_shader",
+    "name": "Vaporwave Shader",
+    "guidance": "Combinar gradientes rosa/roxo, elementos neon e padrões geométricos retrô.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "retro_print_shader",
+    "name": "Retro Print Shader",
+    "guidance": "Simular impressão antiga com registro de cores ligeiramente desalinhado, textura de papel e ruído de tinta.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "neon_tube_shader",
+    "name": "Neon Tube Shader",
+    "guidance": "Reproduzir tubos luminosos acompanhando a silhueta do texto. Criar núcleo brilhante e halo difuso.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "holographic_shader",
+    "name": "Holographic Shader",
+    "guidance": "Simular projeção holográfica com transparência, scanlines, pequenos deslocamentos e cintilação.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "iridescent_shader",
+    "name": "Iridescent Shader",
+    "guidance": "Produzir cores que variam conforme ângulo, posição e tempo.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "pearlescent_shader",
+    "name": "Pearlescent Shader",
+    "guidance": "Criar reflexos perolados suaves, com mudança de tonalidade dependendo da orientação da superfície.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "liquid_glass_shader",
+    "name": "Liquid Glass Shader",
+    "guidance": "Simular material vítreo com refração localizada, transparência, bordas de Fresnel, highlights e reflexos estilizados.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "frosted_glass_shader",
+    "name": "Frosted Glass Shader",
+    "guidance": "Produzir aparência de vidro fosco com fundo desfocado e contornos translúcidos.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "chromatic_glass_shader",
+    "name": "Chromatic Glass Shader",
+    "guidance": "Simular vidro com refração diferenciada dos canais vermelho, verde e azul.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "cyberpunk_shader",
+    "name": "Cyberpunk Shader",
+    "guidance": "Combinar iluminação neon, gradientes elétricos, linhas digitais e detalhes holográficos.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "plasma_shader",
+    "name": "Plasma Shader",
+    "guidance": "Gerar padrões fluidos de cores luminosas utilizando funções periódicas e ruído procedural.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "aurora_shader",
+    "name": "Aurora Shader",
+    "guidance": "Animar faixas coloridas e luminosas com movimentos suaves, como auroras boreais.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "volumetric_glow_shader",
+    "name": "Volumetric Glow Shader",
+    "guidance": "Criar aparência de emissão luminosa com múltiplas camadas de brilho. Usar aproximações eficientes quando não houver suporte para efeitos volumétricos reais.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "electric_arc_shader",
+    "name": "Electric Arc Shader",
+    "guidance": "Gerar arcos elétricos procedurais que percorrem o contorno das letras, com ramificações e pulsos breves.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "liquid_metal_shader",
+    "name": "Liquid Metal Shader",
+    "guidance": "Simular metal líquido com reflexos móveis e deformações suaves.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "chrome_shader",
+    "name": "Chrome Shader",
+    "guidance": "Criar aparência cromada com reflexos de ambiente, utilizando environment mapping quando disponível ou aproximação estilizada.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "gold_foil_shader",
+    "name": "Gold Foil Shader",
+    "guidance": "Simular folha de ouro, com regiões refletivas, irregularidades e pequenos detalhes de superfície.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "holographic_foil_shader",
+    "name": "Holographic Foil Shader",
+    "guidance": "Reproduzir adesivos holográficos que mudam de cor com o ângulo.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "crystal_shader",
+    "name": "Crystal Shader",
+    "guidance": "Simular cristais com regiões facetadas, transparência parcial e reflexos internos estilizados.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "ice_shader",
+    "name": "Ice Shader",
+    "guidance": "Criar aparência de gelo com tons azulados, pequenas rachaduras, dispersão e brilho nas bordas.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "lava_shader",
+    "name": "Lava Shader",
+    "guidance": "Aplicar textura procedural de lava com rachaduras brilhantes e movimentos lentos.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "fire_shader",
+    "name": "Fire Shader",
+    "guidance": "Simular chamas estilizadas consumindo ou envolvendo as letras, utilizando ruído animado.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "smoke_shader",
+    "name": "Smoke Shader",
+    "guidance": "Fazer o preenchimento ou as bordas se transformarem em fumaça com deslocamentos suaves e dissipação.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "galaxy_shader",
+    "name": "Galaxy Shader",
+    "guidance": "Preencher as letras com estrelas, nebulosas e gradientes espaciais animados.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "cloud_shader",
+    "name": "Cloud Shader",
+    "guidance": "Reproduzir nuvens volumosas estilizadas dentro da máscara do texto.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "marble_shader",
+    "name": "Marble Shader",
+    "guidance": "Simular mármore com veios procedurais, brilho e variação de tonalidade.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "woodcut_shader",
+    "name": "Woodcut Shader",
+    "guidance": "Criar aparência de madeira entalhada, com fibras, riscos e sombreamento gravado.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "fabric_shader",
+    "name": "Fabric Shader",
+    "guidance": "Reproduzir tecidos, com padrões entrelaçados e pequenos detalhes de fibras.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "heat_distortion_shader",
+    "name": "Heat Distortion Shader",
+    "guidance": "Criar ondulações de calor ao redor ou dentro das letras.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "water_ripple_shader",
+    "name": "Water Ripple Shader",
+    "guidance": "Gerar ondulações concêntricas que distorcem a superfície do texto.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "wave_shader",
+    "name": "Wave Shader",
+    "guidance": "Deslocar coordenadas em ondas senoidais, com amplitude, frequência e direção configuráveis.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "melt_shader",
+    "name": "Melt Shader",
+    "guidance": "Fazer as letras parecerem derreter através de distorções direcionadas para baixo.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "dissolve_shader",
+    "name": "Dissolve Shader",
+    "guidance": "Dissolver o texto progressivamente através de um mapa de ruído e bordas brilhantes opcionais.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "disintegration_shader",
+    "name": "Disintegration Shader",
+    "guidance": "Fragmentar visualmente o texto em partículas ou pequenos pedaços que se afastam.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "kaleidoscope_shader",
+    "name": "Kaleidoscope Shader",
+    "guidance": "Criar padrões simétricos dentro do texto por espelhamento radial.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "prismatic_shader",
+    "name": "Prismatic Shader",
+    "guidance": "Separar e recombinar cores em padrões semelhantes aos de um prisma.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "voronoi_shader",
+    "name": "Voronoi Shader",
+    "guidance": "Utilizar células de Voronoi para criar superfícies orgânicas, mosaicos ou fragmentações.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "fractal_shader",
+    "name": "Fractal Shader",
+    "guidance": "Aplicar padrões fractais animados ao preenchimento, mantendo controles de escala e complexidade.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "flow_field_shader",
+    "name": "Flow Field Shader",
+    "guidance": "Deslocar texturas, partículas ou padrões internos ao longo de um campo vetorial procedural.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "reaction_diffusion_shader",
+    "name": "Reaction-Diffusion Shader",
+    "guidance": "Simular padrões orgânicos que crescem e se reorganizam. Preferir resolução reduzida e atualização controlada caso seja implementada uma simulação real.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "audio_reactive_glow",
+    "name": "Audio Reactive Glow",
+    "guidance": "Variar a luminosidade de acordo com a intensidade da música ou dos vocais.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "beat_pulse_shader",
+    "name": "Beat Pulse Shader",
+    "guidance": "Criar pulsos visuais sincronizados ao ritmo, com decaimento suave após cada batida.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "frequency_gradient_shader",
+    "name": "Frequency Gradient Shader",
+    "guidance": "Associar determinadas faixas de frequência a mudanças de cor.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "bass_distortion_shader",
+    "name": "Bass Distortion Shader",
+    "guidance": "Aumentar deformações do preenchimento durante eventos de grave, respeitando um limite máximo de intensidade.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "vocal_energy_shader",
+    "name": "Vocal Energy Shader",
+    "guidance": "Relacionar a energia vocal estimada ou fornecida pelo sistema de sincronização à intensidade do efeito.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "karaoke_fill_shader",
+    "name": "Karaoke Fill Shader",
+    "guidance": "Preencher progressivamente cada palavra de acordo com seu intervalo temporal, permitindo combinar o preenchimento com qualquer estilo artístico.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "word_highlight_shader",
+    "name": "Word Highlight Shader",
+    "guidance": "Destacar a palavra cantada com contorno, brilho, contraste ou mudança de material.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "phoneme_pulse_shader",
+    "name": "Phoneme Pulse Shader",
+    "guidance": "Quando houver timestamps confiáveis de fonemas, aplicar pequenas variações durante a pronúncia.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "echo_trail_shader",
+    "name": "Echo Trail Shader",
+    "guidance": "Criar rastros visuais curtos de palavras em movimento, com transparência decrescente.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "afterimage_shader",
+    "name": "Afterimage Shader",
+    "guidance": "Renderizar cópias temporárias da silhueta para simular persistência visual.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "rhythm_particle_shader",
+    "name": "Rhythm Particle Shader",
+    "guidance": "Emitir partículas a partir das letras conforme eventos rítmicos.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "energy_flow_shader",
+    "name": "Energy Flow Shader",
+    "guidance": "Fazer fluxos luminosos percorrerem as palavras conforme são cantadas.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "transition_morph_shader",
+    "name": "Transition Morph Shader",
+    "guidance": "Transicionar suavemente entre dois estilos de shader durante uma frase ou mudança musical.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  },
+  {
+    "id": "dynamic_style_blending",
+    "name": "Dynamic Style Blending",
+    "guidance": "Combinar dois ou mais estilos usando pesos interpoláveis, permitindo misturas como Handdrawn + Neon ou Watercolor + Dissolve.",
+    "scope": "reference; capability depends on required passes, not an installed effect"
+  }
+]

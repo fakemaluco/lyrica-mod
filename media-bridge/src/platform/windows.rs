@@ -54,6 +54,7 @@ fn spawn_loopback_capture(shared: IntensityCapture) -> Option<()> {
         let client: IAudioClient = device.Activate(CLSCTX_ALL, None).ok()?;
         let format = client.GetMixFormat().ok()?;
         let channels = (*format).nChannels.max(1) as usize;
+        let sample_rate = (*format).nSamplesPerSec;
         let block_align = (*format).nBlockAlign.max(1) as usize;
         client
             .Initialize(
@@ -69,7 +70,7 @@ fn spawn_loopback_capture(shared: IntensityCapture) -> Option<()> {
         let capture: IAudioCaptureClient = client.GetService().ok()?;
         client.Start().ok()?;
         let capture = SendCaptureClient(capture);
-        thread::spawn(move || capture_loop(capture, shared, channels, block_align));
+        thread::spawn(move || capture_loop(capture, shared, channels, block_align, sample_rate));
     }
     Some(())
 }
@@ -125,6 +126,7 @@ fn capture_loop(
     shared: IntensityCapture,
     channels: usize,
     block_align: usize,
+    sample_rate: u32,
 ) {
     let capture = capture.0;
     let silent_flag = AUDCLNT_BUFFERFLAGS_SILENT.0 as u32;
@@ -259,6 +261,8 @@ fn capture_loop(
             for k in 0..half {
                 mags[k] = (re[k] * re[k] + im[k] * im[k]).sqrt();
             }
+            let island = crate::island_meter::levels(&mags, FFT_SIZE, sample_rate);
+            for (band, value) in shared.island_bands.iter().zip(island) { band.store(value, Ordering::Relaxed); }
             // 16 log-spaced bands over bins 1..half. Map bin magnitudes through
             // a -70..-10 dB scale so they read as 0..1.
             let mut sum_mag = 0.0f64;
@@ -295,6 +299,7 @@ fn capture_loop(
                 .centroid
                 .store((centroid_smooth * 10_000.0) as u32, Ordering::Relaxed);
         } else {
+            for band in shared.island_bands.iter() { band.store(0, Ordering::Relaxed); }
             for band in 0..BAND_COUNT {
                 shared.bands[band].store(0, Ordering::Relaxed);
             }

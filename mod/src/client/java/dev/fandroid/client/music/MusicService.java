@@ -43,7 +43,7 @@ public final class MusicService implements AutoCloseable {
     private String motionCanvasUrl, motionCoverUrl;
     private long motionGeneration;
     private volatile String motionDiagnostics = "";
-    private final MultiSourceLyricsClient lyricsClient;
+    private MultiSourceLyricsClient lyricsClient;
     private volatile String sourceDiagnostics = "";
     private volatile boolean closed;
     private volatile CompletableFuture<MultiSourceLyricsClient.Result> remoteLookup;
@@ -57,6 +57,9 @@ public final class MusicService implements AutoCloseable {
     private final AtomicReference<PlaybackSnapshot> snapshot = new AtomicReference<>(PlaybackSnapshot.unavailable());
     private final LyricsOverlay overlay;
     private final ClientPreferences preferences;
+    private final GeminiShaderSession geminiShaders;
+    private final LyricsTranslationSession translations;
+    private final ReleaseSupport support;
     private final SpotifyAccountClient spotifyAccount;
     private volatile MusicSource lastSyncedSource;
     private volatile String lookupKey;
@@ -76,7 +79,13 @@ public final class MusicService implements AutoCloseable {
     public MusicService(LyricsOverlay overlay, ClientPreferences preferences) {
         this.overlay = overlay;
         this.preferences = preferences;
-        lyricsClient = new MultiSourceLyricsClient(importsFolder.resolveSibling("sources"));
+        translations = new LyricsTranslationSession(FabricLoader.getInstance().getConfigDir().resolve("lyrica/translation"), preferences);
+        support = new ReleaseSupport(preferences);
+        overlay.setTranslationRequest(translations::request);
+        geminiShaders = new GeminiShaderSession(preferences, FabricLoader.getInstance().getConfigDir().resolve("lyrica/gemini-shaders"),
+                task -> net.minecraft.client.MinecraftClient.getInstance().execute(task));
+        if (preferences.isLyricsRomanization()) LyricsRomanizer.warmup();
+        lyricsClient = new MultiSourceLyricsClient(importsFolder.resolveSibling("sources"), SpicyLyricsApiClient.configuredKey(preferences.getSpicyLyricsApiKey()));
         motionEngine = new DesktopMotionArtworkEngine(importsFolder.resolveSibling("motion").toFile());
         artistEngine = new DesktopArtistArtworkEngine(importsFolder.resolveSibling("artist-artwork").toFile());
         String executable = System.getProperty("os.name", "").toLowerCase().contains("win")
@@ -95,7 +104,11 @@ public final class MusicService implements AutoCloseable {
         connector.subscribe(value -> {
             if (!spotifyAccount.shouldOverrideBridge()) update(value);
         });
-        if (connector instanceof MediaBridgeConnector bridge) bridge.subscribeLyrics(this::acceptSpicyLyrics);
+        if (connector instanceof MediaBridgeConnector bridge) {
+            bridge.subscribeLyrics(this::acceptSpicyLyrics);
+            bridge.subscribeAudio(overlay::setIslandAudioLevels);
+            overlay.setIslandAudioDemand(bridge::setAudioLevelsEnabled);
+        }
         syncMusicSource();
         refreshIdleArtworkFallback();
         overlay.setArtworkTexture(artwork);
@@ -256,15 +269,17 @@ public final class MusicService implements AutoCloseable {
 
     private synchronized void updateMotionArtwork(PlaybackSnapshot track) {
         artwork.setMotionPlaying(track.playing());
-        boolean allow = preferences.isLyricsAnimations();
+        boolean allow = preferences.isMotionVideos();
         boolean canvas = allow && preferences.isSpotifyCanvas();
         boolean cover = allow && preferences.isAnimatedCovers();
         boolean background = allow && preferences.isCanvasBackground();
+        boolean island = allow && preferences.isIslandVideoCover();
+        artwork.setIslandMotionEnabled(island);
         boolean meaningful = track.title() != null && !track.title().isBlank()
                 && !track.title().equals("Nothing playing") && !isSpotifyDjSpeaking(track);
         String key = meaningful ? String.join("\n", String.valueOf(track.spotifyUri()), track.title(),
                 String.valueOf(track.artist()), String.valueOf(track.album()), Long.toString(track.durationMillis()),
-                Boolean.toString(canvas), Boolean.toString(cover), Boolean.toString(background),
+                Boolean.toString(canvas), Boolean.toString(cover), Boolean.toString(background), Boolean.toString(island),
                 Boolean.toString(preferences.isPauseMotionWithMusic())) : "idle";
         boolean retry = key.equals(motionTrackKey);
         if (retry && (motionRetryCount >= 3 || motionLookup != null && !motionLookup.isDone()
@@ -284,12 +299,12 @@ public final class MusicService implements AutoCloseable {
         long generation = ++motionGeneration;
         if (motionLookup != null) motionLookup.cancel(true);
         motionDiagnostics = "";
-        if (!meaningful || !(canvas || cover || background) || closed) return;
+        if (!meaningful || !(canvas || cover || background || island) || closed) return;
         motionDiagnostics = "Finding Canvas and animated cover";
         boolean forceRefresh = retry || motionForceRefresh; motionForceRefresh = false;
         motionLookup = motionEngine.find(track.title(), java.util.Objects.toString(track.artist(), ""),
                 java.util.Objects.toString(track.album(), ""), track.durationMillis(),
-                SpicyLyricsApiClient.spotifyTrackId(track.spotifyUri()), canvas || background, cover, forceRefresh,
+                SpicyLyricsApiClient.spotifyTrackId(track.spotifyUri()), canvas || background || island, cover || island, forceRefresh,
                 result -> applyMotionArtwork(generation, result, canvas, cover, background));
         motionLookup.thenAccept(result -> {
             synchronized (this) {
@@ -312,6 +327,7 @@ public final class MusicService implements AutoCloseable {
         if (result.getCanvasUrl() != null) motionCanvasUrl = result.getCanvasUrl();
         if (result.getAnimatedCoverUrl() != null) motionCoverUrl = result.getAnimatedCoverUrl();
         motionMissing = (canvas || background) && motionCanvasUrl == null || cover && motionCoverUrl == null;
+        motionMissing |= artwork.isIslandMotionEnabled() && motionCanvasUrl==null && motionCoverUrl==null;
         artwork.configureMotion(motionCanvasUrl, motionCoverUrl, canvas, cover, background,
                 preferences.isPauseMotionWithMusic());
         artwork.setMotionPlaying(snapshot().playing());
@@ -426,6 +442,15 @@ public final class MusicService implements AutoCloseable {
 
     public PlaybackSnapshot snapshot() { return snapshot.get(); }
     public long positionMillis() { return clock.positionMillis(); }
+    public GeminiShaderSession geminiShaders() { return geminiShaders; }
+    public LyricsTranslationSession translations() { return translations; }
+    public ReleaseSupport support() { return support; }
+    public String diagnosticReport() { return support.diagnosticReport(preferences, overlay.document(), bridgeAlive()); }
+    public void tickGeminiShaders() {
+        var current = overlay.document();
+        var translated = translations.tick(current);
+        if (translated != current && overlay.document() == current) overlay.setLyrics(translated);
+        support.tick(); geminiShaders.tick(snapshot.get(), clock.positionMillis(), artwork.accentColor()); }
     public String pairingCode() {
         return connector instanceof MediaBridgeConnector bridge ? bridge.pairingCode() : null;
     }
@@ -502,6 +527,15 @@ public final class MusicService implements AutoCloseable {
     }
     public int artworkAccent() { return artwork.accentColor(); }
     public String artworkStatus() { return artwork.status(); }
+    public synchronized void refreshLyricsApiKey() {
+        if (remoteLookup != null) remoteLookup.cancel(true);
+        lookupKey = null;
+        lookupGeneration++;
+        lyricsClient.close();
+        lyricsClient = new MultiSourceLyricsClient(importsFolder.resolveSibling("sources"),
+                SpicyLyricsApiClient.configuredKey(preferences.getSpicyLyricsApiKey()));
+        retryLyrics();
+    }
     public void retryLyrics() {
         spotifyAccount.requestPlaybackRefresh();
         PlaybackSnapshot current = snapshot();
@@ -712,6 +746,9 @@ public final class MusicService implements AutoCloseable {
         artistEngine.close();
         motionEngine.close();
         lyricsClient.close();
+        geminiShaders.close();
+        translations.close();
+        support.close();
         artwork.close();
         spotifyAccount.close();
         connector.close();

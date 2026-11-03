@@ -1,0 +1,5 @@
+allprojects {
+    tasks.withType(Test).configureEach {
+        systemProperty 'lyrica.presence.liveFile', rootProject.layout.buildDirectory.file('presence-qa-sessions.json').get().asFile.absolutePath
+    }
+}

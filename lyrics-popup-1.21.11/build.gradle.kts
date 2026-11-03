@@ -41,10 +41,16 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
     from(rootProject.file("lyrics-popup/src/version/1.21.11/java"))
     from(rootProject.file("mod/src/main/java")) {
         include("dev/fandroid/client/music/LyricsAnimation.java")
+        include("dev/fandroid/client/music/LyricsTiming.java")
+        include("dev/fandroid/client/music/PopupResizeGesture.java")
         include("dev/fandroid/client/music/KawarpRaster.java")
         include("dev/fandroid/client/music/GlassButtonRaster.java")
         include("dev/fandroid/client/music/ResponsiveLyricsLayout.java")
         include("dev/fandroid/client/music/CanvasPopupLayout.java")
+        include("dev/fandroid/client/music/AdaptivePopupLayout.java")
+        include("dev/fandroid/client/music/PopupDockLayout.java")
+        include("dev/fandroid/client/music/PopupDockMotion.java")
+        include("dev/fandroid/client/music/IslandAudioMotion.java")
         include("dev/fandroid/client/music/RoundedVideoRaster.java")
         include("dev/fandroid/client/music/UnavailableLyricsTransition.java")
         include("dev/fandroid/client/music/LyricsEffectRaster.java")
@@ -87,11 +93,13 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
         include("dev/fandroid/client/CompatibilityManager.java")
         include("dev/fandroid/client/ui/HudSafeArea.java")
         exclude("dev/fandroid/client/music/PlatformTextures.java")
+        exclude("dev/fandroid/client/music/WorldGeminiRenderer.java")
         exclude("dev/fandroid/client/ui/PlatformCursor.java")
         filter { line: String -> line.replace("fandroid", "relaylyrics") }
     }
     from(rootProject.file("mod-1.21.11/src/client/java")) {
         include("dev/fandroid/client/music/PlatformTextures.java")
+        include("dev/fandroid/client/music/WorldGeminiRenderer.java")
         include("dev/fandroid/client/ui/LyricsBloomRenderer.java")
         include("dev/fandroid/client/mixin/glow/DrawContextStateAccessor.java")
         include("dev/fandroid/client/mixin/glow/SpecialGuiElementRendererAccessor.java")
@@ -118,6 +126,7 @@ sourceSets.main {
 sourceSets.test { java.setSrcDirs(listOf(rootProject.file("lyrics-popup/src/test/java"))) }
 
 dependencies {
+    modCompileOnly("maven.modrinth:jade:21.1.6+fabric") { isTransitive = false }
     modCompileOnly("dev.lambdaurora.lambdynamiclights:lambdynamiclights-api:4.9.1+1.21.11")
     implementation(project(":lyrics-engine"))
     include(project(":lyrics-engine"))

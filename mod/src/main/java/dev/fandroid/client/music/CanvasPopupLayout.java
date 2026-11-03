@@ -32,11 +32,11 @@ public final class CanvasPopupLayout {
     }
     /** Utility controls stay over the video, clear of the playback row and volume slider. */
     public static UtilityRow utilityRow(int width, int height, int count, boolean leftAligned) {
-        count = Math.clamp(count, 1, 3);
+        count = Math.clamp(count, 1, 5);
         int minimum = Math.min(width, height);
         int edge = Math.clamp(minimum / 24, 5, 10);
-        int gap = Math.clamp(minimum / 24, 4, 8);
-        int size = Math.min(Math.clamp(minimum / 6, 22, 34),
+        int gap = Math.clamp(minimum / 24, 4, 6);
+        int size = Math.min(Math.clamp(minimum / 8, 16, 24),
                 Math.max(1, (width - edge * 2 - gap * (count - 1)) / count));
         int rowWidth = count * size + gap * (count - 1);
         return new UtilityRow(leftAligned ? edge : (width - rowWidth) / 2, edge, size, gap);
@@ -62,7 +62,7 @@ public final class CanvasPopupLayout {
     }
     public static Layout columns(int width, int height, double aspect) {
         int padding = Math.max(0, Math.min(12, Math.min(width, height) / 8));
-        int minimumLyrics = Math.max(1, Math.min(160, width / 2));
+        int minimumLyrics = Math.max(1, Math.min(136, width / 2));
         int artWidth = Math.clamp((int) Math.round(height * columnAspect(aspect)), 1, Math.max(1, width - padding * 2 - minimumLyrics));
         int lyricsX = artWidth + padding;
         int feather = Math.max(1, Math.min((int) Math.round(artWidth * .32), width - artWidth - padding));

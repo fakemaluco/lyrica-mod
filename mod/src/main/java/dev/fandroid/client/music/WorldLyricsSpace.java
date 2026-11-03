@@ -30,6 +30,47 @@ public final class WorldLyricsSpace {
         return firstStart < secondEnd && secondStart < firstEnd;
     }
     public static boolean courseChanged(boolean gliding, double alignment, double elapsedSeconds, double remainingSeconds) {
-        return gliding && alignment < .75 && elapsedSeconds >= .6 && remainingSeconds >= .8;
+        return gliding && Double.isFinite(alignment) && alignment < .35
+                && elapsedSeconds >= 1.2 && remainingSeconds >= 1.4;
+    }
+
+    public enum Relocation { KEEP, ADVANCE, TURN }
+
+    /** A brief bank, a stationary camera or a page boundary must not restart a placement. */
+    public static final class RelocationState {
+        private long turnSince = Long.MIN_VALUE;
+        private long attemptedAt = Long.MIN_VALUE;
+        private long lastPosition = Long.MIN_VALUE;
+
+        public Relocation evaluate(long now, double distance, double placedDistance, double closingSpeed,
+                                   double speed, double remaining, double anchorAge,
+                                   boolean flying, boolean moving) {
+            if (lastPosition != Long.MIN_VALUE && now < lastPosition) {
+                turnSince = attemptedAt = Long.MIN_VALUE;
+            }
+            lastPosition = now;
+            if (moving || !Double.isFinite(speed) || speed < 4 || remaining < 1.2
+                    || attemptedAt != Long.MIN_VALUE && now - attemptedAt < 1200) {
+                turnSince = Long.MIN_VALUE;
+                return Relocation.KEEP;
+            }
+            if (courseChanged(flying, closingSpeed / speed, anchorAge, remaining)) {
+                if (turnSince == Long.MIN_VALUE) turnSince = now;
+                if (now - turnSince >= 450) return Relocation.TURN;
+            } else turnSince = Long.MIN_VALUE;
+            return WorldLyricsPlacement.shouldRelocate(distance, placedDistance, closingSpeed,
+                    remaining, anchorAge, flying) ? Relocation.ADVANCE : Relocation.KEEP;
+        }
+
+        /** Also back off when terrain rejects a replacement; do not probe again every frame. */
+        public void attempted(long now) {
+            attemptedAt = now;
+            turnSince = Long.MIN_VALUE;
+        }
+
+        /** A successful move uses the new anchor's speed-dependent runway, even in very fast flight. */
+        public void placed() {
+            attemptedAt = turnSince = Long.MIN_VALUE;
+        }
     }
 }

@@ -22,10 +22,15 @@ pub struct TimelineTracker {
     position: f64,
     observed: Option<Instant>,
     playing: bool,
+    sample_time: Option<chrono::DateTime<Utc>>,
 }
 
 impl TimelineTracker {
     pub fn update(&mut self, snapshot: &mut PlaybackSnapshot, now: Instant) {
+        self.update_at(snapshot, now, Utc::now());
+    }
+
+    fn update_at(&mut self, snapshot: &mut PlaybackSnapshot, now: Instant, wall_now: chrono::DateTime<Utc>) {
         if !snapshot.is_meaningful() {
             *self = Self::default();
             return;
@@ -33,21 +38,29 @@ impl TimelineTracker {
         let track = format!("{}\n{}\n{}\n{}", snapshot.spotify_uri.as_deref().unwrap_or(""),
             snapshot.title, snapshot.artist, snapshot.duration_millis);
         let raw = snapshot.position_millis.max(0);
+        let sample_time = snapshot.observed_at;
+        let age_ms = (wall_now - sample_time).num_milliseconds().clamp(0, 2_000);
+        let observed = raw as f64 + if snapshot.playing { age_ms as f64 } else { 0.0 };
         if self.observed.is_none() || self.track != track {
             self.track = track;
             self.raw_position = raw;
-            self.position = raw as f64;
+            self.position = observed;
             self.observed = Some(now);
             self.playing = snapshot.playing;
         } else {
-            let elapsed = now.duration_since(self.observed.unwrap()).as_secs_f64().min(3.0);
+            let elapsed = now.duration_since(self.observed.unwrap()).as_secs_f64();
             let predicted = self.position + if self.playing { elapsed * 1_000.0 } else { 0.0 };
-            let backwards_seek = raw < self.raw_position - 750;
-            let forwards_seek = raw as f64 > predicted + 1_500.0;
-            if backwards_seek || forwards_seek {
-                self.position = raw as f64;
-            } else if raw > self.raw_position && (raw as f64) >= predicted - 1_000.0 {
-                self.position = predicted + (raw as f64 - predicted) * 0.3;
+            let fresh = self.sample_time.is_none_or(|previous| sample_time >= previous);
+            let state_changed = snapshot.playing != self.playing;
+            if fresh && (state_changed || raw != self.raw_position) {
+                let error = observed - predicted;
+                // Correct in BOTH directions. Previously a new sample over a second
+                // behind our prediction was ignored forever, leaving lyrics ahead.
+                self.position = if state_changed || !snapshot.playing || error.abs() >= 750.0 {
+                    observed
+                } else {
+                    predicted + error * (1.0 - (-elapsed / 0.12).exp())
+                };
             } else {
                 self.position = predicted;
             }
@@ -55,11 +68,12 @@ impl TimelineTracker {
             self.observed = Some(now);
             self.playing = snapshot.playing;
         }
+        self.sample_time = Some(self.sample_time.map_or(sample_time, |previous| previous.max(sample_time)));
         if snapshot.duration_millis > 0 {
             self.position = self.position.min(snapshot.duration_millis as f64);
         }
         snapshot.position_millis = self.position.round().max(0.0) as i64;
-        snapshot.observed_at = Utc::now();
+        snapshot.observed_at = wall_now;
     }
 }
 
@@ -84,6 +98,41 @@ mod tests {
         value.duration_millis = 30_000;
         value.playing = playing;
         value
+    }
+
+    #[test]
+    fn catches_up_to_new_reports_that_are_over_a_second_behind() {
+        let mut tracker = TimelineTracker::default();
+        let start = Instant::now();
+        let wall = Utc::now();
+        let mut first = song(10_000, true);
+        first.observed_at = wall;
+        tracker.update_at(&mut first, start, wall);
+        let mut corrected = song(10_100, true);
+        corrected.observed_at = wall + chrono::Duration::milliseconds(2_000);
+        tracker.update_at(&mut corrected, start + Duration::from_secs(2), wall + chrono::Duration::milliseconds(2_000));
+        assert_eq!(corrected.position_millis, 10_100);
+    }
+
+    #[test]
+    fn pause_uses_the_reported_position_even_when_the_last_raw_value_repeats() {
+        let mut tracker = TimelineTracker::default();
+        let start = Instant::now();
+        tracker.update(&mut song(8_000, true), start);
+        let mut paused = song(8_000, false);
+        tracker.update(&mut paused, start + Duration::from_secs(2));
+        assert_eq!(paused.position_millis, 8_000);
+    }
+
+    #[test]
+    fn elapsed_time_is_not_lost_during_a_bridge_stall() {
+        let mut tracker = TimelineTracker::default();
+        let start = Instant::now();
+        let mut first = song(1_000, true);
+        tracker.update(&mut first, start);
+        let mut repeated = song(1_000, true);
+        tracker.update(&mut repeated, start + Duration::from_secs(8));
+        assert!((8_990..=9_010).contains(&repeated.position_millis));
     }
 
     #[test]

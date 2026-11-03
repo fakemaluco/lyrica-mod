@@ -26,6 +26,9 @@
         "adapter": "lyrica_optional_lighting",
         "value": "dev.relaylyrics.client.WorldLyricsLightIntegration"
       }
+    ],
+    "jade": [
+      "dev.relaylyrics.client.compat.LyricaJadePlugin"
     ]
   },
   "depends": {
@@ -48,7 +51,8 @@
     "xaerominimap": "*",
     "appleskin": "*",
     "lambdynlights": ">=4.8.0",
-    "ji-afk-cinematic": "*"
+    "ji-afk-cinematic": "*",
+    "jade": "*"
   },
   "custom": {
     "modmenu": {

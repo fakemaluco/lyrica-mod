@@ -6,6 +6,7 @@ import dev.fandroid.protocol.music.MusicCapabilities;
 import dev.fandroid.protocol.music.MusicCommand;
 import dev.fandroid.protocol.music.MusicConnector;
 import dev.fandroid.protocol.music.PlaybackSnapshot;
+import dev.fandroid.protocol.music.MusicAudioLevels;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -26,6 +27,8 @@ public final class MediaBridgeConnector implements MusicConnector {
     private final Process process;
     private final BufferedWriter writer;
     private final CopyOnWriteArrayList<Consumer<PlaybackSnapshot>> listeners = new CopyOnWriteArrayList<>();
+    private final CopyOnWriteArrayList<Consumer<MusicAudioLevels>> audioListeners = new CopyOnWriteArrayList<>();
+    private volatile boolean audioLevelsEnabled;
     private final CopyOnWriteArrayList<Consumer<SpicetifyLyricsPayload>> lyricsListeners = new CopyOnWriteArrayList<>();
     private volatile PlaybackSnapshot latest = PlaybackSnapshot.unavailable();
     private volatile SpicetifyLyricsPayload latestLyrics;
@@ -103,6 +106,15 @@ public final class MediaBridgeConnector implements MusicConnector {
             while ((line = reader.readLine()) != null) {
                 if (line.length() > 10 * 1024 * 1024) continue;
                 var node = ProtocolCodec.mapper().readTree(line);
+                if (node.path("type").asText().equals("audio_levels")) {
+                    var levels=node.path("levels");
+                    if(levels.isArray() && levels.size()==5 && audioLevelsEnabled) {
+                        MusicAudioLevels sample=MusicAudioLevels.fromMeter(levels.get(0).asInt(),levels.get(1).asInt(),levels.get(2).asInt(),
+                                levels.get(3).asInt(),levels.get(4).asInt(),System.nanoTime());
+                        for(var listener:audioListeners) listener.accept(sample);
+                    }
+                    continue;
+                }
                 if (node.path("type").asText().equals("pairing_code")) {
                     pairingCode = node.path("code").asText();
                     pairingPort = node.path("port").asInt();
@@ -211,6 +223,19 @@ public final class MediaBridgeConnector implements MusicConnector {
     public String spicyLyricsUri() { return spicyLyricsUri; }
     public boolean bridgeAlive() { return bridgeAlive && process.isAlive(); }
     public String startupError() { return startupError; }
+
+    public AutoCloseable subscribeAudio(Consumer<MusicAudioLevels> listener) {
+        audioListeners.add(listener);
+        return () -> audioListeners.remove(listener);
+    }
+    /** Changed only when the compact island needs audio; never polled per rendered frame. */
+    public void setAudioLevelsEnabled(boolean enabled) {
+        if(enabled==audioLevelsEnabled || !bridgeAlive()) return;
+        audioLevelsEnabled=enabled;
+        try { send(java.util.Map.of("type","audio_levels_enabled","enabled",enabled)); }
+        catch(IllegalStateException stopped) { audioLevelsEnabled=false; }
+        if(!enabled) for(var listener:audioListeners) listener.accept(MusicAudioLevels.SILENT);
+    }
 
     public void setSource(String source) {
         String next = source == null || source.isBlank() ? "AUTOMATIC" : source;

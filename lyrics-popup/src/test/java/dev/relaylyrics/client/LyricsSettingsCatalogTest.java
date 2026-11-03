@@ -8,6 +8,23 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LyricsSettingsCatalogTest {
+    @Test void stableControlsCanRefreshCapturedPriorityAndCardsKeepSemanticIdentity() {
+        var p = new ClientPreferences(); var c = catalog(p);
+        c.expand("source_priority");
+        var old = c.entries(Category.SOURCES).stream().filter(e -> e.key.endsWith("sources.priority.lrclib")).findFirst().orElseThrow();
+        old.select.accept(0);
+        var fresh = c.entries(Category.SOURCES).stream().filter(e -> e.key.equals(old.key)).findFirst().orElseThrow();
+        old.refreshFrom(fresh); assertThat(old.value.get()).isEqualTo("#1");
+        var appearance = c.entries(Category.APPEARANCE);
+        assertThat(appearance.stream().filter(e -> java.util.Set.of("visual_style","font","scale","alignment").contains(e.key.substring(LyricsSettingsCatalog.PREFIX.length()))))
+                .allMatch(e -> e.section.equals("style"));
+        assertThat(appearance.stream().filter(e -> e.key.endsWith("background_preset")))
+                .allMatch(e -> !e.section.equals("style"));
+        for (var category : c.categories()) {
+            var entries = c.searchEntries(category);
+            assertThat(entries.stream().map(e -> e.section+"|"+e.key).distinct().count()).isEqualTo((long) entries.size());
+        }
+    }
     @Test void searchingFoldedSectionsPreservesNavigationAndPreferences() throws Exception {
         var p = new ClientPreferences(); var c = catalog(p);
         var before = keys(c, Category.APPEARANCE);
@@ -38,8 +55,8 @@ class LyricsSettingsCatalogTest {
         entries.stream().filter(e -> e.key.equals(LyricsSettingsCatalog.PREFIX + "height")).findFirst().orElseThrow().setNumber.accept(280);
         assertThat(p.getPopupWidth(true, false)).isEqualTo(300);
         assertThat(p.getPopupHeight(true, false)).isEqualTo(280);
-        assertThat(p.getLyricsWidth()).isEqualTo(420);
-        assertThat(p.getLyricsHeight()).isEqualTo(260);
+        assertThat(p.getLyricsWidth()).isEqualTo(210);
+        assertThat(p.getLyricsHeight()).isEqualTo(130);
     }
     private static List<String> keys(LyricsSettingsCatalog catalog, Category category) {
         return catalog.entries(category).stream().map(e -> e.key.substring(LyricsSettingsCatalog.PREFIX.length())).toList();
@@ -47,13 +64,13 @@ class LyricsSettingsCatalogTest {
     @Test void organizedCustomCategoryAndSmallMainPagesWithOptionalWorld() {
         var p = new ClientPreferences(); var c = catalog(p);
         assertThat(c.categories()).containsExactly(Category.GENERAL, Category.APPEARANCE, Category.CUSTOM, Category.CONNECTION, Category.SOURCES, Category.ADVANCED, Category.WORLD);
-        for (var category : c.categories()) if (category != Category.SOURCES) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(8);
+        for (var category : c.categories()) if (category != Category.SOURCES) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(category == Category.GENERAL ? 10 : 8);
         p.setWorldLyrics(true);
         assertThat(c.categories()).endsWith(Category.WORLD);
-        for (var category : c.categories()) if (category != Category.SOURCES) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(8);
+        for (var category : c.categories()) if (category != Category.SOURCES) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(category == Category.GENERAL ? 10 : 8);
         assertThat(keys(c, Category.ADVANCED)).doesNotContain("world_lyrics");
         assertThat(keys(c, Category.WORLD)).contains("world_lyrics", "world_style", "world_terrain_light", "world_position", "world_luminance");
-        assertThat(keys(c, Category.GENERAL)).doesNotContain("world_lyrics");
+        assertThat(keys(c, Category.GENERAL)).doesNotContain("world_lyrics").contains("lyrics_delay", "lyrics_delay_reset");
     }
     @Test void openingEveryCategoryDoesNotMigrateOrOverwriteCustomValues() throws Exception {
         var p = ClientPreferences.decode("""
@@ -131,7 +148,7 @@ class LyricsSettingsCatalogTest {
     }
     @Test void detailedSettingsStayInCustomizeAndNoPreviewActionsRemain() {
         var p = new ClientPreferences(); var c = catalog(p);
-        for (String group : List.of("effects", "background", "world", "typography", "interaction")) c.expand(group);
+        for (String group : List.of("languages", "translation_provider", "updates", "support", "effects", "background", "world", "typography", "interaction")) c.expand(group);
         p.setWorldLyrics(true);
         assertThat(keys(c, Category.CUSTOM)).contains("font", "weight", "scale", "translation", "romanization", "glow", "shadow", "width", "height", "dynamic", "reactive", "world_depth");
         assertThat(keys(c, Category.ADVANCED)).doesNotContain("shadow", "glow", "world_depth", "font", "width");
@@ -162,16 +179,28 @@ class LyricsSettingsCatalogTest {
                 var translations = ProtocolCodec.mapper().readTree(stream);
                 var p = new ClientPreferences(); var c = catalog(p);
                 p.setWorldLyrics(true); LyricsSettingsPresets.applyBackground(p, LyricsSettingsPresets.Background.REACTIVE);
-                for (String group : List.of("effects", "background", "world", "typography", "experimental", "performance", "interaction", "connection_details", "motion_artwork", "source_priority")) c.expand(group);
+                for (String group : List.of("languages", "translation_provider", "updates", "support", "effects", "background", "world", "typography", "experimental", "performance", "interaction", "connection_details", "motion_artwork", "source_priority")) c.expand(group);
+                for (String provider : List.of("Google", "DeepL", "Gemini", "OpenAi")) {
+                    p.setTranslationProvider(provider);
                 for (boolean automatic : List.of(true, false)) {
                     p.setWorldLyricsAutomatic(automatic);
                     for (var category : c.categories()) for (var entry : c.entries(category)) {
                         assertThat(translations.has(entry.key)).as(language + ": " + entry.key).isTrue();
+                        if (entry.kind == LyricsSettingsCatalog.Kind.TEXT) assertThat(translations.has(entry.key + ".placeholder")).as(entry.key + ".placeholder").isTrue();
                         for (String option : entry.options) if (option.startsWith("@config."))
                             assertThat(translations.has(option.substring(1))).as(language + ": " + option).isTrue();
                     }
                 }
             }
         }
+    }
+    }
+    @Test void islandOptionsShareOneAppearanceGroupAndRestoreTheirDefaults() {
+        var p=new ClientPreferences();var c=catalog(p);c.expand("motion_artwork");c.expand("island");
+        var entries=c.entries(Category.APPEARANCE);
+        assertThat(entries).anyMatch(e -> e.key.endsWith("island.kawarp")).anyMatch(e -> e.key.endsWith("island.video"));
+        p.setIslandKawarpBackground(false);p.setIslandVideoCover(false);p.setJadeIsland(false);c.restore("appearance");
+        assertThat(p.isIslandKawarpBackground()).isTrue();assertThat(p.isIslandVideoCover()).isTrue();
+        assertThat(p.isJadeIsland()).isTrue();
     }
 }

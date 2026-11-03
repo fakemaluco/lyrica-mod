@@ -1,9 +1,16 @@
 package dev.relaylyrics.client;
 
+import dev.relaylyrics.client.music.SpringValue;
+
 /** Time-based visibility used when the HUD popup crosses an inventory boundary. */
 final class InventoryPopupTransition {
     static final long HIDE_DURATION_NANOS = 1_000_000_000L;
     static final long SHOW_DURATION_NANOS = 1_000_000_000L;
+
+    private final SpringValue gentleSpring;
+    private long sampledNanos;
+    InventoryPopupTransition() { this(false); }
+    InventoryPopupTransition(boolean gentle) { gentleSpring=gentle?new SpringValue(1,4.5,.84):null; }
 
     private double value = 1;
     private double from = 1;
@@ -13,6 +20,12 @@ final class InventoryPopupTransition {
     void setVisible(boolean visible, long nowNanos, boolean animated) {
         double requested = visible ? 1 : 0;
         double current = value(nowNanos, animated);
+        if(gentleSpring!=null) {
+            target=requested; gentleSpring.setGoal(requested); sampledNanos=nowNanos;
+            if(!animated) gentleSpring.snap(requested);
+            value=animated?current:requested;
+            return;
+        }
         if (!animated) {
             value = requested;
             from = requested;
@@ -28,6 +41,13 @@ final class InventoryPopupTransition {
     }
 
     double value(long nowNanos, boolean animated) {
+        if(gentleSpring!=null) {
+            double delta=Math.max(0,(nowNanos-sampledNanos)/1_000_000_000.0); sampledNanos=nowNanos;
+            if(animated) gentleSpring.step(delta*.85); else gentleSpring.snap(target);
+            value=Math.clamp(gentleSpring.position(),0,1);
+            if(Math.abs(value-target)<.001) { value=target; gentleSpring.snap(target); }
+            return value;
+        }
         if (!animated) {
             value = target;
             return value;

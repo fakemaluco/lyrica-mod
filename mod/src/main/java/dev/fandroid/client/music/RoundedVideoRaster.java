@@ -16,6 +16,9 @@ public final class RoundedVideoRaster {
         this(sourceWidth, sourceHeight, logicalWidth, logicalHeight, radius, density, false);
     }
     public RoundedVideoRaster(int sourceWidth, int sourceHeight, int logicalWidth, int logicalHeight, int radius, double density, boolean canvasSurface) {
+        this(sourceWidth,sourceHeight,logicalWidth,logicalHeight,radius,density,canvasSurface,true);
+    }
+    public RoundedVideoRaster(int sourceWidth, int sourceHeight, int logicalWidth, int logicalHeight, int radius, double density, boolean canvasSurface, boolean soften) {
         if (sourceWidth <= 0 || sourceHeight <= 0 || logicalWidth <= 0 || logicalHeight <= 0) throw new IllegalArgumentException("Invalid video bounds");
         this.sourceWidth = sourceWidth; this.sourceHeight = sourceHeight;
         this.canvasSurface = canvasSurface;
@@ -26,8 +29,8 @@ public final class RoundedVideoRaster {
         double fit = Math.max(logicalWidth / (double) sourceWidth, logicalHeight / (double) sourceHeight);
         blurRadius = Math.clamp((int) Math.ceil(1.4 / fit), 1, 4);
         blurMix = Math.min(1, 1.4 / (fit * blurRadius));
-        blurA = canvasSurface ? new int[sourceWidth * sourceHeight] : null;
-        blurB = canvasSurface ? new int[sourceWidth * sourceHeight] : null;
+        blurA = canvasSurface && soften ? new int[sourceWidth * sourceHeight] : null;
+        blurB = canvasSurface && soften ? new int[sourceWidth * sourceHeight] : null;
         shade = new double[height];
         for (int y = 0; y < height; y++) shade[y] = canvasSurface ? 1 - .44 * smooth((y / (double) height - .55) / .45) : 1;
         double cropW = logicalWidth / fit, cropH = logicalHeight / fit;
@@ -52,7 +55,7 @@ public final class RoundedVideoRaster {
     }
     public void render(int[] source, int[] output) {
         if (source.length != sourceWidth * sourceHeight || output.length != width * height) throw new IllegalArgumentException("Invalid frame dimensions");
-        if (canvasSurface) {
+        if (canvasSurface && blurA!=null) {
             blur(source, blurA, true); blur(blurA, blurB, false);
             for (int i = 0; i < blurB.length; i++) {
                 int mixed = 0;

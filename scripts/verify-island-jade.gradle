@@ -1,0 +1,19 @@
+// Actual Jade runtime on the disposable QA world; never starts music or presence services.
+allprojects {
+    afterEvaluate {
+        if (project.name in ['lyrics-popup','lyrics-popup-1.21.11','lyrics-popup-26.2']) {
+            def game = project.name == 'lyrics-popup' ? '1.21.1' : project.name == 'lyrics-popup-1.21.11' ? '1.21.11' : '26.2'
+            def runtime = configurations.findByName('modRuntimeOnly') != null ? 'modRuntimeOnly' : 'runtimeOnly'
+            def version = game == '1.21.1' ? '15.10.6+fabric' : game == '1.21.11' ? '21.1.6+fabric' : '26.2.11+fabric'
+            dependencies.add(runtime, "maven.modrinth:jade:${version}")
+        }
+    }
+    tasks.withType(JavaExec).configureEach {
+        if (name == 'runClient') {
+            systemProperty 'lyrica.worldExperienceSelfTest', 'true'
+            systemProperty 'lyrica.islandJadeSelfTest', 'true'
+            systemProperty 'lyrica.islandJadeProbeOutput', rootProject.layout.buildDirectory.dir('island-jade-qa').get().asFile.absolutePath
+            args '--width', '1280', '--height', '720', '--quickPlaySingleplayer', 'LyricaWorldQA'
+        }
+    }
+}

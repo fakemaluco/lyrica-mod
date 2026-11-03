@@ -3,7 +3,7 @@ package dev.relaylyrics.client.ui;
 /** Desktop Spicy Lyrics motion tokens (settings-panel.css and tokens.css).
  * Values are sampled by monotonic time, never by frame count. */
 final class SettingsMotion {
-    static final int FAST = 150, PRESS = 120, PANE = 140, TOGGLE = 220, MODAL = 220;
+    static final int FAST = 150, PRESS = 120, PANE = 140, TOGGLE = 220, MODAL = 220, EXPAND = 180, STAGGER = 30;
     enum Curve {
         GLASS(.34, 1.56, .64, 1), OUT(.23, 1, .32, 1), STANDARD(.4, 0, .2, 1), EASE(.25, .1, .25, 1);
         final double x1, y1, x2, y2;

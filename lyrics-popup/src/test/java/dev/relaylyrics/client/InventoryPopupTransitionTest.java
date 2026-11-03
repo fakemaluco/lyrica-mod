@@ -37,4 +37,18 @@ final class InventoryPopupTransitionTest {
         transition.setVisible(true, 2, false);
         assertThat(transition.value(3, false)).isEqualTo(1);
     }
+    @Test void islandClosingIsFastGentleAndCanReverseWithoutJumping() {
+        var transition=new InventoryPopupTransition(true);long now=1_000_000_000L;
+        transition.setVisible(false,now,true);
+        assertThat(transition.value(now,true)).isEqualTo(1);
+        double partial=transition.value(now+80_000_000L,true);
+        assertThat(partial).isBetween(0.,1.);
+        transition.setVisible(true,now+80_000_000L,true);
+        assertThat(transition.value(now+80_000_000L,true)).isEqualTo(partial);
+        assertThat(transition.value(now+600_000_000L,true)).isEqualTo(1);
+        transition.setVisible(false,now+600_000_000L,true);
+        assertThat(transition.value(now+1_100_000_000L,true)).isZero();
+        transition.setVisible(true,now+1_100_000_000L,false);
+        assertThat(transition.value(now+1_100_000_000L,false)).isEqualTo(1);
+    }
 }

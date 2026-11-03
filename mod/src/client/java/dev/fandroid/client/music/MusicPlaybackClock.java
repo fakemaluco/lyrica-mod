@@ -56,12 +56,12 @@ public final class MusicPlaybackClock {
             positionMillis = observed;
             pendingCorrection = 0;
         } else if (playbackStateChanged) {
-            if (!sameTrack || rawPosition != lastRawPosition) positionMillis = observed;
+            positionMillis = observed;
             pendingCorrection = 0;
         } else if (repeatedPosition) {
             // Windows can publish a fresh timestamp with an unchanged position for seconds.
-            // That sample contains no timing information, so keep the local clock running.
-            pendingCorrection = 0;
+            // That sample contains no new timing information. Keep the clock and any
+            // correction from the last meaningful sample running until it converges.
         } else {
             double error = observed - positionMillis;
             pendingCorrection = Math.abs(error) <= JITTER_TOLERANCE_MILLIS ? 0 : error;

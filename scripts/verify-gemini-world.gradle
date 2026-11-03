@@ -1,0 +1,11 @@
+// Uses the existing disposable LyricaWorldQA save. Never opens a user gameplay save or contacts Google.
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        if(name=='runClient') {
+            systemProperty 'lyrica.geminiWorldSelfTest','true'
+            systemProperty 'lyrica.geminiArtSelfTest', rootProject.hasProperty('artStyles') ? 'true':'false'
+            systemProperty 'lyrica.geminiWorldProbeOutput',rootProject.layout.buildDirectory.dir(rootProject.hasProperty('artStyles')?'gemini-art-qa':'gemini-world-qa').get().asFile.absolutePath
+            args '--width','1280','--height','720','--quickPlaySingleplayer','LyricaWorldQA'
+        }
+    }
+}
