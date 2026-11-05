@@ -4,7 +4,7 @@ plugins {
 
 allprojects {
     group = "dev.lyrica"
-    version = providers.gradleProperty("version").orElse("0.9.1").get()
+    version = providers.gradleProperty("version").orElse("0.9.0").get()
     repositories {
         mavenCentral()
         maven("https://api.modrinth.com/maven") { content { includeGroup("maven.modrinth") } }
