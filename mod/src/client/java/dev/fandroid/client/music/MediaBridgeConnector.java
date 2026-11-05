@@ -30,6 +30,8 @@ public final class MediaBridgeConnector implements MusicConnector {
     private final CopyOnWriteArrayList<Consumer<MusicAudioLevels>> audioListeners = new CopyOnWriteArrayList<>();
     private volatile boolean audioLevelsEnabled;
     private final CopyOnWriteArrayList<Consumer<SpicetifyLyricsPayload>> lyricsListeners = new CopyOnWriteArrayList<>();
+    private volatile String activeMediaApp;
+    private boolean duckingUsed;
     private volatile PlaybackSnapshot latest = PlaybackSnapshot.unavailable();
     private volatile SpicetifyLyricsPayload latestLyrics;
     private volatile String pairingCode;
@@ -181,6 +183,7 @@ public final class MediaBridgeConnector implements MusicConnector {
                 }
                 if (!node.path("type").asText().equals("snapshot")) continue;
                 activeSource = node.path("activeSource").asText("WINDOWS_MEDIA");
+                activeMediaApp = node.path("activeMediaApp").asText(null);
                 latest = ProtocolCodec.mapper().treeToValue(node.path("snapshot"), PlaybackSnapshot.class);
                 for (Consumer<PlaybackSnapshot> listener : listeners) listener.accept(latest);
             }
@@ -244,6 +247,16 @@ public final class MediaBridgeConnector implements MusicConnector {
         send(java.util.Map.of("type", "source", "source", next));
     }
 
+    public String activeMediaApp() { return activeMediaApp; }
+
+    public void updateDucking(AudioDucking.Request request) {
+        if (!bridgeAlive()) return;
+        try {
+            send(java.util.Map.of("type", "ducking", "request", ProtocolCodec.mapper().valueToTree(request)));
+            duckingUsed |= request != null;
+        } catch (IllegalStateException ignored) { }
+    }
+
     /** Reopens WASAPI loopback against the current Windows default output. */
     public void reloadAudioOutput() {
         send(java.util.Map.of("type", "reload_audio_output"));
@@ -289,6 +302,13 @@ public final class MediaBridgeConnector implements MusicConnector {
     @Override
     public void close() {
         try { writer.close(); } catch (Exception ignored) { }
+        if (duckingUsed) {
+            try {
+                if (process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) return;
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
         process.destroy();
         if (process.isAlive()) process.destroyForcibly();
     }

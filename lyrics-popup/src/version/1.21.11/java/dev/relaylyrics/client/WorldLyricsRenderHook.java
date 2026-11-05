@@ -14,6 +14,7 @@ public final class WorldLyricsRenderHook {
     public static void register() {
         WorldRenderEvents.AFTER_ENTITIES.register(context -> {
             dev.relaylyrics.client.ui.MusicPresenceRenderer.renderWorld(context.matrices(), context.consumers(), context.gameRenderer().getCamera().getCameraPos());
+            dev.relaylyrics.client.karaoke.KaraokePlatform.render(context.matrices(), context.consumers(), context.gameRenderer().getCamera().getCameraPos());
             WorldLyricsRenderer.render(context.matrices(), context.consumers(), context.gameRenderer().getCamera().getCameraPos());
         });
     }

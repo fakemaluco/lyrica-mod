@@ -24,10 +24,17 @@ jobs:
       - run: cargo build --release --locked
         working-directory: media-bridge
       - name: Build standalone Lyrica jars
+        id: build
         shell: pwsh
         run: |
           $releaseVersion = "${{ github.ref_name }}".TrimStart('v')
+          "version=$releaseVersion" >> $env:GITHUB_OUTPUT
+          $notesPath = "docs/releases/$releaseVersion.md"
+          if (Test-Path -LiteralPath $notesPath) {
+            "notes=$notesPath" >> $env:GITHUB_OUTPUT
+          }
           .\gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build :lyrics-popup-26.2:build "-Pversion=$releaseVersion" --no-daemon
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Path release-assets | Out-Null
           Get-ChildItem lyrics-popup/build/libs,lyrics-popup-1.21.11/build/libs,lyrics-popup-26.2/build/libs -Filter "lyrica-*.jar" |
             Where-Object { $_.Name -notmatch "sources|dev" } |
@@ -37,6 +44,9 @@ jobs:
       - name: Publish standalone jars
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ steps.build.outputs.version }}
+          body_path: ${{ steps.build.outputs.notes }}
+          fail_on_unmatched_files: true
           files: |
             release-assets/*.jar
             release-assets/*.zip

@@ -66,6 +66,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
     private volatile String accessToken = "";
     private volatile String refreshToken = "";
     private volatile long expiresAtMillis;
+    private volatile boolean karaokeWatching;
     private volatile PlaybackSnapshot latest = PlaybackSnapshot.unavailable();
     private volatile boolean automaticPlaybackOwned;
     private volatile String status = "Not connected";
@@ -424,6 +425,55 @@ public final class SpotifyAccountClient implements AutoCloseable {
         });
     }
 
+    public PlaybackSnapshot karaokeSnapshot() { return latest; }
+    public void setKaraokeWatching(boolean watching) {
+        if (karaokeWatching == watching) return;
+        karaokeWatching = watching;
+        requestPlaybackRefresh();
+    }
+
+    public CompletableFuture<Void> syncKaraoke(String uri, long position, boolean playing,
+                                               boolean loadTrack, boolean seek, BooleanSupplier active) {
+        pendingCommands.incrementAndGet();
+        playbackRevision.incrementAndGet();
+        return CompletableFuture.runAsync(() -> {
+            try {
+                if (!active.getAsBoolean()) return;
+                if (uri == null || !uri.matches("spotify:track:[A-Za-z0-9]{22}")) throw new IllegalArgumentException("Invalid Spotify track");
+                String token = validToken();
+                if (token == null) throw new IllegalStateException("Spotify account is not connected");
+                if (!active.getAsBoolean()) return;
+                if (loadTrack) {
+                    var body = ProtocolCodec.mapper().createObjectNode();
+                    body.putArray("uris").add(uri);
+                    body.put("position_ms", Math.max(0, position));
+                    karaokePut(token, "/play", body.toString());
+                } else {
+                    if (!uri.equals(latest.spotifyUri())) return;
+                    if (seek) karaokePut(token, "/seek?position_ms=" + Math.max(0, position), null);
+                }
+                if (active.getAsBoolean() && (loadTrack ? !playing : playing != latest.playing()))
+                    karaokePut(token, playing ? "/play" : "/pause", null);
+            } catch (Exception error) {
+                throw new IllegalStateException(error);
+            } finally {
+                playbackRevision.incrementAndGet();
+                pendingCommands.decrementAndGet();
+                requestPlaybackRefresh();
+            }
+        });
+    }
+
+    private void karaokePut(String token, String path, String json) throws Exception {
+        var request = HttpRequest.newBuilder(URI.create("https://api.spotify.com/v1/me/player" + path))
+                .timeout(Duration.ofSeconds(10)).header("Authorization", "Bearer " + token);
+        if (json != null) request.header("Content-Type", "application/json");
+        var response = http.send(request.PUT(json == null ? HttpRequest.BodyPublishers.noBody()
+                : HttpRequest.BodyPublishers.ofString(json)).build(), HttpResponse.BodyHandlers.discarding());
+        if (response.statusCode() < 200 || response.statusCode() >= 300)
+            throw new IllegalStateException("Spotify returned HTTP " + response.statusCode());
+    }
+
     public void requestPlaybackRefresh() {
         synchronized (pollWake) {
             refreshRequested = true;
@@ -436,7 +486,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
             refreshRequested = false;
             long waitMillis = latest.playing() ? 1_000 : 2_000;
             try {
-                if (shouldUseAccountSource() && connected()) poll();
+                if ((shouldUseAccountSource() || karaokeWatching) && connected()) poll();
             } catch (Exception error) {
                 status = "Spotify temporarily unavailable";
                 waitMillis = 3_000;

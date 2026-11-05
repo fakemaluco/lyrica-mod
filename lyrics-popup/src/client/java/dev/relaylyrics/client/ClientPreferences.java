@@ -290,6 +290,12 @@ public final class ClientPreferences {
     private double worldLyricsSize = 1.2;
     private boolean worldLyricsAutoWalls = true;
     private boolean worldLyricsReposition;
+    private boolean jiAfkResumeMusic = true;
+    private boolean audioDucking;
+    private DuckingTrigger duckingTrigger = DuckingTrigger.VOICE;
+    private DuckingTarget duckingTarget = DuckingTarget.SPOTIFY;
+    private String duckingApplication = "";
+    private double duckingVolume = .30;
     private boolean worldLyricsCinematic;
     private boolean worldLyricsVolumetric;
     private WorldLyricsPresentation.Direction worldLyricsDirection = WorldLyricsPresentation.Direction.AUTOMATIC;
@@ -639,6 +645,23 @@ public final class ClientPreferences {
     public boolean isWorldLyricsVolumetric() { return worldLyricsVolumetric; }
     public void setWorldLyricsVolumetric(boolean value) { worldLyricsVolumetric = value; }
     public boolean isWorldLyricsCinematic() { return worldLyricsCinematic; }
+    public enum DuckingTrigger { VOICE, MUSIC, BOTH }
+    public enum DuckingTarget { SPOTIFY, APPLICATION, ALL }
+
+    public boolean isAudioDucking() { return audioDucking; }
+    public void setAudioDucking(boolean value) { audioDucking = value; }
+    public DuckingTrigger getDuckingTrigger() { return duckingTrigger == null ? DuckingTrigger.VOICE : duckingTrigger; }
+    public void setDuckingTrigger(DuckingTrigger value) { duckingTrigger = value; }
+    public DuckingTarget getDuckingTarget() { return duckingTarget == null ? DuckingTarget.SPOTIFY : duckingTarget; }
+    public void setDuckingTarget(DuckingTarget value) { duckingTarget = value; }
+    public String getDuckingApplication() { return duckingApplication == null ? "" : duckingApplication; }
+    public void setDuckingApplication(String value) { duckingApplication = value; }
+    public double getDuckingVolume() { return Double.isFinite(duckingVolume) ? Math.clamp(duckingVolume, 0, 1) : .30; }
+    public void setDuckingVolume(double value) { duckingVolume = Math.clamp(value, 0, 1); }
+
+    public boolean isJiAfkResumeMusic() { return jiAfkResumeMusic; }
+    public void setJiAfkResumeMusic(boolean value) { jiAfkResumeMusic = value; }
+
     public boolean isWorldLyricsReposition() { return worldLyricsReposition; }
     public void setWorldLyricsReposition(boolean value) { worldLyricsReposition = value; }
     public void setWorldLyricsCinematic(boolean value) { worldLyricsCinematic = value; }

@@ -172,7 +172,7 @@ tasks.processResources {
     }
     inputs.property("version", project.version)
     filesMatching("fabric.mod.json") {
-        expand(mapOf("version" to project.version, "minecraft_dependency" to "~1.21.1",
+        expand(mapOf("version" to project.version, "minecraft_dependency" to "1.21.1",
             "fabric_api_dependency" to ">=0.116.15"))
     }
 }

@@ -45,10 +45,16 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
     from(rootProject.file("lyrics-popup/src/client/java")) {
         include("dev/relaylyrics/client/ClientPreferences.java")
         include("dev/relaylyrics/mixin/XaeroMinimapAlignmentMixin.java")
+        include("dev/relaylyrics/mixin/JiAfkSessionMixin.java")
+        include("dev/relaylyrics/mixin/JiAfkMusicMixin.java")
+        include("dev/relaylyrics/mixin/SimpleVoiceDuckingMixin.java")
+        include("dev/relaylyrics/mixin/PlasmoVoiceDuckingMixin.java")
         include("dev/relaylyrics/client/MusicPresence.java")
         include("dev/relaylyrics/client/presence/**")
+        include("dev/relaylyrics/client/karaoke/KaraokeClient.java")
+        include("dev/relaylyrics/client/karaoke/KaraokePopup.java")
+        include("dev/relaylyrics/client/karaoke/KaraokeSurfaces.java")
         include("dev/relaylyrics/client/compat/**")
-        include("dev/relaylyrics/client/WorldLyricsLightAdapter.java")
         include("dev/relaylyrics/client/LyricsSettingsCatalog.java")
         include("dev/relaylyrics/client/LyricsSettingsPresets.java")
         include("dev/relaylyrics/client/LyricsSettingsDemo.java")
@@ -82,7 +88,8 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
 }
 
 sourceSets.main {
-    java.setSrcDirs(listOf(rootProject.file("lyrics-popup/src/main/java")))
+    java.srcDir(rootProject.file("lyrics-popup/src/main/java"))
+    java.exclude { it.file == rootProject.file("lyrics-popup/src/main/java/dev/relaylyrics/karaoke/KaraokeNetwork.java") }
     resources.setSrcDirs(listOf(rootProject.file("lyrics-popup/src/main/resources")))
 }
 sourceSets.test {
@@ -135,14 +142,12 @@ tasks.processResources {
         into("assets/lyrica/textures/gui/lyrics")
     }
     inputs.property("version", project.version)
-    inputs.property("mixin_config", "26.2-client-only")
+    inputs.property("mixin_config", "26.2-client-and-server")
     filesMatching("fabric.mod.json") {
-        expand(mapOf("version" to project.version, "minecraft_dependency" to "~26.2",
+        expand(mapOf("version" to project.version, "minecraft_dependency" to "26.2",
             "fabric_api_dependency" to ">=0.161.0"))
         filter { line: String ->
             when {
-                line.contains("\"environment\"") -> "$line\n  \"mixins\": [\"relaylyrics.client.mixins.json\"],"
-                line.contains("\"mixins\"") -> ""
                 line.contains("\"java\": \">=21\"") -> line.replace("\">=21\"", "\">=25\"")
                 else -> line
             }

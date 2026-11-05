@@ -12,9 +12,10 @@
     "sources": "https://github.com/fakemaluco/lyrica-mod"
   },
   "license": "AGPL-3.0-only",
-  "environment": "client",
-  "mixins": ["relaylyrics.client.mixins.json"],
+  "environment": "*",
+  "mixins": [{"config": "relaylyrics.client.mixins.json", "environment": "client"}],
   "entrypoints": {
+    "main": ["dev.relaylyrics.karaoke.KaraokeNetwork"],
     "client": [
       "dev.relaylyrics.client.RelayLyricsClient"
     ],

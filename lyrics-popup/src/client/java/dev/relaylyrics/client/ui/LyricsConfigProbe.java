@@ -45,7 +45,7 @@ public final class LyricsConfigProbe {
             : Boolean.getBoolean("lyrica.configCompactOnlySelfTest")
             ? new String[]{"compact", "compact_choices", "search"}
             : Boolean.getBoolean("lyrica.configModalOnlySelfTest")
-            ? new String[]{"general", "appearance", "choices", "search", "sources_end", "motion_artwork", "world", "compact", "compact_choices"}
+            ? new String[]{"general", "appearance", "choices", "search", "sources_end", "motion_artwork", "world", "compact", "compact_choices", "opening_35", "opening_reduced"}
             : Boolean.getBoolean("lyrica.configMotionOnlySelfTest")
             ? new String[]{"appearance", "motion_artwork"}
             : Boolean.getBoolean("lyrica.configSourcesOnlySelfTest")

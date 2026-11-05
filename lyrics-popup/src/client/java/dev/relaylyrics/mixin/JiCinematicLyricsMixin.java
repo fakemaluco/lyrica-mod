@@ -12,8 +12,19 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Pseudo
 @Mixin(targets = "com.ji.afkcinematic.render.LetterboxRenderer", remap = false)
 public abstract class JiCinematicLyricsMixin {
-    @Inject(method = "render", at = @At("TAIL"), remap = false, require = 0)
+    @Inject(method = {"render(Lnet/minecraft/class_332;F)V", "render(Lnet/minecraft/client/gui/DrawContext;F)V"}, at = @At("TAIL"), remap = false, require = 0)
     private static void lyrica$caption(@Coerce Object context, float delta, CallbackInfo ci) {
+        lyrica$drawCaption(context);
+    }
+
+    @Inject(method = {"render(Lnet/minecraft/class_332;)V", "render(Lnet/minecraft/client/gui/DrawContext;)V"},
+            at = @At("TAIL"), remap = false, require = 0)
+    private static void lyrica$captionWithoutDelta(@Coerce Object context, CallbackInfo ci) {
+        lyrica$drawCaption(context);
+    }
+
+    @org.spongepowered.asm.mixin.Unique
+    private static void lyrica$drawCaption(Object context) {
         var overlay = RelayLyricsClient.overlay();
         if (overlay != null) overlay.renderCinematicCaption((net.minecraft.client.gui.DrawContext) context);
     }

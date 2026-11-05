@@ -18,6 +18,11 @@ abstract class FanDroidScreenBase extends Screen {
         super.extractRenderState(context, mouseX, mouseY, delta);
     }
 
+    /** Blur the scene already drawn behind the settings plate using the game's menu blur. */
+    protected final void blurSettingsBackdrop(GuiGraphicsExtractor context, float delta) {
+        extractBlurredBackground(context);
+    }
+
     protected double inputScale() { return 1; }
     protected double pointerX(double x) { return x / inputScale(); }
     protected double pointerY(double y) { return y / inputScale(); }

@@ -260,6 +260,19 @@ public final class LyricsSettingsCatalog {
     }
 
     private void advanced() {
+        if (CompatibilityManager.jiAfkInstalled())
+            toggle("ji_afk_resume_music", p::isJiAfkResumeMusic, p::setJiAfkResumeMusic);
+        if (dev.relaylyrics.client.music.AudioDucking.supported() && group("audio_ducking")) {
+            toggle("audio_ducking.enabled", p::isAudioDucking, p::setAudioDucking).changesStructure = true;
+            if (p.isAudioDucking()) {
+                choice("audio_ducking.trigger", ClientPreferences.DuckingTrigger.values(), p::getDuckingTrigger, p::setDuckingTrigger);
+                choice("audio_ducking.target", ClientPreferences.DuckingTarget.values(),
+                        p::getDuckingTarget, p::setDuckingTarget).changesStructure = true;
+                if (p.getDuckingTarget() == ClientPreferences.DuckingTarget.APPLICATION)
+                    input("audio_ducking.application", p::getDuckingApplication, p::setDuckingApplication, false);
+                percent("audio_ducking.volume", 0, 1, .05, p::getDuckingVolume, p::setDuckingVolume);
+            }
+        }
         if (group("updates")) {
             toggle("updates.automatic", p::isUpdateChecks, p::setUpdateChecks);
             toggle("updates.prereleases", p::isUpdatePrereleases, p::setUpdatePrereleases);
@@ -503,6 +516,9 @@ public final class LyricsSettingsCatalog {
                 p.setWorldLyricsQuality(d.getWorldLyricsQuality()); p.setWorldLyricsCinematic(d.isWorldLyricsCinematic());
             }
             case "all" -> {
+                p.setAudioDucking(d.isAudioDucking());
+                p.setDuckingTrigger(d.getDuckingTrigger()); p.setDuckingTarget(d.getDuckingTarget());
+                p.setDuckingApplication(d.getDuckingApplication()); p.setDuckingVolume(d.getDuckingVolume());
                 restore("world_experience");
                 restore("appearance"); restore("performance"); restore("world_position"); restore("world_volume"); restore("world_animation");
                 p.setGeminiCreativeFreedom(85); p.setGeminiSongContext(true); p.setGeminiArtStyle("auto"); p.setGeminiArtSecondary("none"); p.setGeminiArtScale(100); p.setGeminiArtStroke(100); p.setGeminiArtGrain(30); p.setGeminiArtSeed(1); p.setGeminiArtBlend(35); p.setGeminiArtAnimated(false); p.setGeminiArtAudio(true);

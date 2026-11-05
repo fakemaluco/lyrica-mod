@@ -663,6 +663,35 @@ public final class LyricsOverlay implements AutoCloseable {
         preview.renderCompact(context, x, y, width, height);
     }
 
+    /** Copies local media state into an independent world view, including live album video. */
+    public void usePopupMediaFrom(LyricsOverlay source) {
+        currentSongSource = source;
+        playback = source.playback;
+        artworkTexture = source.artworkTexture;
+        artworkAccent = source.artworkAccent;
+        lyricsLoading = source.lyricsLoading;
+        emptyMessage = source.emptyMessage;
+        syncLabel = source.syncLabel;
+        if (document != source.document) setLyrics(source.document, source.syncLabel);
+    }
+
+    /** Paints the HUD popup at fixed logical dimensions with its own pointer and hit regions. */
+    public void renderWorldPopup(DrawContext context, int width, int height, double mouseX, double mouseY) {
+        clearPopupControlBounds();
+        hudHitRegions.clear();
+        adaptivePopupMode = AdaptivePopupLayout.choose(width, height, videoArtworkAspect(),
+                !document.groups().isEmpty(), preferences.getLyricsTextScale());
+        renderingOverScreen = true;
+        pointerX = mouseX;
+        pointerY = mouseY;
+        try {
+            renderCompactDesign(context, 0, 0, width, height);
+        } finally {
+            renderingOverScreen = false;
+            pointerX = pointerY = Double.NaN;
+        }
+    }
+
     /** Album artwork belongs to MusicService and is never closed by the preview. */
     public void releaseCurrentSongPreview() {
         LyricsOverlay retired = currentSongPreview;
@@ -1924,11 +1953,15 @@ public final class LyricsOverlay implements AutoCloseable {
             int hintWidth = Math.max(1, cover.width() - edge * 2);
             String label = fit(hint, Math.max(1, hintWidth - 10), .68);
             int paintedWidth = Math.min(hintWidth, (int) Math.ceil(textWidth(label) * .68) + 10);
-            int hintY = utilityTop + utilitySize + 5;
+            ControlBounds hovered = worldHovered ? world : romanizationHovered ? romanization
+                    : translationHovered ? translation : settings;
+            int hintX = Math.clamp(hovered.x() + (hovered.width() - paintedWidth) / 2,
+                    cover.x() + edge, cover.right() - edge - paintedWidth);
+            int hintY = hovered.y() + hovered.height() + 5;
             double hintAlpha = visibility * Math.max(popupWorldHover,Math.max(popupSettingsHover, Math.max(popupRomanizationHover, popupTranslationHover)));
-            RoundedGui.smoothFill(context, cover.x() + edge, hintY, paintedWidth, 15, 7,
+            RoundedGui.smoothFill(context, hintX, hintY, paintedWidth, 15, 7,
                     multiplyAlpha(0xB0080A12, hintAlpha));
-            drawScaled(context, renderer(), label, cover.x() + edge + 5, hintY + 4,
+            drawScaled(context, renderer(), label, hintX + 5, hintY + 4,
                     multiplyAlpha(0xFFFFFFFF, hintAlpha), .68);
         }
         if (volumeFits) renderPopupVolume(context, volume, visibility, delta, videoControls);

@@ -6,10 +6,10 @@ import net.minecraft.network.chat.Component;
 import org.joml.Matrix4f;
 
 /** Emits prepared vanilla glyphs into the same consumers as the world mesh. */
-final class FontCompat {
+public final class FontCompat {
     private FontCompat() { }
 
-    static void drawInBatch(Font font, Component text, float x, float y, int color,
+    public static void drawInBatch(Font font, Component text, float x, float y, int color,
                             boolean shadow, Matrix4f matrix, MultiBufferSource buffers,
                             Font.DisplayMode mode, int background, int light) {
         font.prepareText(text.getVisualOrderText(), x, y, color, shadow, false, background)

@@ -1,3 +1,4 @@
+mod ducking;
 mod platform;
 mod spicetify;
 mod timeline;
@@ -157,7 +158,8 @@ enum Event {
     Shutdown,
 }
 
-fn stdin_events(sender: mpsc::Sender<Event>, audio: std::sync::Arc<reactive_audio::ReactiveAudioStream>) {
+fn stdin_events(sender: mpsc::Sender<Event>, audio: std::sync::Arc<reactive_audio::ReactiveAudioStream>,
+                ducking: mpsc::Sender<ducking::Command>) {
     thread::spawn(move || {
         for line in io::stdin().lock().lines().map_while(Result::ok) {
             let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -176,6 +178,11 @@ fn stdin_events(sender: mpsc::Sender<Event>, audio: std::sync::Arc<reactive_audi
                         .unwrap_or("AUTOMATIC").to_owned();
                     if sender.send(Event::Source(source)).is_err() { break; }
                 }
+                Some("ducking") => {
+                    if let Ok(request) = serde_json::from_value::<Option<ducking::Request>>(value["request"].clone()) {
+                        let _ = ducking.send(ducking::Command::Update(request));
+                    }
+                }
                 Some("audio_levels_enabled") => audio.set_enabled(value["enabled"].as_bool().unwrap_or(false)),
                 Some("reload_audio_output") => {
                     if sender.send(Event::ReloadAudioOutput).is_err() { break; }
@@ -186,6 +193,7 @@ fn stdin_events(sender: mpsc::Sender<Event>, audio: std::sync::Arc<reactive_audi
         // The helper is a child of Minecraft. EOF means the Java side closed or
         // crashed, so keeping the loopback port alive would create an orphan that
         // prevents the next game session from producing a pairing code.
+        let _ = ducking.send(ducking::Command::Shutdown);
         let _ = sender.send(Event::Shutdown);
     });
 }
@@ -201,13 +209,14 @@ fn output(value: Value) {
 fn main() -> Result<()> {
     let (sender, receiver) = mpsc::channel();
     let audio = reactive_audio::ReactiveAudioStream::start();
-    stdin_events(sender.clone(), audio.clone());
-    let spicetify = spicetify::Server::start(sender)?;
+    let spicetify = spicetify::Server::start(sender.clone())?;
+    let mut system = platform::SystemMedia::new()?;
+    let ducking = ducking::Controller::start();
+    stdin_events(sender, audio.clone(), ducking.sender.clone());
     output(
         json!({"type": "pairing_code", "code": spicetify.pairing_code(), "port": spicetify.port()}),
     );
 
-    let mut system = platform::SystemMedia::new()?;
     let mut intensity = platform::start_intensity_capture();
     audio.replace_source(intensity.clone());
     let mut latest_spicetify: Option<(PlaybackSnapshot, Instant)> = None;
@@ -222,6 +231,7 @@ fn main() -> Result<()> {
         if !drain_events(&receiver, &mut system, &spicetify, &mut latest_spicetify,
             &mut latest_youtube, &mut spicetify_connected, &mut youtube_connected,
             &mut active_source, &mut intensity, &audio, selected_source) {
+            ducking.stop();
             audio.stop();
             intensity.stop();
             return Ok(());
@@ -233,7 +243,10 @@ fn main() -> Result<()> {
         let system_snapshot = system.snapshot_for(&active_source).ok();
         let (mut snapshot, route) = select_playback(&active_source,
             latest_spicetify.as_ref().filter(|_| spicetify_connected),
-            latest_youtube.as_ref().filter(|_| youtube_connected), system_snapshot);
+            latest_youtube.as_ref().filter(|_| youtube_connected), system_snapshot.clone());
+        let active_media_app = system_snapshot.as_ref()
+            .filter(|os| os.playing && same_track(&snapshot, os))
+            .and_then(|os| os.device_name.as_deref());
         selected_source = route;
         snapshot.intensity = intensity.intensity();
         timeline.update(&mut snapshot, Instant::now());
@@ -241,7 +254,7 @@ fn main() -> Result<()> {
         snapshot.bpm = intensity.bpm();
         snapshot.spectral_centroid = intensity.centroid();
         snapshot.intensity_bands = intensity.bands();
-        output(json!({"type": "snapshot", "snapshot": snapshot, "activeSource": selected_source.name()}));
+        output(json!({"type": "snapshot", "snapshot": snapshot, "activeSource": selected_source.name(), "activeMediaApp": active_media_app}));
         thread::sleep(Duration::from_millis(500));
     }
 }

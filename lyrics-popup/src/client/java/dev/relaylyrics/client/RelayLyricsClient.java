@@ -48,6 +48,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
                 preferences().getLyricsFontWeight().cssWeight(), overlay::fontChanged);
         InventoryLyricsInteraction.register();
         MusicPresence.initialize();
+        dev.relaylyrics.client.karaoke.KaraokeClient.initialize();
         WorldLyricsRenderHook.register();
         net.fabricmc.fabric.api.resource.ResourceManagerHelper.get(net.minecraft.resource.ResourceType.CLIENT_RESOURCES)
                 .registerReloadListener(new net.fabricmc.fabric.api.resource.SimpleSynchronousResourceReloadListener() {
@@ -89,12 +90,15 @@ public final class RelayLyricsClient implements ClientModInitializer {
             dev.relaylyrics.client.ui.GeminiWorldProbe.tick();
             overlay.tick();
             if (music != null) {
+                dev.relaylyrics.client.compat.JiAfkPlayback.tick(music, client.world != null);
+                music.tickAudioDucking(client.world != null);
                 music.tickGeminiShaders();
                 if (client.player != null) {
                     String version = music.support().takeNotification();
                     if (!version.isBlank()) client.inGameHud.getChatHud().addMessage(net.minecraft.text.Text.translatable("config.relaylyrics.updates.notification", version));
                 }
             }
+            dev.relaylyrics.client.karaoke.KaraokeClient.tick();
             MusicPresence.tick();
             dev.relaylyrics.client.ui.WorldLyricsProbe.tick(client);
             dev.relaylyrics.client.ui.WorldLyricsRenderer.tickPlayerMotion(client);
@@ -108,6 +112,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
         // both passes in handled screens: they would advance the cover-hover
         // animation once toward closed and once toward open every frame.
         HudRenderCallback.EVENT.register((context, tickCounter) -> {
+            dev.relaylyrics.client.karaoke.KaraokePlatform.paintPopups();
             var screen = MinecraftClient.getInstance().currentScreen;
             if (screen == null) {
                 InventoryLyricsController.renderWorldHud(context);
@@ -116,6 +121,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
             }
         });
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+            dev.relaylyrics.client.karaoke.KaraokeClient.clear();
             preferences().save();
             if (overlay != null) overlay.close();
             MusicPresence.close();

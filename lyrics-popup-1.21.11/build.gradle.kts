@@ -188,13 +188,12 @@ tasks.processResources {
         into("assets/lyrica/textures/gui/lyrics")
     }
     inputs.property("version", project.version)
+    inputs.property("mixin_config", "1.21.11-client-and-server")
     filesMatching("fabric.mod.json") {
-        expand(mapOf("version" to project.version, "minecraft_dependency" to "~1.21.11",
+        expand(mapOf("version" to project.version, "minecraft_dependency" to "1.21.11",
             "fabric_api_dependency" to ">=0.141.2"))
         filter { line: String ->
-            if (line.contains("\"environment\""))
-                "$line\n  \"mixins\": [\"relaylyrics.client.mixins.json\", \"relaylyrics.glow.mixins.json\"],"
-            else if (line.contains("\"mixins\"")) ""
+            if (line.contains("\"mixins\"")) line.replace("}],", "}, {\"config\": \"relaylyrics.glow.mixins.json\", \"environment\": \"client\"}],")
             else line
         }
     }

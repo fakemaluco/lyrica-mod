@@ -39,6 +39,10 @@ final class SettingsMotion {
         }
         void snap(double next) { from = target = next; duration = 0; }
     }
+    static double modalScale(double progress) {
+        return .96 + .04 * progress;
+    }
+
     static int mix(int a, int b, double amount) {
         double t = Math.clamp(amount, 0, 1);
         int color = 0;

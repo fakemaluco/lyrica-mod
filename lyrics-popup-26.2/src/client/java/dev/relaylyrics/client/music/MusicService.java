@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public final class MusicService implements AutoCloseable {
     private final MusicConnector connector;
+    private final AudioDucking audioDucking = new AudioDucking();
     private final DesktopMotionArtworkEngine motionEngine;
     private final DesktopArtistArtworkEngine artistEngine;
     private CompletableFuture<String> artistLookup;
@@ -147,6 +148,21 @@ public final class MusicService implements AutoCloseable {
         spotifyAccount.disconnect();
         refreshIdleArtworkFallback();
     }
+    public PlaybackSnapshot karaokeSpotifySnapshot() { return spotifyAccount.karaokeSnapshot(); }
+    public void setKaraokeSpotifyWatching(boolean watching) { spotifyAccount.setKaraokeWatching(watching); }
+    public CompletableFuture<String> resolveKaraokeSpotify(String title, String artist, long duration) {
+        return CompletableFuture.supplyAsync(() -> {
+            String id = spotifyAccount.resolveTrackId(new PlaybackSnapshot(title, artist, "", null, null, null,
+                    0, duration, false, 0, false, "off", false, 0, 0, 0, 0, new double[0],
+                    java.time.Instant.now(), dev.relaylyrics.protocol.music.MusicCapabilities.unavailable()));
+            return id == null ? null : "spotify:track:" + id;
+        });
+    }
+    public CompletableFuture<Void> syncKaraokeSpotify(String uri, long position, boolean playing,
+                                                     boolean loadTrack, boolean seek, java.util.function.BooleanSupplier active) {
+        return spotifyAccount.syncKaraoke(uri, position, playing, loadTrack, seek, active);
+    }
+
     public boolean spotifyAccountConnected() { return spotifyAccount.connected(); }
     /** The selected account may only be used for matching, not for playback. */
     public boolean spotifyPlaybackActive() { return spotifyAccount.shouldOverrideBridge(); }
@@ -489,6 +505,10 @@ public final class MusicService implements AutoCloseable {
     public LyricsTranslationSession translations() { return translations; }
     public ReleaseSupport support() { return support; }
     public String diagnosticReport() { return support.diagnosticReport(preferences, overlay.document(), bridgeAlive()); }
+    public void tickAudioDucking(boolean inWorld) {
+        if (connector instanceof MediaBridgeConnector bridge)
+            audioDucking.tick(bridge, preferences, snapshot(), playbackMethod(), inWorld);
+    }
     public void tickGeminiShaders() {
         var current = overlay.document();
         var translated = translations.tick(current);

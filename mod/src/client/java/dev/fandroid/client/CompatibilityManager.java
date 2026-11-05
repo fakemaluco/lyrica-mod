@@ -60,6 +60,8 @@ public final class CompatibilityManager {
     public static boolean minecraftCursor() { return MINECRAFT_CURSOR; }
 
     private static final boolean JI_AFK = loaded("ji-afk-cinematic");
+    public static boolean jiAfkInstalled() { return JI_AFK; }
+
     private static final java.lang.reflect.Method JI_STATE = jiStateMethod();
     private static java.lang.reflect.Method jiStateMethod() {
         if (JI_AFK) try {

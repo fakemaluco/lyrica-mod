@@ -87,13 +87,13 @@ tasks.processResources {
     dependsOn(stageBundledMediaBridge)
     from(bundledBridgeResources)
     inputs.property("version", project.version)
-    inputs.property("minecraft_dependency", "~1.21.1")
+    inputs.property("minecraft_dependency", "1.21.1")
     inputs.property("fabric_api_dependency", ">=0.116.15")
     inputs.property("voicechat_dependency", ">=1.21.1-2.6.21")
     filesMatching("fabric.mod.json") {
         expand(mapOf(
             "version" to project.version,
-            "minecraft_dependency" to "~1.21.1",
+            "minecraft_dependency" to "1.21.1",
             "fabric_api_dependency" to ">=0.116.15",
             "voicechat_dependency" to ">=1.21.1-2.6.21"
         ))

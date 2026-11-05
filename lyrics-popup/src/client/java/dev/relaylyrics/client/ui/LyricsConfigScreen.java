@@ -39,7 +39,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     private static final Identifier UI_COMPACT = Identifier.of("relaylyrics", "settings_compact");
     private static final Identifier UI_COMPACT_BOLD = Identifier.of("relaylyrics", "settings_compact_semibold");
     private static final int INK = 0xFFD9CAFF, MUTED = 0xFFB9AFD7, TERTIARY = 0xFF87779F;
-    private static final int FIELD = 0xF2342057, DEEP = 0xF523133E, HAIRLINE = 0x22D9CAFF;
+    private static final int FIELD = 0xB82B1C45, DEEP = 0xC11F152F, HAIRLINE = 0x22D9CAFF;
     private final Screen parent;
     private final ClientPreferences preferences;
     private final LyricsSettingsCatalog catalog;
@@ -73,7 +73,17 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     private PanelButton peekButton;
     private boolean probeSearch, drawingPanel;
     private int viewportWidth, viewportHeight;
-    private double uiScale = 1;
+    private double uiScale = 1, modalScale = 1;
+
+    @Override protected double pointerX(double x) {
+        double center = modalX + modalWidth / 2.0;
+        return center + (super.pointerX(x) - center) / modalScale;
+    }
+
+    @Override protected double pointerY(double y) {
+        double center = modalY + modalHeight / 2.0;
+        return center + (super.pointerY(y) - center) / modalScale;
+    }
     @Override protected double inputScale() { return uiScale; }
     private LyricsOverlay.PopupBounds previewBounds;
     private final java.util.Map<String, ButtonMotion> buttonMotions = new LinkedHashMap<>();
@@ -732,7 +742,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         for (int spread = 12; spread >= 3; spread -= 3)
             RoundedGui.smoothFill(context, modalX - spread, modalY - spread / 2, modalWidth + spread * 2,
                     modalHeight + spread, 16, ink(0x08000000));
-        RoundedGui.smoothGradient(context, modalX, modalY, modalWidth, modalHeight, 16, FIELD, DEEP, sidebarWidth, 0x6B23133E, paintAlpha);
+        RoundedGui.smoothGradient(context, modalX, modalY, modalWidth, modalHeight, 16, FIELD, DEEP, sidebarWidth, 0x55231A39, paintAlpha);
         context.fill(paneX, modalY, paneX + 1, modalY + modalHeight, ink(HAIRLINE));
         RoundedGui.smoothOutline(context, modalX, modalY, modalWidth, modalHeight, 16, ink(0x28D9CAFF));
         if (!compactNavigation && modalHeight > 220)
@@ -807,23 +817,37 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         }
     }
     @Override public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        mouseX = (int) Math.round(pointerX(mouseX)); mouseY = (int) Math.round(pointerY(mouseY));
         GuiTransform.push(context); GuiTransform.scale(context, (float) uiScale, (float) uiScale);
         double oldDensity = PlatformTextures.beginUiScale(uiScale);
         try {
             frameNanos = now();
             updateRowMotion();
-            if (probeMouseX >= 0) { mouseX = probeMouseX; mouseY = probeMouseY; }
             modalAlpha = modalMotion.to(1, SettingsMotion.MODAL, SettingsMotion.Curve.OUT, frameNanos, motionEnabled());
             paneAlpha = paneMotion.to(1, SettingsMotion.PANE, SettingsMotion.Curve.OUT, frameNanos, motionEnabled());
+            modalScale = editing || peeking ? 1 : SettingsMotion.modalScale(modalAlpha);
+            mouseX = (int) Math.round(pointerX(mouseX));
+            mouseY = (int) Math.round(pointerY(mouseY));
+            if (probeMouseX >= 0) { mouseX = probeMouseX; mouseY = probeMouseY; }
+
             if (!editing) drawPopup(context);
             GuiTransform.nextLayer(context);
-            context.fill(0, 0, width, height, SettingsMotion.opacity(0x73000000, peeking ? 0 : modalAlpha));
+            if (!editing && !peeking && modalAlpha > 0) blurSettingsBackdrop(context, delta);
+            context.fill(0, 0, width, height, SettingsMotion.opacity(0x48000000, peeking ? 0 : modalAlpha));
             GuiTransform.nextLayer(context);
-            drawingPanel = true;
-            try { renderBackground(context, mouseX, mouseY, delta); } finally { drawingPanel = false; }
-            GuiTransform.nextLayer(context);
-            renderVanillaScreen(context, mouseX, mouseY, delta);
+            GuiTransform.push(context);
+            try {
+                if (modalScale < 1) {
+                    float centerX = modalX + modalWidth / 2f;
+                    float centerY = modalY + modalHeight / 2f;
+                    GuiTransform.translate(context, centerX, centerY);
+                    GuiTransform.scale(context, (float) modalScale, (float) modalScale);
+                    GuiTransform.translate(context, -centerX, -centerY);
+                }
+                drawingPanel = true;
+                try { renderBackground(context, mouseX, mouseY, delta); } finally { drawingPanel = false; }
+                GuiTransform.nextLayer(context);
+                renderVanillaScreen(context, mouseX, mouseY, delta);
+            } finally { GuiTransform.pop(context); }
             paintAlpha = 1;
             if (peeking) return;
             if (editing) {
@@ -1075,6 +1099,12 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
                 if (stage.equals("zoom_small") ? uiScale >= old : uiScale <= old) throw new IllegalStateException("Control-wheel did not zoom settings");
             }
             return;
+        }
+        if (stage.equals("opening_35") || stage.equals("opening_reduced")) {
+            preferences.setLyricsAnimations(stage.equals("opening_35"));
+            probeTime = 1_000_000_000L;
+            modalMotion.to(1, SettingsMotion.MODAL, SettingsMotion.Curve.OUT, probeTime, motionEnabled());
+            probeTime += 35_000_000L;
         }
         probeSearch = stage.equals("search");
         searchQuery = probeSearch ? "Canvas" : "";

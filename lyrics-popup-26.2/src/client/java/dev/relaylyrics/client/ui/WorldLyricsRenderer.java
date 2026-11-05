@@ -765,9 +765,15 @@ public final class WorldLyricsRenderer {
                     if (piece.glyphMotion != null) piece.glyphMotion.sample(piece.glyphStart, piece.glyphEnd, now, frameClock, animate && layout.timed);
                     double segmentScale = 1 + (piece.segmentMotion.scale() - 1) * strength;
                     double glyphScale = 1 + ((piece.glyphMotion == null ? 1 : piece.glyphMotion.scale()) - 1) * strength;
-                    double center = ((piece.segmentCenter - row.width / 2)
-                            + (piece.x + piece.width / 2 - piece.segmentCenter) * segmentScale) * pixelScale;
+                    // Timed syllables share one word. Their animation can lift and stretch
+                    // vertically, but each fragment must stay inside its measured horizontal slot.
+                    boolean splitWord = layout.timed && word + 1 < layout.tokens.size()
+                            && !layout.tokens.get(word + 1).startsWord();
+                    double center = (splitWord ? piece.x + piece.width / 2 - row.width / 2
+                            : piece.segmentCenter - row.width / 2
+                                    + (piece.x + piece.width / 2 - piece.segmentCenter) * segmentScale) * pixelScale;
                     float scale = (float) (pixelScale * segmentScale * glyphScale * appearance.scale());
+                    float horizontalScale = splitWord ? (float) pixelScale : scale;
                     double elevation = (piece.segmentMotion.elevation()
                             + (piece.glyphMotion == null ? 0 : piece.glyphMotion.elevation())) * renderer.lineHeight * pixelScale * strength;
                     double localSide = center + appearance.offsetX() * lineHeight * pixelScale;
@@ -781,7 +787,7 @@ public final class WorldLyricsRenderer {
                     matrices.pushPose();
                     place(matrices, cameraPos, anchor, side, up, 0);
                     matrices.mulPose(new Quaternionf().rotateZ((float) angle));
-                    matrices.scale(scale, -scale, scale);
+                    matrices.scale(horizontalScale, -scale, scale);
                     double progress = LyricsAnimation.timedProgress(now, piece.token.startMillis(), piece.token.endMillis());
                     double boundary = (piece.rtl ? 1 - progress : progress) * piece.fragmentWidth - piece.fragmentX - piece.width / 2;
                     int face = appearance.color() < 0 ? preferences.getWorldLyricsFaceColor() : appearance.color();

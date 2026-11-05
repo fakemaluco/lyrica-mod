@@ -1,5 +1,6 @@
 package dev.fandroid.client.ui;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.text.Text;
@@ -14,6 +15,16 @@ abstract class FanDroidScreenBase extends Screen {
     protected final void renderVanillaScreen(DrawContext context, int mouseX, int mouseY, float delta) {
         renderBackground(context, mouseX, mouseY, delta);
         super.render(context, mouseX, mouseY, delta);
+    }
+
+    /** Blur the scene already drawn behind the settings plate using the game's menu blur. */
+    protected final void blurSettingsBackdrop(DrawContext context, float delta) {
+        if (client.options.getMenuBackgroundBlurrinessValue() < 1) return;
+        context.draw();
+        // Legacy post passes may reuse their cached blend state after the GUI changes it.
+        RenderSystem.disableBlend();
+        applyBlur(delta);
+        RenderSystem.defaultBlendFunc();
     }
 
     protected double inputScale() { return 1; }

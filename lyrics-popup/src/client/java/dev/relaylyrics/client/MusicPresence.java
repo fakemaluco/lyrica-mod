@@ -1,6 +1,7 @@
 package dev.relaylyrics.client;
 
 import dev.relaylyrics.client.presence.*;
+import dev.relaylyrics.client.karaoke.KaraokeClient;
 import java.util.*;
 
 /** Minecraft-free lifecycle shared by the three platform adapters. */
@@ -15,6 +16,11 @@ public final class MusicPresence {
     public static void tick() {
         if (Boolean.getBoolean("lyrica.musicPresenceSelfTest")) { PresencePlatform.probeTick(); return; }
         var p = RelayLyricsClient.preferences();
+        if (KaraokeClient.supported()) {
+            if (connection != null) close();
+            updateGaze(p.isMusicPresenceEnabled() ? PresencePlatform.lookingAt() : null);
+            return;
+        }
         Context context = p.isMusicPresenceEnabled() ? PresencePlatform.context() : null;
         if (context == null) { if (connection != null) close(); return; }
         if (connection == null || !connection.identity().equals(context.identity())) {
@@ -37,10 +43,13 @@ public final class MusicPresence {
     public static PresenceTrack track(UUID id) {
         if (!RelayLyricsClient.preferences().isMusicPresenceEnabled() || id == null) return null;
         PresenceTrack t = fixture.get(id);
-        return t != null && t.alive(System.nanoTime()) ? t : connection == null ? null : connection.track(id);
+        if (t != null && t.alive(System.nanoTime())) return t;
+        if (KaraokeClient.supported()) return KaraokeClient.track(id);
+        return connection == null ? null : connection.track(id);
     }
     public static String statusKey() {
         if (!RelayLyricsClient.preferences().isMusicPresenceEnabled()) return "disabled";
+        if (KaraokeClient.supported()) return "connected";
         return connection == null ? "multiplayer" : connection.status().name().toLowerCase(Locale.ROOT);
     }
     public static int show(String name) {

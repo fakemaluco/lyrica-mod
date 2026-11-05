@@ -17,15 +17,19 @@ final class StandaloneMetadataTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
-    void exposesClientSettingsAndOptionalLightingEntrypoints() throws Exception {
+    void exposesKaraokeAndOptionalClientEntrypoints() throws Exception {
         try (InputStream stream = getClass().getResourceAsStream("/fabric.mod.json")) {
             assertThat(stream).isNotNull();
             JsonNode metadata = mapper.readTree(stream);
             assertThat(metadata.path("id").asText()).isEqualTo("lyrica");
-            assertThat(metadata.path("environment").asText()).isEqualTo("client");
+            assertThat(metadata.path("environment").asText()).isEqualTo("*");
+            assertThat(metadata.path("depends").path("minecraft").asText())
+                    .isIn("1.21.1", "1.21.11", "26.2");
             assertThat(metadata.path("entrypoints").has("client")).isTrue();
             assertThat(metadata.path("entrypoints").has("modmenu")).isTrue();
-            assertThat(metadata.path("entrypoints").has("main")).isFalse();
+            assertThat(metadata.path("entrypoints").path("main").get(0).asText())
+                    .isEqualTo("dev.relaylyrics.karaoke.KaraokeNetwork");
+            assertThat(metadata.path("mixins").get(0).path("environment").asText()).isEqualTo("client");
             assertThat(metadata.path("entrypoints").has("voicechat")).isFalse();
             assertThat(metadata.path("entrypoints").path("lambdynlights:initializer").get(0).path("adapter").asText()).isEqualTo("lyrica_optional_lighting");
             assertThat(metadata.path("languageAdapters").has("lyrica_optional_lighting")).isTrue();
