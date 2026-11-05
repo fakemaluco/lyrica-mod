@@ -15,11 +15,9 @@ import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL30;
 
-import static dev.relaylyrics.karaoke.KaraokeWire.*;
-
 public final class KaraokePopupTarget implements AutoCloseable {
     public static final int DENSITY = 2;
-    private static boolean painting;
+    private static int paintHeight;
     private static BufferAllocator allocator;
     private final Identifier texture;
     private SimpleFramebuffer target;
@@ -27,7 +25,9 @@ public final class KaraokePopupTarget implements AutoCloseable {
     KaraokePopupTarget(int slot) { texture = Identifier.of("lyrica", "karaoke/" + slot); }
 
     Identifier texture() { return texture; }
-    public static boolean painting() { return painting; }
+    public static boolean painting() { return paintHeight != 0; }
+
+    public static int paintHeight() { return paintHeight; }
 
     void paint(KaraokePopup view, double x, double y) {
         if (allocator == null) allocator = new BufferAllocator(256 * 1024);
@@ -41,24 +41,27 @@ public final class KaraokePopupTarget implements AutoCloseable {
         modelView.pushMatrix().translation(0, 0, -11000);
         try {
             if (target == null) {
-                target = new SimpleFramebuffer(WIDTH * DENSITY, HEIGHT * DENSITY, true, false);
+                target = new SimpleFramebuffer(view.width * DENSITY, view.height * DENSITY, true, false);
                 target.setClearColor(0, 0, 0, 0);
                 target.setTexFilter(GL11.GL_LINEAR);
                 MinecraftClient.getInstance().getTextureManager().registerTexture(texture, new AbstractTexture() {
                     @Override public int getGlId() { return target.getColorAttachment(); }
                     @Override public void load(ResourceManager resources) { }
                 });
+            } else if (target.textureWidth != view.width * DENSITY || target.textureHeight != view.height * DENSITY) {
+                target.resize(view.width * DENSITY, view.height * DENSITY, false);
+                target.setTexFilter(GL11.GL_LINEAR);
             }
             target.clear(false);
             target.beginWrite(true);
-            RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0, WIDTH, HEIGHT, 0, 1000, 21000), VertexSorter.BY_Z);
+            RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0, view.width, view.height, 0, 1000, 21000), VertexSorter.BY_Z);
             RenderSystem.applyModelViewMatrix();
-            painting = true;
+            paintHeight = target.textureHeight;
             var context = new DrawContext(MinecraftClient.getInstance(), VertexConsumerProvider.immediate(allocator));
-            view.overlay.renderWorldPopup(context, WIDTH, HEIGHT, x, y);
+            view.overlay.renderWorldPopup(context, view.width, view.height, x, y);
             context.draw();
         } finally {
-            painting = false;
+            paintHeight = 0;
             RenderSystem.disableScissor();
             modelView.popMatrix();
             RenderSystem.applyModelViewMatrix();

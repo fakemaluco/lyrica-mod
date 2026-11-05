@@ -8,9 +8,16 @@ import dev.relaylyrics.protocol.music.PlaybackSnapshot;
 
 import java.time.Instant;
 
+import static dev.relaylyrics.karaoke.KaraokeWire.HEIGHT;
+import static dev.relaylyrics.karaoke.KaraokeWire.WIDTH;
+
 /** Presentation and input state separate from the player's HUD popup. */
 final class KaraokePopup implements AutoCloseable {
     final LyricsOverlay overlay = new LyricsOverlay(RelayLyricsClient.preferences());
+    int width = WIDTH, height = HEIGHT;
+    double pointerX(double centeredX) { return (centeredX / WIDTH + .5) * width; }
+    double pointerY(double centeredY) { return (centeredY / HEIGHT + .5) * height; }
+
     private CoverArtTexture artwork;
     private long revision = -1;
 

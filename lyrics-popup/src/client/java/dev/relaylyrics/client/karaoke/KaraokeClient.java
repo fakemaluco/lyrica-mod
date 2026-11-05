@@ -373,7 +373,7 @@ public final class KaraokeClient {
         var view = KaraokePlatform.popup(room);
         if (view == null) return;
         var overlay = view.overlay;
-        double x = hit.x + WIDTH / 2.0, y = hit.y + HEIGHT / 2.0;
+        double x = view.pointerX(hit.x), y = view.pointerY(hit.y);
         var control = overlay.popupControlAt(x, y);
         var music = RelayLyricsClient.music();
         boolean localPlayback = music != null && (room.owned() || room.isListeningOnSpotify());

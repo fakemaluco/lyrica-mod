@@ -7,14 +7,12 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
-import static dev.relaylyrics.karaoke.KaraokeWire.HEIGHT;
-
 @Mixin(DrawContext.class)
 abstract class KaraokeGuiTargetMixin {
     @Redirect(method = "setScissor", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/util/Window;getFramebufferHeight()I"))
     private int lyrica$height(Window window) {
-        return KaraokePopupTarget.painting() ? HEIGHT * KaraokePopupTarget.DENSITY : window.getFramebufferHeight();
+        return KaraokePopupTarget.painting() ? KaraokePopupTarget.paintHeight() : window.getFramebufferHeight();
     }
 
     @Redirect(method = "setScissor", at = @At(value = "INVOKE",

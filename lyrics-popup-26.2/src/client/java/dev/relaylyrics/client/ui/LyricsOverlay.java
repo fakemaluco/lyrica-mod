@@ -137,6 +137,7 @@ public final class LyricsOverlay implements AutoCloseable {
     private boolean phoneEnhancedFailed;
     private boolean renderingInPhone;
     private boolean renderingOverScreen;
+    private boolean renderingWorldPopup;
     private boolean bandedTransitionDrawing;
     private LyricsFramePlan bandedLyricsFramePlan;
     private boolean drawingLyricsShadow;
@@ -681,12 +682,22 @@ public final class LyricsOverlay implements AutoCloseable {
         adaptivePopupMode = AdaptivePopupLayout.choose(width, height, videoArtworkAspect(),
                 !document.groups().isEmpty(), preferences.getLyricsTextScale());
         renderingOverScreen = true;
+        renderingWorldPopup = true;
         pointerX = mouseX;
         pointerY = mouseY;
         try {
             renderCompactDesign(context, 0, 0, width, height);
+            int size = 18, x = width - size - 7, y = 7;
+            var close = new ControlBounds(x, y, size, size);
+            boolean hovered = close.contains(mouseX, mouseY);
+            GuiTransform.nextLayer(context);
+            RoundedGui.smoothFill(context, x, y, size, size, size / 2,
+                    hovered ? 0xFF824659 : 0xDD211D2B);
+            PopupIcons.drawCentered(context, PopupIcons.CLOSE, x + size / 2, y + size / 2, 11, 0xFFFFFFFF);
+            popupCloseButtonBounds = close;
         } finally {
             renderingOverScreen = false;
+            renderingWorldPopup = false;
             pointerX = pointerY = Double.NaN;
         }
     }
@@ -1374,7 +1385,7 @@ public final class LyricsOverlay implements AutoCloseable {
     }
     private void renderPopupClose(GuiGraphicsExtractor context,ControlBounds close,CoverBounds cover,boolean integrated,double visibility,double delta) {
         popupCloseButtonBounds=null;
-        if(!preferences.isPopupEdgeDocking() || preferences.isPopupDocked() || visibility<=.004) return;
+        if(renderingWorldPopup || !preferences.isPopupEdgeDocking() || preferences.isPopupDocked() || visibility<=.004) return;
         boolean over=renderingOverScreen && visibility>.32 && close.contains(pointerX,pointerY);
         popupCloseHover=utilityHover(popupCloseHover,over,PopupControl.CLOSE,delta);
         if(renderingOverScreen && visibility>.32) popupCloseButtonBounds=close;
@@ -1658,7 +1669,7 @@ public final class LyricsOverlay implements AutoCloseable {
                 RoundedGui.smoothFill(context,x+art.x(),y+art.y(),art.width(),art.height(),radius,blend(0xFF171321,accentColor(),.5));
         }
         var metadata = layout.metadata();
-        int closeReserve = preferences.isPopupEdgeDocking() ? layout.settings().width()+4 : 0;
+        int closeReserve = renderingWorldPopup || preferences.isPopupEdgeDocking() ? layout.settings().width()+4 : 0;
         int worldReserve=layout.settings().width()+4;
         int metadataWidth = Math.max(1,metadata.width()-closeReserve-worldReserve);
         double titleScale = height < 90 ? .85 : 1.05, artistScale = height < 90 ? .72 : .84;

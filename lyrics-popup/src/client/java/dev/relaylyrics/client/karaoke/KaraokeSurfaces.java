@@ -39,6 +39,8 @@ final class KaraokeSurfaces {
             entry.getValue().close();
             return true;
         });
+        var dragged = KaraokeClient.draggedRoom();
+        var dragPose = dragged == null ? null : KaraokeClient.draggedPanel(KaraokePlatform.ray());
         int usedSlots = 0;
         for (var surface : SURFACES.values()) usedSlots |= 1 << surface.slot;
         for (var room : visible) {
@@ -51,8 +53,13 @@ final class KaraokeSurfaces {
             }
             surface.popup.update(room);
             boolean aimed = hit != null && hit.room() == room;
-            surface.target.paint(surface.popup, aimed ? hit.x() + WIDTH / 2.0 : Double.NaN,
-                    aimed ? hit.y() + HEIGHT / 2.0 : Double.NaN);
+            var panel = room == dragged && dragPose != null ? dragPose : room.panel;
+            var popup = surface.popup;
+            // Quantize by four logical pixels so small mouse movements reuse the GPU target.
+            popup.width = (int) Math.round(WIDTH * panel.zoom() / 4) * 4;
+            popup.height = (int) Math.round(HEIGHT * panel.heightZoom() / 4) * 4;
+            surface.target.paint(popup, aimed ? popup.pointerX(hit.x()) : Double.NaN,
+                    aimed ? popup.pointerY(hit.y()) : Double.NaN);
         }
     }
 

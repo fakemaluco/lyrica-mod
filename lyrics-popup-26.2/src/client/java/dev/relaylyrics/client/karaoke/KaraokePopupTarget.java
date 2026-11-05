@@ -35,6 +35,10 @@ public final class KaraokePopupTarget implements AutoCloseable {
 
     KaraokePopupTarget(int slot) {
         texture = Identifier.fromNamespaceAndPath("lyrica", "karaoke/" + slot);
+        registerTexture();
+    }
+
+    private void registerTexture() {
         Minecraft.getInstance().getTextureManager().register(texture, new AbstractTexture() {
             {
                 texture = target.getColorTexture();
@@ -51,6 +55,11 @@ public final class KaraokePopupTarget implements AutoCloseable {
 
     void paint(KaraokePopup view, double x, double y) {
         var client = Minecraft.getInstance();
+        int width = view.width * DENSITY, height = view.height * DENSITY;
+        if (target.width != width || target.height != height) {
+            target.resize(width, height);
+            registerTexture();
+        }
         if (renderer == null) {
             state = new GuiRenderState();
             renderer = new GuiRenderer(state, client.gameRenderer.featureRenderDispatcher(), List.of());
@@ -59,7 +68,7 @@ public final class KaraokePopupTarget implements AutoCloseable {
         var projection = RenderSystem.getProjectionMatrixBuffer();
         var projectionType = RenderSystem.getProjectionType();
         try {
-            view.overlay.renderWorldPopup(context, WIDTH, HEIGHT, x, y);
+            view.overlay.renderWorldPopup(context, view.width, view.height, x, y);
             RenderSystem.getDevice().createCommandEncoder().clearColorAndDepthTextures(
                     target.getColorTexture(), CLEAR, target.getDepthTexture(), 0);
             active = target;
