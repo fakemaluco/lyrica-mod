@@ -53,8 +53,8 @@ class LyricsSettingsCatalogTest {
         var entries = c.entries(Category.CUSTOM);
         entries.stream().filter(e -> e.key.equals(LyricsSettingsCatalog.PREFIX + "width")).findFirst().orElseThrow().setNumber.accept(300);
         entries.stream().filter(e -> e.key.equals(LyricsSettingsCatalog.PREFIX + "height")).findFirst().orElseThrow().setNumber.accept(280);
-        assertThat(p.getPopupWidth(true, false)).isEqualTo(300);
-        assertThat(p.getPopupHeight(true, false)).isEqualTo(280);
+        assertThat(p.getPopupWidth(dev.relaylyrics.client.music.PopupSizeProfile.CANVAS_WITH_LYRICS)).isEqualTo(300);
+        assertThat(p.getPopupHeight(dev.relaylyrics.client.music.PopupSizeProfile.CANVAS_WITH_LYRICS)).isEqualTo(280);
         assertThat(p.getLyricsWidth()).isEqualTo(210);
         assertThat(p.getLyricsHeight()).isEqualTo(130);
     }
@@ -69,7 +69,8 @@ class LyricsSettingsCatalogTest {
         assertThat(c.categories()).endsWith(Category.WORLD);
         for (var category : c.categories()) if (category != Category.SOURCES) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(category == Category.GENERAL ? 10 : 8);
         assertThat(keys(c, Category.ADVANCED)).doesNotContain("world_lyrics");
-        assertThat(keys(c, Category.WORLD)).contains("world_lyrics", "world_style", "world_terrain_light", "world_position", "world_luminance");
+        assertThat(keys(c, Category.WORLD)).contains("world_lyrics", "world_style", "world_presentation_intensity", "world_cinematic", "world_reposition")
+                .doesNotContain("world_direction", "group.world_gemini");
         assertThat(keys(c, Category.GENERAL)).doesNotContain("world_lyrics").contains("lyrics_delay", "lyrics_delay_reset");
     }
     @Test void openingEveryCategoryDoesNotMigrateOrOverwriteCustomValues() throws Exception {
@@ -179,7 +180,7 @@ class LyricsSettingsCatalogTest {
                 var translations = ProtocolCodec.mapper().readTree(stream);
                 var p = new ClientPreferences(); var c = catalog(p);
                 p.setWorldLyrics(true); LyricsSettingsPresets.applyBackground(p, LyricsSettingsPresets.Background.REACTIVE);
-                for (String group : List.of("languages", "translation_provider", "updates", "support", "effects", "background", "world", "typography", "experimental", "performance", "interaction", "connection_details", "motion_artwork", "source_priority")) c.expand(group);
+                for (String group : List.of("languages", "translation_provider", "updates", "support", "effects", "background", "world", "typography", "experimental", "performance", "interaction", "connection_details", "motion_artwork", "source_priority", "world_gemini")) c.expand(group);
                 for (String provider : List.of("Google", "DeepL", "Gemini", "OpenAi")) {
                     p.setTranslationProvider(provider);
                 for (boolean automatic : List.of(true, false)) {

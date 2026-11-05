@@ -10,6 +10,48 @@ import java.util.ArrayList;
 import dev.fandroid.client.music.MultiSourceLyricsClient;
 
 public final class ClientPreferences {
+    @com.fasterxml.jackson.annotation.JsonProperty
+    private java.util.Map<dev.fandroid.client.music.PopupSizeProfile, dev.fandroid.client.music.PopupSizeProfile.Size> popupSizes =
+            new java.util.EnumMap<>(dev.fandroid.client.music.PopupSizeProfile.class);
+    private Double popupPreciseX, popupPreciseY;
+    public double getPopupPreciseX() { return popupPreciseX != null && Double.isFinite(popupPreciseX) ? popupPreciseX : getLyricsX(); }
+    public double getPopupPreciseY() { return popupPreciseY != null && Double.isFinite(popupPreciseY) ? popupPreciseY : getLyricsY(); }
+    public void setPopupPosition(double x, double y) {
+        if (!Double.isFinite(x) || !Double.isFinite(y)) return;
+        lyricsX = (int) Math.round(x); lyricsY = (int) Math.round(y);
+        popupPreciseX = x; popupPreciseY = y;
+    }
+    public int getPopupWidth(dev.fandroid.client.music.PopupSizeProfile profile) {
+        if (profile == null) profile = dev.fandroid.client.music.PopupSizeProfile.COVER_WITH_LYRICS;
+        var size = popupSizes == null ? null : popupSizes.get(profile);
+        return size == null ? getPopupWidth(profile.video(), profile == dev.fandroid.client.music.PopupSizeProfile.CANVAS_ONLY && lyricsSquareVideoSize > 0)
+                : Math.clamp(size.width(), 96, 900);
+    }
+    public int getPopupHeight(dev.fandroid.client.music.PopupSizeProfile profile) {
+        if (profile == null) profile = dev.fandroid.client.music.PopupSizeProfile.COVER_WITH_LYRICS;
+        var size = popupSizes == null ? null : popupSizes.get(profile);
+        return size == null ? getPopupHeight(profile.video(), profile == dev.fandroid.client.music.PopupSizeProfile.CANVAS_ONLY && lyricsSquareVideoSize > 0)
+                : Math.clamp(size.height(), 64, 600);
+    }
+    public void setPopupWidth(dev.fandroid.client.music.PopupSizeProfile profile, int value) {
+        if (profile == null) profile = dev.fandroid.client.music.PopupSizeProfile.COVER_WITH_LYRICS;
+        int height = getPopupHeight(profile);
+        if (popupSizes == null) popupSizes = new java.util.EnumMap<>(dev.fandroid.client.music.PopupSizeProfile.class);
+        popupSizes.put(profile, new dev.fandroid.client.music.PopupSizeProfile.Size(Math.clamp(value, 96, 900), height));
+    }
+    public void setPopupHeight(dev.fandroid.client.music.PopupSizeProfile profile, int value) {
+        if (profile == null) profile = dev.fandroid.client.music.PopupSizeProfile.COVER_WITH_LYRICS;
+        int width = getPopupWidth(profile);
+        if (popupSizes == null) popupSizes = new java.util.EnumMap<>(dev.fandroid.client.music.PopupSizeProfile.class);
+        popupSizes.put(profile, new dev.fandroid.client.music.PopupSizeProfile.Size(width, Math.clamp(value, 64, 600)));
+    }
+
+    public enum LineLyricsAnimation { TOP_TO_BOTTOM, TIMED }
+    private LineLyricsAnimation lineLyricsAnimation = LineLyricsAnimation.TOP_TO_BOTTOM;
+    public LineLyricsAnimation getLineLyricsAnimation() {
+        return lineLyricsAnimation == null ? LineLyricsAnimation.TOP_TO_BOTTOM : lineLyricsAnimation;
+    }
+    public void setLineLyricsAnimation(LineLyricsAnimation value) { lineLyricsAnimation = value; }
     private boolean romanizationUnderLine = true;
     private boolean automaticTranslation;
     private String translationLanguage = java.util.Locale.getDefault().getLanguage();
@@ -122,6 +164,9 @@ public final class ClientPreferences {
     private double phoneHeight = 0.55;
     private boolean islandKawarpBackground, islandVideoCover;
     private boolean jadeIsland = true;
+    private boolean islandLyrics;
+    public boolean isIslandLyrics() { return islandLyrics; }
+    public void setIslandLyrics(boolean value) { islandLyrics=value; }
     public boolean isJadeIsland() { return jadeIsland; }
     public void setJadeIsland(boolean value) { jadeIsland=value; }
     public boolean isIslandKawarpBackground() { return islandKawarpBackground; }
@@ -387,9 +432,9 @@ public final class ClientPreferences {
     public boolean isLyricsClickSeek() { return lyricsClickSeek; }
     public void setLyricsClickSeek(boolean value) { lyricsClickSeek = value; }
     public int getLyricsX() { return lyricsX; }
-    public void setLyricsX(int lyricsX) { this.lyricsX = lyricsX; }
+    public void setLyricsX(int lyricsX) { popupPreciseX = null; this.lyricsX = lyricsX; }
     public int getLyricsY() { return lyricsY; }
-    public void setLyricsY(int lyricsY) { this.lyricsY = lyricsY; }
+    public void setLyricsY(int lyricsY) { popupPreciseY = null; this.lyricsY = lyricsY; }
     public int getPopupWidth(boolean video, boolean square) {
         return square ? getPopupHeight(video, true) : video && lyricsVideoWidth > 0
                 ? Math.clamp(lyricsVideoWidth, 96, 900) : getLyricsWidth();

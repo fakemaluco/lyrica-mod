@@ -46,7 +46,7 @@ class WorldLyricsPreferencesTest {
         assertThat(preferences.isWorldLyricsPlayerReactions()).isTrue();
         assertThat(preferences.getWorldLyricsSize()).isEqualTo(1.2);
         assertThat(preferences.isWorldLyricsAutoWalls()).isTrue();
-        assertThat(preferences.isWorldLyricsCinematic()).isTrue();
+        assertThat(preferences.isWorldLyricsCinematic()).isFalse();
         assertThat(preferences.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.SIGN);
         assertThat(preferences.getWorldLyricsMinimumDistance()).isEqualTo(6);
         assertThat(preferences.getWorldLyricsMaximumDistance()).isEqualTo(192);

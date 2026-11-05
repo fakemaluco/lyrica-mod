@@ -41,7 +41,7 @@ class DesktopLyricsEngine private constructor(
         this(cacheDirectory, runtime.providers, runtime.nativeNames, runtime.http)
 
     data class Source(val id: String, val name: String, val defaultEnabled: Boolean)
-    data class Result(
+    data class Result @JvmOverloads constructor(
         val ttml: String? = null,
         val lrc: String? = null,
         val plain: String? = null,
@@ -55,6 +55,7 @@ class DesktopLyricsEngine private constructor(
         val uploader: String = "",
         val uploaderAvatar: String = "",
         val sourceId: String = "",
+        val wordTimingAvailable: Boolean = false,
     ) {
         fun found() = !ttml.isNullOrBlank() || !lrc.isNullOrBlank() || !plain.isNullOrBlank()
     }
@@ -120,6 +121,15 @@ class DesktopLyricsEngine private constructor(
                     val hit = known["spicy_lyrics"] as? ProviderResult.Hit ?: return progress
                     val quality = hit.payload.measuredQuality()
                     if (quality == RemoteLyricsQuality.NONE || ranking.filtered("spicy_lyrics", hit.payload, quality) != null) return progress
+                    if (quality != RemoteLyricsQuality.WORD_SYNCED && "lrc_red" in enabled) {
+                        val wordSync = (known["lrc_red"] as? ProviderResult.Hit)?.payload
+                        val lrcRed = descriptors.firstOrNull { it.id == "lrc_red" }
+                        if (lrcRed != null && wordSync?.measuredQuality() == RemoteLyricsQuality.WORD_SYNCED
+                            && ranking.filtered(lrcRed.id, wordSync, RemoteLyricsQuality.WORD_SYNCED) == null) {
+                            return RemoteLyricsResolution.Found(
+                                RemoteLyricsSelection(lrcRed, wordSync, RemoteLyricsQuality.WORD_SYNCED), progress.attempts)
+                        }
+                    }
                     val descriptor = descriptors.firstOrNull { it.id == "spicy_lyrics" } ?: return progress
                     return RemoteLyricsResolution.Found(RemoteLyricsSelection(descriptor, hit.payload, quality), progress.attempts)
                 }
@@ -136,12 +146,19 @@ class DesktopLyricsEngine private constructor(
                     if (resolution == null) it.copy(diagnostics = it.diagnostics + "\nLookup deadline reached; higher sources will be retried")
                     else it
                 } ?: latest
-                if (result.found()) runCatching {
+                val finalResult = result.copy(wordTimingAvailable = known.any { (id, reply) ->
+                    val payload = (reply as? ProviderResult.Hit)?.payload ?: return@any false
+                    payload.measuredQuality() == RemoteLyricsQuality.WORD_SYNCED &&
+                        ranking.filtered(id, payload, RemoteLyricsQuality.WORD_SYNCED) == null
+                })
+                if (finalResult.found()) runCatching {
                     cacheDirectory.mkdirs()
                     val temporary = File(cacheDirectory, cache.name + ".${java.util.UUID.randomUUID()}.tmp")
                     val found = finalResolution as? RemoteLyricsResolution.Found
-                    val settled = resolution != null && (preferSpicy && found?.selection?.source?.id == "spicy_lyrics" || settled(request, resolution))
-                    val serialized = gson.toJson(Stored(System.currentTimeMillis() + CACHE_TTL_MS, result, settled,
+                    val preferredSettled = preferSpicy && found?.selection?.source?.id == "spicy_lyrics" &&
+                        ("lrc_red" !in enabled || found.selection.quality == RemoteLyricsQuality.WORD_SYNCED)
+                    val settled = resolution != null && (preferredSettled || settled(request, resolution))
+                    val serialized = gson.toJson(Stored(System.currentTimeMillis() + CACHE_TTL_MS, finalResult, settled,
                         found?.selection?.source?.id, found?.selection?.payload,
                         finalResolution?.attempts.orEmpty().filter { it.outcome == ProviderAttemptOutcome.MISS }.map { it.sourceId }))
                     if (serialized.toByteArray().size > MAX_CACHE_ENTRY_BYTES) return@runCatching
@@ -152,7 +169,7 @@ class DesktopLyricsEngine private constructor(
                     } finally { temporary.delete() }
                     pruneCache()
                 }
-                future.complete(result)
+                future.complete(finalResult)
             } catch (cancelled: CancellationException) {
                 future.cancel(false)
             } catch (error: Exception) {
@@ -160,6 +177,33 @@ class DesktopLyricsEngine private constructor(
             }
         }
         job.invokeOnCompletion { if (!future.isDone) future.cancel(false) }
+        future.whenComplete { _, _ -> if (future.isCancelled) job.cancel() }
+        return future
+    }
+
+    /** Only called by the desktop client after normal sources failed to supply word timing. */
+    fun requestLrcRedSync(title: String, artist: String, album: String, durationMs: Long): CompletableFuture<Result> {
+        val future = CompletableFuture<Result>()
+        val provider = providers.filterIsInstance<LrcRedLyricsProvider>().firstOrNull()
+            ?: return CompletableFuture.completedFuture(Result(diagnostics = "lrc.red model sync unavailable"))
+        val request = LyricsLookupRequest(artist, title, album,
+            (durationMs / 1000).coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
+        val job = scope.launch {
+            val output = withTimeoutOrNull(75_000L) {
+                when (val reply = provider.requestSync(request)) {
+                    is ModelSyncResult.Failed -> Result(diagnostics = reply.message)
+                    is ModelSyncResult.Synced -> {
+                        val payload = reply.payload.withoutFakeTiming().withWordTimingAsTtml()
+                        if (payload.ttmlLyrics?.let(::safeTtml) != true || payload.measuredQuality() != RemoteLyricsQuality.WORD_SYNCED)
+                            Result(diagnostics = "lrc.red returned no valid word timing")
+                        else result(RemoteLyricsResolution.Found(
+                            RemoteLyricsSelection(provider.descriptor, payload, RemoteLyricsQuality.WORD_SYNCED), emptyList()))
+                    }
+                }
+            } ?: Result(diagnostics = "lrc.red model sync timed out")
+            future.complete(output)
+        }
+        job.invokeOnCompletion { error -> if (error != null && !future.isDone) future.cancel(false) }
         future.whenComplete { _, _ -> if (future.isCancelled) job.cancel() }
         return future
     }
@@ -187,7 +231,7 @@ class DesktopLyricsEngine private constructor(
     }
 
     private fun cacheFile(request: LyricsLookupRequest, enabled: Set<String>, order: List<String>, preferSpicy: Boolean): File {
-        val identity = listOf("v5-recording-ids", preferSpicy.toString(), request.title.trim().lowercase(), request.artist.trim().lowercase(),
+        val identity = listOf("v7-lrc-red-word-priority", preferSpicy.toString(), request.title.trim().lowercase(), request.artist.trim().lowercase(),
             request.album.trim().lowercase(), request.durationSeconds.toString(), request.spotifyTrackId.orEmpty(),
             request.alternateSpotifyTrackIds.joinToString(","),
             enabled.sorted().joinToString(","), order.joinToString(",")).joinToString("\u001f")

@@ -13,6 +13,7 @@ import com.tx24.spicyplayer.lyrics.spicy.parser.TtmlLyricsParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Test
 
 class ProviderTextTest {
@@ -124,6 +125,39 @@ class ProviderTextTest {
         // No TTML, no answer.
         assertEquals(null, LrcRedLyricsProvider.songPayload(song("\"byModel\":false")))
         assertEquals(null, LrcRedLyricsProvider.songPayload(song(source(""))))
+    }
+
+    @Test fun lrcRedRequestsModelOnlyWhenTheMatchingRecordingLacksWordTiming() = kotlinx.coroutines.runBlocking {
+        val gson = Gson()
+        val line = """<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="1s" end="3s">Hello world</p></div></body></tt>"""
+        val words = """<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="1s" end="3s"><span begin="1s" end="2s">Hello</span> <span begin="2s" end="3s">world</span></p></div></body></tt>"""
+        val requests = mutableListOf<String>()
+        var synced = false
+        val client = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val path = request.url.encodedPath
+            requests += "${request.method} $path"
+            val body = when (path) {
+                "/search.json" -> """{"hits":[{"isrc":"USABC2600001","title":"Hello World","artist":"Fixture Artist","album":"Fixture Album","duration":120}]}"""
+                "/s/USABC2600001.song.json" -> gson.toJson(mapOf("source" to if (synced) words else line, "byModel" to synced))
+                "/s/USABC2600001/sync" -> {
+                    assertEquals("POST", request.method)
+                    synced = true
+                    gson.toJson(mapOf("source" to words))
+                }
+                else -> error("Unexpected request $path")
+            }
+            okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1)
+                .code(200).message("OK").body(body.toResponseBody()).build()
+        }.build()
+        val provider = LrcRedLyricsProvider(client, gson)
+        val track = com.tx24.spicyplayer.network.data.LyricsLookupRequest("Fixture Artist", "Hello World", "Fixture Album", 120)
+        repeat(2) {
+            val result = provider.requestSync(track) as ModelSyncResult.Synced
+            assertEquals(RemoteLyricsQuality.WORD_SYNCED, result.payload.measuredQuality())
+            assertEquals(LyricsOrigins.LRC_RED_AI_NAME, result.payload.attribution?.originName)
+        }
+        assertEquals(1, requests.count { it.startsWith("POST ") })
     }
 
     @Test fun spicyLyricsApiErrorsSayWhy() {

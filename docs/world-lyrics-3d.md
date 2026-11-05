@@ -1,5 +1,8 @@
 # Letras no mundo 3D
 
+A composição e os controles atuais estão no [guia de letras cinematográficas](cinematic-lyrics.md).
+Esse guia substitui as descrições históricas de apresentações e padrões abaixo.
+
 Na aba **Experimental**, ative **Letras posicionadas no mundo**. A aba **Mundo 3D** aparece
 imediatamente e desaparece ao desligar a opção. Nela, escolha a **Intensidade 3D**
 (Suave, Normal ou Intensa) e configure **Reagir ao jogador**. O controle geral
@@ -42,10 +45,25 @@ correções, voo quase parado e mudanças de página preservam a posição. Nova
 podem reutilizar a âncora considerando a trajetória de voo e a inclinação completa,
 mesmo quando o jogador olha para o lado ou usa uma câmera afastada.
 
-Durante uma sessão ativa do **Ji AFK Cinematic**, as letras 3D ficam suspensas e a
-legenda cinematográfica assume a exibição, inclusive com elytra. As tomadas do Ji não
-recriam âncoras nem exibem letras duplicadas. Ao sair da sessão, o modo 3D retoma com
-uma nova âncora na posição atual; pausar a música também esconde a legenda do Ji.
+Durante uma sessão ativa do **Ji AFK Cinematic**, as letras 3D continuam visíveis
+quando o modo Mundo 3D está ligado. A posição usa o enquadramento da câmera do Ji,
+sem herdar a trajetória ou a velocidade do jogador com elytra. As dimensões e o
+eixo vertical se adaptam à câmera, às barras pretas e ao espaço da legenda inferior.
+Cortes, deslocamentos
+e panorâmicas amplas reposicionam a frase com uma entrada suave de 240 ms; pequenas
+oscilações preservam a âncora. O enquadramento continua se adaptando com a música
+pausada. Ao sair do AFK, uma nova âncora acompanha a câmera do jogador. A legenda
+cinematográfica continua disponível e só aparece durante a reprodução.
+
+Em **Personalizar > Efeitos > Animação das letras por linha**, **De cima para baixo**
+é o padrão: o preenchimento acompanha toda a duração da linha, do início até o fim,
+com um degradê vertical que cobre todas as linhas quebradas. O efeito não inventa tempos por palavra. **Por tempo**
+restaura o preenchimento horizontal anterior. Letras com sincronização por palavra
+preservam seus tempos e animações; sem animações, a frase acende imediatamente.
+O brilho suave da frase cresce até o meio do tempo da linha e diminui até o fim,
+com uma mola compartilhada por todas as palavras e linhas quebradas. As intensidades
+Suave, Normal e Forte também controlam esse halo. Ele aparece no pop-up e na legenda
+do Ji; o modo simples e a opção de desativar animações suprimem o brilho.
 
 Ao criar uma âncora livre, o terreno sob o centro e as extremidades é medido e a
 composição sobe quando seu limite inferior encostaria no chão.

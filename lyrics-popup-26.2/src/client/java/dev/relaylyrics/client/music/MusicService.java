@@ -21,6 +21,7 @@ import dev.lyrica.engine.DesktopArtistArtworkEngine;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
@@ -46,6 +47,7 @@ public final class MusicService implements AutoCloseable {
     private volatile String sourceDiagnostics = "";
     private volatile boolean closed;
     private volatile CompletableFuture<MultiSourceLyricsClient.Result> remoteLookup;
+    private final LinkedHashMap<String, MultiSourceLyricsClient.Result> modelSyncByTrack = new LinkedHashMap<>();
     private final SecureTtmlParser ttmlParser = new SecureTtmlParser();
     private final SpicyLyricsParser spicyParser = new SpicyLyricsParser();
     private final Path importsFolder = FabricLoader.getInstance().getConfigDir().resolve("relaylyrics/lyrics/imports");
@@ -57,6 +59,7 @@ public final class MusicService implements AutoCloseable {
     private final LyricsOverlay overlay;
     private final ClientPreferences preferences;
     private final GeminiShaderSession geminiShaders;
+    private final GeminiLyricsSession geminiLyrics;
     private final LyricsTranslationSession translations;
     private final ReleaseSupport support;
     private final SpotifyAccountClient spotifyAccount;
@@ -70,6 +73,7 @@ public final class MusicService implements AutoCloseable {
     private volatile String importedLyricsKey;
     private volatile String spicyLyricsKey;
     private volatile String preferredLyricsKey;
+    private String lrcRedWordKey;
     private volatile List<ImportedLyricsClient.Candidate> importCandidates = List.of();
     private volatile String lyricsStatus = "Start playback to find lyrics";
     private volatile String artworkTrackKey;
@@ -83,6 +87,7 @@ public final class MusicService implements AutoCloseable {
         overlay.setTranslationRequest(translations::request);
         geminiShaders = new GeminiShaderSession(preferences, FabricLoader.getInstance().getConfigDir().resolve("lyrica/gemini-shaders"),
                 task -> net.minecraft.client.Minecraft.getInstance().execute(task));
+        geminiLyrics = new GeminiLyricsSession(preferences, FabricLoader.getInstance().getConfigDir().resolve("lyrica/gemini-lyrics"));
         if (preferences.isLyricsRomanization()) LyricsRomanizer.warmup();
         lyricsClient = new MultiSourceLyricsClient(importsFolder.resolveSibling("sources"), SpicyLyricsApiClient.configuredKey(preferences.getSpicyLyricsApiKey()));
         motionEngine = new DesktopMotionArtworkEngine(importsFolder.resolveSibling("motion").toFile());
@@ -353,15 +358,45 @@ public final class MusicService implements AutoCloseable {
     private synchronized void startRemoteLookup(PlaybackSnapshot value, String key, List<String> ids) {
         if (!isCurrentLookup(key)) return;
         remoteLookup = lyricsClient.find(value, ids, preferences.getLyricsSources(), preferences.getLyricsSourceOrder(), preferences.isPreferSpicyLyrics(), result -> applySourceResult(key, result));
-        remoteLookup.thenAccept(result -> finishSourceLookup(key, result)).exceptionally(error -> {
+        remoteLookup.thenAccept(result -> finishSourceLookup(value, key, result)).exceptionally(error -> {
             failSourceLookup(key);
             return null;
         });
     }
 
-    private synchronized void finishSourceLookup(String key, MultiSourceLyricsClient.Result result) {
+    private synchronized void finishSourceLookup(PlaybackSnapshot track, String key, MultiSourceLyricsClient.Result result) {
         if (!isCurrentLookup(key)) return;
         applySourceResult(key, result);
+        if (preferences.getLyricsSources().contains("lrc_red")
+                && !hasWordTiming(overlay.document()) && !result.wordTimingAvailable()
+                && !result.document().map(MusicService::hasWordTiming).orElse(false)) {
+            var cached = modelSyncByTrack.get(lookupTrackKey);
+            if (cached != null) {
+                applySourceResult(key, cached, true);
+                return;
+            }
+            if (!modelSyncByTrack.containsKey(lookupTrackKey)) {
+                modelSyncByTrack.put(lookupTrackKey, null);
+                if (modelSyncByTrack.size() > 128) modelSyncByTrack.pollFirstEntry();
+                remoteLookup = lyricsClient.requestLrcRedSync(track);
+                remoteLookup.thenAccept(generated -> finishModelSync(key, generated));
+                return;
+            }
+        }
+        reportMissingLyrics(result);
+    }
+
+    private synchronized void finishModelSync(String key, MultiSourceLyricsClient.Result result) {
+        if (!isCurrentLookup(key) || !preferences.getLyricsSources().contains("lrc_red") || hasWordTiming(overlay.document())) return;
+        sourceDiagnostics += "\n" + result.diagnostics();
+        if (result.document().filter(MusicService::hasWordTiming).isPresent()) {
+            modelSyncByTrack.put(lookupTrackKey, result);
+            applySourceResult(key, result, true);
+        }
+        else reportMissingLyrics(result);
+    }
+
+    private void reportMissingLyrics(MultiSourceLyricsClient.Result result) {
         if (result.document().isEmpty() && overlay.document().lines().isEmpty()) {
             markUnavailable(preferences.getLyricsSources().isEmpty()
                     ? "No lyrics sources enabled" : "No matching lyrics in enabled sources");
@@ -381,18 +416,26 @@ public final class MusicService implements AutoCloseable {
     }
 
     private synchronized void applySourceResult(String key, MultiSourceLyricsClient.Result result) {
+        applySourceResult(key, result, false);
+    }
+
+    private synchronized void applySourceResult(String key, MultiSourceLyricsClient.Result result, boolean modelUpgrade) {
         if (!isCurrentLookup(key)) return;
         sourceDiagnostics = result.diagnostics();
         if (result.document().isEmpty()) return;
         LyricsDocument document = result.document().get();
         boolean preferred = preferences.isPreferSpicyLyrics() && "spicy_lyrics".equals(result.sourceId());
-        if (preferences.isPreferSpicyLyrics() && key.equals(preferredLyricsKey) && !preferred) return;
+        boolean lrcRedWord = "lrc_red".equals(result.sourceId()) && hasWordTiming(document);
+        if (preferences.isPreferSpicyLyrics() && key.equals(preferredLyricsKey) && !preferred
+                && (!(modelUpgrade || lrcRedWord) || hasWordTiming(overlay.document()) || !hasWordTiming(document))) return;
+        if (preferred && key.equals(lrcRedWordKey) && !hasWordTiming(document)) return;
         if (preferred && key.equals(preferredLyricsKey) && hasWordTiming(overlay.document()) && !hasWordTiming(document)) return;
         if (preferred) preferredLyricsKey = key;
         // A late line-only source must not replace word-synced companion/cache lyrics.
         if (!(preferences.isPreferSpicyLyrics() && "spicy_lyrics".equals(result.sourceId()))
                 && key.equals(spicyLyricsKey) && hasWordTiming(overlay.document()) && !hasWordTiming(document)) return;
         if (overlay.document().equals(document)) return;
+        lrcRedWordKey = lrcRedWord ? key : null;
         spicyLyricsKey = key;
         lyricsStatus = "Lyrics ready";
         overlay.setLyrics(document, "LYRICS");
@@ -442,6 +485,7 @@ public final class MusicService implements AutoCloseable {
     public PlaybackSnapshot snapshot() { return snapshot.get(); }
     public long positionMillis() { return clock.positionMillis(); }
     public GeminiShaderSession geminiShaders() { return geminiShaders; }
+    public GeminiLyricsSession geminiLyrics() { return geminiLyrics; }
     public LyricsTranslationSession translations() { return translations; }
     public ReleaseSupport support() { return support; }
     public String diagnosticReport() { return support.diagnosticReport(preferences, overlay.document(), bridgeAlive()); }
@@ -449,7 +493,8 @@ public final class MusicService implements AutoCloseable {
         var current = overlay.document();
         var translated = translations.tick(current);
         if (translated != current && overlay.document() == current) overlay.setLyrics(translated);
-        support.tick(); geminiShaders.tick(snapshot.get(), clock.positionMillis(), artwork.accentColor()); }
+        support.tick(); geminiShaders.tick(snapshot.get(), clock.positionMillis(), artwork.accentColor());
+        geminiLyrics.tick(snapshot.get(), overlay.document(), overlay.worldPlayback().positionMillis()); }
     public String pairingCode() {
         return connector instanceof MediaBridgeConnector bridge ? bridge.pairingCode() : null;
     }
@@ -633,6 +678,8 @@ public final class MusicService implements AutoCloseable {
                 return;
             }
             if (!key.equals(lookupKey) || document.lines().isEmpty()) return;
+            if (key.equals(lrcRedWordKey) && !wordSynced) return;
+            if (wordSynced) lrcRedWordKey = null;
             if (preferences.isPreferSpicyLyrics() && key.equals(preferredLyricsKey) && hasWordTiming(overlay.document()) && !wordSynced) return;
             if (preferences.isPreferSpicyLyrics()) preferredLyricsKey = key;
             spicyLyricsKey = key;
@@ -746,6 +793,7 @@ public final class MusicService implements AutoCloseable {
         motionEngine.close();
         lyricsClient.close();
         geminiShaders.close();
+        geminiLyrics.close();
         translations.close();
         support.close();
         artwork.close();

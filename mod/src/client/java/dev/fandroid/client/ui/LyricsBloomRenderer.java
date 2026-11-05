@@ -80,6 +80,35 @@ final class LyricsBloomRenderer implements AutoCloseable {
                 scale, alpha << 24, blur);
     }
 
+    /** At subpixel sizes, filtered coverage keeps thin strokes from vanishing. */
+    boolean drawMinifiedLineFill(DrawContext context, Text text, double x, double y, double scale,
+                                 double opacity, double progress, double phraseTop, double phraseHeight,
+                                 int futureColor, int activeColor) {
+        var surface = cache.request(text, 0);
+        if (surface == null) return false;
+        var mask = surface.mask();
+        double pixelScale = scale / mask.pixelsPerUnit();
+        double top = y + mask.top() * scale;
+        var bands = LyricsEffectRaster.verticalTintBands(mask.height(),
+                (top + pixelScale * .5 - phraseTop) / phraseHeight, pixelScale / phraseHeight,
+                progress, futureColor, activeColor);
+        GuiTransform.push(context);
+        try {
+            GuiTransform.translate(context, (float) (x + mask.left() * scale), (float) top);
+            GuiTransform.scale(context, (float) pixelScale, (float) pixelScale);
+            for (var band : bands) {
+                int alpha = (int) Math.round((band.color() >>> 24) * Math.clamp(opacity, 0, 1));
+                int color = alpha << 24 | band.color() & 0xFFFFFF;
+                int rows = band.endRow() - band.firstRow();
+                PlatformTextures.drawTinted(context, surface.texture(), 0, band.firstRow(), mask.width(), rows,
+                        0, band.firstRow(), mask.width(), rows, mask.width(), mask.height(), color);
+            }
+        } finally {
+            GuiTransform.pop(context);
+        }
+        return true;
+    }
+
     private void drawMask(DrawContext context, Text text, double x, double y,
                           double scale, int color, double radius) {
         var surface = cache.request(text, radius);

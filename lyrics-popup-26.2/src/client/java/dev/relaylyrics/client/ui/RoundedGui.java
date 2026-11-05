@@ -116,13 +116,27 @@ public final class RoundedGui {
     /** Runtime-supersampled equivalent of a CSS rounded background. */
     public static void smoothFill(GuiGraphicsExtractor context, int x, int y, int width, int height,
                                   int radius, int color) {
+        smoothFillClipped(context, x, y, width, height, radius, x + width, y, color);
+    }
+
+    /** Clips only the fill geometry, keeping the rounded ends under fractional GUI transforms. */
+    public static void smoothFillPortion(GuiGraphicsExtractor context, int x, int y, int width, int height,
+                                         int radius, int amount, boolean vertical, int color) {
+        if (amount <= 0) return;
+        int right = x + (vertical ? width : Math.min(amount, width));
+        int top = y + (vertical ? Math.max(0, height - amount) : 0);
+        smoothFillClipped(context, x, y, width, height, radius, right, top, color);
+    }
+
+    private static void smoothFillClipped(GuiGraphicsExtractor context, int x, int y, int width, int height,
+                                          int radius, int right, int top, int color) {
         if (width <= 0 || height <= 0 || color >>> 24 == 0) return;
         int r = radius(width, height, radius);
         if (r == 0) {
-            context.fill(x, y, x + width, y + height, color);
+            context.fill(x, top, right, y + height, color);
             return;
         }
-        drawMaskNineSlice(context, fillTexture(r), x, y, width, height, color);
+        drawMaskNineSlice(context, fillTexture(r), x, y, width, height, right, top, color);
     }
 
     public static void gradient(GuiGraphicsExtractor context, int x, int y, int width, int height,
@@ -415,10 +429,10 @@ public final class RoundedGui {
     }
 
     private static void drawMaskNineSlice(GuiGraphicsExtractor context, MaskTexture mask,
-                                          int x, int y, int width, int height, int color) {
+                                          int x, int y, int width, int height, int right, int top, int color) {
         int cap = Math.min(mask.cap(), Math.min(width, height) / 2);
         if (cap <= 0) {
-            context.fill(x, y, x + width, y + height, color);
+            context.fill(x, top, right, y + height, color);
             return;
         }
         int sampleCap = mask.cap() * BORDER_SUPERSAMPLE;
@@ -426,32 +440,39 @@ public final class RoundedGui {
         int middleWidth = width - cap * 2;
         int middleHeight = height - cap * 2;
         drawMaskPiece(context, mask, x, y, cap, cap,
-                0, 0, sampleCap, sampleCap, color);
+                0, 0, sampleCap, sampleCap, right, top, color);
         drawMaskPiece(context, mask, x + cap, y, middleWidth, cap,
-                sampleCap, 0, sampleMiddle, sampleCap, color);
+                sampleCap, 0, sampleMiddle, sampleCap, right, top, color);
         drawMaskPiece(context, mask, x + width - cap, y, cap, cap,
-                sampleCap + sampleMiddle, 0, sampleCap, sampleCap, color);
+                sampleCap + sampleMiddle, 0, sampleCap, sampleCap, right, top, color);
         drawMaskPiece(context, mask, x, y + cap, cap, middleHeight,
-                0, sampleCap, sampleCap, sampleMiddle, color);
+                0, sampleCap, sampleCap, sampleMiddle, right, top, color);
         drawMaskPiece(context, mask, x + cap, y + cap, middleWidth, middleHeight,
-                sampleCap, sampleCap, sampleMiddle, sampleMiddle, color);
+                sampleCap, sampleCap, sampleMiddle, sampleMiddle, right, top, color);
         drawMaskPiece(context, mask, x + width - cap, y + cap, cap, middleHeight,
-                sampleCap + sampleMiddle, sampleCap, sampleCap, sampleMiddle, color);
+                sampleCap + sampleMiddle, sampleCap, sampleCap, sampleMiddle, right, top, color);
         drawMaskPiece(context, mask, x, y + height - cap, cap, cap,
-                0, sampleCap + sampleMiddle, sampleCap, sampleCap, color);
+                0, sampleCap + sampleMiddle, sampleCap, sampleCap, right, top, color);
         drawMaskPiece(context, mask, x + cap, y + height - cap, middleWidth, cap,
-                sampleCap, sampleCap + sampleMiddle, sampleMiddle, sampleCap, color);
+                sampleCap, sampleCap + sampleMiddle, sampleMiddle, sampleCap, right, top, color);
         drawMaskPiece(context, mask, x + width - cap, y + height - cap, cap, cap,
-                sampleCap + sampleMiddle, sampleCap + sampleMiddle, sampleCap, sampleCap, color);
+                sampleCap + sampleMiddle, sampleCap + sampleMiddle, sampleCap, sampleCap, right, top, color);
     }
 
     private static void drawMaskPiece(GuiGraphicsExtractor context, MaskTexture mask,
                                       int x, int y, int width, int height,
                                       int sourceX, int sourceY, int sourceWidth, int sourceHeight,
-                                      int color) {
-        if (width <= 0 || height <= 0) return;
-        PlatformTextures.drawTinted(context, mask.id(), x, y, width, height,
-                sourceX, sourceY, sourceWidth, sourceHeight,
+                                      int right, int top, int color) {
+        int drawnWidth = Math.min(width, right - x);
+        int skippedRows = Math.max(0, top - y);
+        int drawnHeight = height - skippedRows;
+        if (drawnWidth <= 0 || drawnHeight <= 0) return;
+        int sampledWidth = drawnWidth == width ? sourceWidth
+                : Math.max(1, (int) Math.round(sourceWidth * (drawnWidth / (double) width)));
+        int skippedTexels = skippedRows == 0 ? 0
+                : Math.min(sourceHeight - 1, (int) Math.round(sourceHeight * (skippedRows / (double) height)));
+        PlatformTextures.drawTinted(context, mask.id(), x, y + skippedRows, drawnWidth, drawnHeight,
+                sourceX, sourceY + skippedTexels, sampledWidth, sourceHeight - skippedTexels,
                 mask.textureSize(), mask.textureSize(), color);
     }
 

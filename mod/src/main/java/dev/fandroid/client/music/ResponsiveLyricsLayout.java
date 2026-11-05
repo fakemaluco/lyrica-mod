@@ -14,7 +14,7 @@ public final class ResponsiveLyricsLayout {
     public static double contentScale(double width, double height) {
         return Math.max(.05, Math.min(1, Math.min(width / 240.0, height / 160.0)));
     }
-    public static Bounds popup(int viewportWidth, int viewportHeight, int x, int y, int width, int height) {
+    public static Bounds popup(int viewportWidth, int viewportHeight, double x, double y, int width, int height) {
         double s = scale(viewportWidth, viewportHeight);
         int margin = Math.max(2, (int) Math.round(12 * s));
         int w = Math.clamp((int) Math.round(width * s), 1, Math.max(1, viewportWidth - margin * 2));

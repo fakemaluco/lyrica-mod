@@ -1,0 +1,15 @@
+// Disposable local QA world and temporary Fabric mod path; does not save user preferences.
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        if (name == 'runClient') {
+            systemProperty 'lyrica.worldExperienceSelfTest', 'true'
+            systemProperty 'lyrica.popupPlacementSelfTest', 'true'
+            systemProperty 'lyrica.popupPlacementGuiScale', providers.gradleProperty('popupGuiScale').getOrElse('1')
+            systemProperty 'lyrica.worldProbeOutput', rootProject.layout.buildDirectory.dir('popup-placement-qa').get().asFile.absolutePath
+            def gameVersion = project.name == 'lyrics-popup' ? '1.21.1' : project.name == 'lyrics-popup-1.21.11' ? '1.21.11' : '26.2'
+            def versions = new groovy.json.JsonSlurper().parse(rootProject.file('build/xaero-align-qa/versions.json'))
+            systemProperty 'fabric.addMods', versions.find { it.minecraft == gameVersion }.file
+            args '--width', '1280', '--height', '720', '--quickPlaySingleplayer', 'LyricaWorldQA'
+        }
+    }
+}

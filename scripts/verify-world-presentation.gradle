@@ -1,0 +1,20 @@
+// Offline presentation fixtures: uses only the existing disposable LyricaWorldQA save.
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        if (name == 'runClient') {
+            systemProperty 'lyrica.worldExperienceSelfTest', 'true'
+            systemProperty 'lyrica.worldPresentationSelfTest', 'true'
+            def obstacles = providers.gradleProperty('worldObstacles').getOrElse('false') == 'true'
+            systemProperty 'lyrica.worldObstacleSelfTest', obstacles.toString()
+            systemProperty 'lyrica.worldPresentationStage', providers.gradleProperty('worldStage').getOrElse('0')
+            def compatibility = providers.gradleProperty('worldCompat').getOrElse('false') == 'true'
+            if (compatibility) {
+                if (project.name != 'lyrics-popup') throw new GradleException('The local world-compat fixture targets Minecraft 1.21.1 only')
+                def records = new groovy.json.JsonSlurper().parse(rootProject.file('build/world-compat/mods.json'))
+                systemProperty 'fabric.addMods', records.collect { it.file }.join(File.pathSeparator)
+            }
+            systemProperty 'lyrica.worldProbeOutput', rootProject.layout.buildDirectory.dir(obstacles ? (compatibility ? 'world-obstacle-compat-qa' : 'world-obstacle-qa') : (compatibility ? 'world-presentation-compat-qa' : 'world-presentation-qa')).get().asFile.absolutePath
+            args '--width', '1280', '--height', '720', '--quickPlaySingleplayer', 'LyricaWorldQA'
+        }
+    }
+}

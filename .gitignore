@@ -16,8 +16,8 @@ crash-reports/
 
 # Native and web build output
 media-bridge/target/
-spicetify-extension/node_modules/
-spicetify-extension/dist/
+integrations/spicetify-extension/node_modules/
+integrations/spicetify-extension/dist/
 release-assets/
 artifacts/
 

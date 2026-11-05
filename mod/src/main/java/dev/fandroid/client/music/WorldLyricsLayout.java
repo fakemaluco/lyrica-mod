@@ -88,6 +88,16 @@ public final class WorldLyricsLayout {
         return List.copyOf(result);
     }
 
+    /** Keep an ordinary cinematic phrase assembled instead of paging its earlier words away. */
+    public static List<Page> scenePages(List<WorldLyricsPlan.Token> tokens, boolean timed, boolean rtl,
+                                        double widthLimit, ToDoubleFunction<String> measure) {
+        List<Page> pages = plan(tokens, timed, rtl, widthLimit, measure);
+        long words = timed ? tokens.stream().filter(WorldLyricsPlan.Token::startsWord).count()
+                : tokens.stream().mapToLong(token -> WORD.matcher(token.text()).results().count()).sum();
+        if (pages.size() <= 1 || words > WorldLyricsPresentation.MAX_WORDS) return pages;
+        return List.of(page(pages.stream().flatMap(value -> value.rows().stream()).toList()));
+    }
+
     private static Page page(List<Row> rows) {
         return new Page(List.copyOf(rows), rows.stream().mapToDouble(Row::width).max().orElse(0),
                 rows.stream().mapToLong(Row::startMillis).min().orElse(0),

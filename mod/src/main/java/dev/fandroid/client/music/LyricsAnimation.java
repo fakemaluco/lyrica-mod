@@ -26,6 +26,51 @@ public final class LyricsAnimation {
 
     private LyricsAnimation() { }
 
+    /** Fill the complete phrase vertically over its supplied line timing. */
+    public static double lineProgress(long now, long start, long end, boolean animated) {
+        if (now < start) return 0;
+        if (!animated || now >= end) return 1;
+        return (now - start) / (double) (end - start);
+    }
+
+    /** Shared top-to-bottom feather, across the complete wrapped phrase, not each word. */
+    public static double lineHighlight(double progress, double verticalFraction) {
+        if (progress <= 0) return 0;
+        if (progress >= 1) return 1;
+        return Math.clamp((progress * 1.2 - verticalFraction) / .2, 0, 1);
+    }
+
+    /** Spicy Line mode: a natural spline through (0,0), (.5,1), (1,0). */
+    public static double spicyLineGlowTarget(double progress) {
+        if (progress <= 0 || progress >= 1) return 0;
+        return naturalThreePoint(progress, .5, 0, 1, 0);
+    }
+
+    /** One whole-phrase spring; wrapped rows and words share the same glow. */
+    public static final class LineGlowMotion {
+        private final SpringValue glow = new SpringValue(0, 1, .5);
+
+        public void update(double progress, boolean animated, double delta) {
+            if (!animated) { glow.snap(0); return; }
+            glow.setGoal(spicyLineGlowTarget(progress));
+            glow.step(delta);
+        }
+
+        public void reset(double progress, boolean animated) {
+            glow.snap(animated ? spicyLineGlowTarget(progress) : 0);
+        }
+
+        public double amount() { return Math.max(0, glow.position()); }
+    }
+
+    /** Spicy's line shadow: alpha = glow*.5, blur = 4+8*glow CSS pixels. */
+    public static ActiveGlowProfile lineGlowProfile(double glowAmount, double intensityMultiplier) {
+        double signal = Math.clamp(glowAmount, 0, 2);
+        if (signal <= .001) return ActiveGlowProfile.NONE;
+        double radius = (4 + 8 * signal) * 9.0 / 28.0;
+        return new ActiveGlowProfile(.5 * signal * intensityMultiplier, radius, 0, radius);
+    }
+
     /** Spicy Lyrics Mobile's normal renderer: natural splines and damped, interruptible springs.
      * Reference: spicylyrics/mobile LyricsAnimator.kt (AGPL-3.0), normal mode.
      * Elevation is positive upward, in em; the letter renderer doubles its vertical travel.

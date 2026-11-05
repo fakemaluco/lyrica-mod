@@ -401,6 +401,24 @@ public final class InventoryLyricsController {
         updatePointer(mouseX, mouseY, popupVisible);
     }
 
+    /** Exact bounds already used by the inventory collision bridge, plus rendered HUD modules. */
+    public static java.util.List<dev.relaylyrics.client.music.PopupAlignment.Target> popupAlignmentTargets() {
+        var client = Minecraft.getInstance();
+        int width = client.getWindow().getGuiScaledWidth(), height = client.getWindow().getGuiScaledHeight();
+        var targets = new java.util.ArrayList<>(dev.relaylyrics.client.music.PopupHudTargets.targets(width, height, true, System.nanoTime()));
+        var screen = client.gui.screen();
+        if (screen != null) {
+            var gui = guiBounds(screen);
+            InventoryOverlayCompat.Rect handled = gui == null ? null : new InventoryOverlayCompat.Rect(gui.left, gui.top, gui.right - gui.left, gui.bottom - gui.top);
+            int index = 0;
+            for (var r : InventoryOverlayCompat.occupiedAreas(screen, handled)) {
+                targets.add(new dev.relaylyrics.client.music.PopupAlignment.Target("gui-" + index++,
+                        r.equals(handled) ? "GUI" : "EMI / REI", new dev.relaylyrics.client.music.PopupAlignment.Rect(r.x(), r.y(), r.width(), r.height())));
+            }
+        }
+        return java.util.List.copyOf(targets);
+    }
+
     private static void updatePointer(double mouseX, double mouseY, boolean popupVisible) {
         LyricsOverlay overlay = RelayLyricsClient.overlay();
         if (overlay == null) return;
@@ -420,7 +438,8 @@ public final class InventoryLyricsController {
         if (!dragging || !popupVisible) return;
         PreferenceBounds before = snapshotPreferences();
         overlay.mouseDragged(mouseX, mouseY);
-        if (inventoryPopupEnabled() && !overlay.isPopupDocked() && !before.equals(snapshotPreferences()))
+        if (inventoryPopupEnabled() && !dev.relaylyrics.client.ui.GuiTransform.shiftDown()
+                && !overlay.isPopupDocked() && !before.equals(snapshotPreferences()))
             keepOutsideGui(activeScreen, before);
     }
 
@@ -835,7 +854,7 @@ public final class InventoryLyricsController {
             case TOGGLE_HEART -> MusicAction.TOGGLE_HEART;
             case NEXT -> MusicAction.NEXT;
             case CYCLE_REPEAT -> MusicAction.CYCLE_REPEAT;
-            case NONE, CLOSE, RESTORE, SETTINGS, TOGGLE_WORLD_LYRICS, TOGGLE_ROMANIZATION, TOGGLE_TRANSLATION, TOGGLE_MUTE -> null;
+            case NONE, CLOSE, RESTORE, SETTINGS, TOGGLE_ISLAND_LYRICS, TOGGLE_WORLD_LYRICS, TOGGLE_ROMANIZATION, TOGGLE_TRANSLATION, TOGGLE_MUTE -> null;
         };
         if (action == null) return false;
         RelayLyricsClient.music().command(action);

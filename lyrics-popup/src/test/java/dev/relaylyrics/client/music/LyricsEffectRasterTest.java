@@ -9,6 +9,35 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LyricsEffectRasterTest {
+    @Test void verticalFillPartitionsEvenTinyFontMasksWithoutMissingOrOverlappingRows() {
+        for (int rows : new int[]{1, 2, 3, 5, 9, 36, 72}) for (double progress : new double[]{0, .125, .5, .99, 1}) {
+            var bands = LyricsEffectRaster.verticalTintBands(rows, -.037, 1.0 / rows, progress, 0x33FFFFFF, 0xFFFFFFFF);
+            int[] coverage = new int[rows];
+            int boundary = 0, previousAlpha = 255;
+            for (var band : bands) {
+                assertThat(band.firstRow()).isEqualTo(boundary);
+                assertThat(band.endRow()).isGreaterThan(band.firstRow()).isLessThanOrEqualTo(rows);
+                int alpha = band.color() >>> 24;
+                assertThat(alpha).isBetween(51, previousAlpha);
+                assertThat(band.color() & 0xFFFFFF).isEqualTo(0xFFFFFF);
+                for (int row = band.firstRow(); row < band.endRow(); row++) coverage[row]++;
+                boundary = band.endRow(); previousAlpha = alpha;
+            }
+            assertThat(boundary).isEqualTo(rows);
+            assertThat(coverage).containsOnly(1);
+        }
+    }
+
+    @Test void verticalFillCoalescesSolidAreasAndKeepsTheFeatherContinuous() {
+        var bands = LyricsEffectRaster.verticalTintBands(5, .3, .1, .5, 0x33FFFFFF, 0xFFFFFFFF);
+        assertThat(bands).containsExactly(new LyricsEffectRaster.TintBand(0, 2, 0xFFFFFFFF),
+                new LyricsEffectRaster.TintBand(2, 3, 0x99FFFFFF), new LyricsEffectRaster.TintBand(3, 5, 0x33FFFFFF));
+        assertThat(LyricsEffectRaster.verticalTintBands(36, 0, 1 / 36.0, 0, 0x33FFFFFF, 0xFFFFFFFF))
+                .containsExactly(new LyricsEffectRaster.TintBand(0, 36, 0x33FFFFFF));
+        assertThat(LyricsEffectRaster.verticalTintBands(36, 0, 1 / 36.0, 1, 0x33FFFFFF, 0xFFFFFFFF))
+                .containsExactly(new LyricsEffectRaster.TintBand(0, 36, 0xFFFFFFFF));
+    }
+
     @Test
     void glyphHolesAndWhitespaceAreNotFilledByTheirBounds() {
         byte[] ring = new byte[13 * 13];

@@ -11,6 +11,36 @@ public final class LyricsEffectRaster {
 
     private LyricsEffectRaster() { }
 
+    /** Half-open rows meet at the same edge, without blending the glyph twice. */
+    public record TintBand(int firstRow, int endRow, int color) { }
+
+    public static List<TintBand> verticalTintBands(int rows, double firstRowFraction, double rowFractionStep,
+                                                 double progress, int futureColor, int activeColor) {
+        if (rows <= 0) return List.of();
+        var bands = new java.util.ArrayList<TintBand>();
+        int first = 0;
+        int previous = verticalTint(progress, firstRowFraction, futureColor, activeColor);
+        for (int row = 1; row < rows; row++) {
+            int color = verticalTint(progress, firstRowFraction + row * rowFractionStep, futureColor, activeColor);
+            if (color != previous) {
+                bands.add(new TintBand(first, row, previous));
+                first = row; previous = color;
+            }
+        }
+        bands.add(new TintBand(first, rows, previous));
+        return bands;
+    }
+
+    private static int verticalTint(double progress, double fraction, int future, int active) {
+        double light = LyricsAnimation.lineHighlight(progress, fraction);
+        int color = 0;
+        for (int shift = 0; shift <= 24; shift += 8) {
+            int from = future >>> shift & 255, to = active >>> shift & 255;
+            color |= (int) Math.round(from + (to - from) * light) << shift;
+        }
+        return color;
+    }
+
     /** Alpha is owned by this mask; callers must treat the returned array as read-only. */
     public record Mask(int width, int height, double left, double top,
                        double pixelsPerUnit, byte[] alpha) {

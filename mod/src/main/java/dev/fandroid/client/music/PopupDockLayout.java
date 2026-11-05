@@ -80,6 +80,10 @@ public final class PopupDockLayout {
         Rect restore=restore(content,scale);
         return new Rect(restore.x()-24*scale,restore.y(),restore.width(),restore.height());
     }
+    public static Rect lyrics(Rect content,double scale) {
+        Rect settings=settings(content,scale);
+        return new Rect(settings.x()-24*scale,settings.y(),settings.width(),settings.height());
+    }
     public static long seek(Rect track,double coordinate,long duration) {
         double start=track.width()>=track.height()?track.x():track.y();
         double length=track.width()>=track.height()?track.width():track.height();

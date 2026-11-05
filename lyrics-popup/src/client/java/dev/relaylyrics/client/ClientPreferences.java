@@ -3,6 +3,7 @@ package dev.relaylyrics.client;
 import dev.relaylyrics.FanDroidMod;
 import dev.relaylyrics.protocol.ProtocolCodec;
 import dev.relaylyrics.client.music.WorldLyricsDirector;
+import dev.relaylyrics.client.music.WorldLyricsPresentation;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.nio.file.Files;
@@ -13,6 +14,48 @@ import dev.relaylyrics.client.music.MultiSourceLyricsClient;
 
 /** Preferences owned by the standalone popup. It never reads or rewrites fandroid.json. */
 public final class ClientPreferences {
+    @com.fasterxml.jackson.annotation.JsonProperty
+    private java.util.Map<dev.relaylyrics.client.music.PopupSizeProfile, dev.relaylyrics.client.music.PopupSizeProfile.Size> popupSizes =
+            new java.util.EnumMap<>(dev.relaylyrics.client.music.PopupSizeProfile.class);
+    private Double popupPreciseX, popupPreciseY;
+    public double getPopupPreciseX() { return popupPreciseX != null && Double.isFinite(popupPreciseX) ? popupPreciseX : getLyricsX(); }
+    public double getPopupPreciseY() { return popupPreciseY != null && Double.isFinite(popupPreciseY) ? popupPreciseY : getLyricsY(); }
+    public void setPopupPosition(double x, double y) {
+        if (!Double.isFinite(x) || !Double.isFinite(y)) return;
+        lyricsX = (int) Math.round(x); lyricsY = (int) Math.round(y);
+        popupPreciseX = x; popupPreciseY = y;
+    }
+    public int getPopupWidth(dev.relaylyrics.client.music.PopupSizeProfile profile) {
+        if (profile == null) profile = dev.relaylyrics.client.music.PopupSizeProfile.COVER_WITH_LYRICS;
+        var size = popupSizes == null ? null : popupSizes.get(profile);
+        return size == null ? getPopupWidth(profile.video(), profile == dev.relaylyrics.client.music.PopupSizeProfile.CANVAS_ONLY && lyricsSquareVideoSize > 0)
+                : Math.clamp(size.width(), 96, 900);
+    }
+    public int getPopupHeight(dev.relaylyrics.client.music.PopupSizeProfile profile) {
+        if (profile == null) profile = dev.relaylyrics.client.music.PopupSizeProfile.COVER_WITH_LYRICS;
+        var size = popupSizes == null ? null : popupSizes.get(profile);
+        return size == null ? getPopupHeight(profile.video(), profile == dev.relaylyrics.client.music.PopupSizeProfile.CANVAS_ONLY && lyricsSquareVideoSize > 0)
+                : Math.clamp(size.height(), 64, 600);
+    }
+    public void setPopupWidth(dev.relaylyrics.client.music.PopupSizeProfile profile, int value) {
+        if (profile == null) profile = dev.relaylyrics.client.music.PopupSizeProfile.COVER_WITH_LYRICS;
+        int height = getPopupHeight(profile);
+        if (popupSizes == null) popupSizes = new java.util.EnumMap<>(dev.relaylyrics.client.music.PopupSizeProfile.class);
+        popupSizes.put(profile, new dev.relaylyrics.client.music.PopupSizeProfile.Size(Math.clamp(value, 96, 900), height));
+    }
+    public void setPopupHeight(dev.relaylyrics.client.music.PopupSizeProfile profile, int value) {
+        if (profile == null) profile = dev.relaylyrics.client.music.PopupSizeProfile.COVER_WITH_LYRICS;
+        int width = getPopupWidth(profile);
+        if (popupSizes == null) popupSizes = new java.util.EnumMap<>(dev.relaylyrics.client.music.PopupSizeProfile.class);
+        popupSizes.put(profile, new dev.relaylyrics.client.music.PopupSizeProfile.Size(width, Math.clamp(value, 64, 600)));
+    }
+
+    public enum LineLyricsAnimation { TOP_TO_BOTTOM, TIMED }
+    private LineLyricsAnimation lineLyricsAnimation = LineLyricsAnimation.TOP_TO_BOTTOM;
+    public LineLyricsAnimation getLineLyricsAnimation() {
+        return lineLyricsAnimation == null ? LineLyricsAnimation.TOP_TO_BOTTOM : lineLyricsAnimation;
+    }
+    public void setLineLyricsAnimation(LineLyricsAnimation value) { lineLyricsAnimation = value; }
     private boolean romanizationUnderLine = true;
     private boolean automaticTranslation;
     private String translationLanguage = java.util.Locale.getDefault().getLanguage();
@@ -109,6 +152,9 @@ public final class ClientPreferences {
 
     private boolean islandKawarpBackground = true, islandVideoCover = true;
     private boolean jadeIsland = true;
+    private boolean islandLyrics;
+    public boolean isIslandLyrics() { return islandLyrics; }
+    public void setIslandLyrics(boolean value) { islandLyrics=value; }
     public boolean isJadeIsland() { return jadeIsland; }
     public void setJadeIsland(boolean value) { jadeIsland=value; }
     public boolean isIslandKawarpBackground() { return islandKawarpBackground; }
@@ -243,7 +289,14 @@ public final class ClientPreferences {
     private boolean worldLyricsPlayerReactions = true;
     private double worldLyricsSize = 1.2;
     private boolean worldLyricsAutoWalls = true;
-    private boolean worldLyricsCinematic = true;
+    private boolean worldLyricsReposition;
+    private boolean worldLyricsCinematic;
+    private boolean worldLyricsVolumetric;
+    private WorldLyricsPresentation.Direction worldLyricsDirection = WorldLyricsPresentation.Direction.AUTOMATIC;
+    private WorldLyricsPresentation.Intensity worldLyricsPresentationIntensity = WorldLyricsPresentation.Intensity.DISCREET;
+    private boolean worldLyricsGeminiFont;
+    private String worldLyricsGeminiModel = "gemini-flash-latest";
+    private String worldLyricsGeminiDirection = "";
     private Boolean worldLyricsAutomatic;
     private WorldLyricsDirector.Preset worldLyricsPreset;
     private WorldLyricsDirector.Variation worldLyricsVariation = WorldLyricsDirector.Variation.MEDIUM;
@@ -325,6 +378,8 @@ public final class ClientPreferences {
     }
 
     public void resetLayout() {
+        if (popupSizes != null) popupSizes.clear();
+        popupPreciseX = popupPreciseY = null;
         popupDocked = true;
         lyricsX = 24;
         lyricsY = 24;
@@ -409,9 +464,9 @@ public final class ClientPreferences {
     public boolean isLyricsClickSeek() { return lyricsClickSeek; }
     public void setLyricsClickSeek(boolean value) { lyricsClickSeek = value; }
     public int getLyricsX() { return lyricsX; }
-    public void setLyricsX(int value) { lyricsX = value; }
+    public void setLyricsX(int value) { popupPreciseX = null; lyricsX = value; }
     public int getLyricsY() { return lyricsY; }
-    public void setLyricsY(int value) { lyricsY = value; }
+    public void setLyricsY(int value) { popupPreciseY = null; lyricsY = value; }
     public int getPopupWidth(boolean video, boolean square) {
         return square ? getPopupHeight(video, true) : video && lyricsVideoWidth > 0
                 ? Math.clamp(lyricsVideoWidth, 96, 900) : getLyricsWidth();
@@ -509,6 +564,9 @@ public final class ClientPreferences {
             ((com.fasterxml.jackson.databind.node.ObjectNode) json).remove("enabledWorldLyricsPresets");
         }
         ClientPreferences result = ProtocolCodec.mapper().treeToValue(json, ClientPreferences.class);
+        // Legacy X/Y setters must not discard precise coordinates because of JSON property order.
+        if (json.path("popupPreciseX").isNumber()) result.popupPreciseX = json.path("popupPreciseX").doubleValue();
+        if (json.path("popupPreciseY").isNumber()) result.popupPreciseY = json.path("popupPreciseY").doubleValue();
         if (oldWorldStyle) {
             result.worldLyricsPreset = WorldLyricsDirector.Preset.SIGN;
             result.worldLyricsAutomatic = true;
@@ -524,6 +582,27 @@ public final class ClientPreferences {
     }
     public int getWorldLyricsPositionVersion() { return worldLyricsPositionVersion; }
     public void setWorldLyricsPositionVersion(int value) { worldLyricsPositionVersion = value; }
+
+    public WorldLyricsPresentation.Direction getWorldLyricsDirection() {
+        return worldLyricsDirection == null ? WorldLyricsPresentation.Direction.AUTOMATIC : worldLyricsDirection;
+    }
+    public void setWorldLyricsDirection(WorldLyricsPresentation.Direction value) { worldLyricsDirection = value; }
+    public WorldLyricsPresentation.Intensity getWorldLyricsPresentationIntensity() {
+        return worldLyricsPresentationIntensity == null ? WorldLyricsPresentation.Intensity.DISCREET : worldLyricsPresentationIntensity;
+    }
+    public void setWorldLyricsPresentationIntensity(WorldLyricsPresentation.Intensity value) { worldLyricsPresentationIntensity = value; }
+    public boolean isWorldLyricsGeminiFont() { return worldLyricsGeminiFont; }
+    public void setWorldLyricsGeminiFont(boolean value) { worldLyricsGeminiFont = value; }
+    public String getWorldLyricsGeminiModel() {
+        return worldLyricsGeminiModel == null || worldLyricsGeminiModel.isBlank() ? "gemini-flash-latest" : worldLyricsGeminiModel.strip();
+    }
+    public void setWorldLyricsGeminiModel(String value) { worldLyricsGeminiModel = limited(value, 100); }
+    public String getWorldLyricsGeminiDirection() { return worldLyricsGeminiDirection == null ? "" : worldLyricsGeminiDirection; }
+    public void setWorldLyricsGeminiDirection(String value) { worldLyricsGeminiDirection = limited(value, 500); }
+    private static String limited(String value, int maximum) {
+        String text = value == null ? "" : value.strip();
+        return text.substring(0, Math.min(text.length(), maximum));
+    }
 
     public WorldIntensity getWorldLyricsIntensity() {
         return worldLyricsIntensity == null ? WorldIntensity.NORMAL : worldLyricsIntensity;
@@ -557,7 +636,11 @@ public final class ClientPreferences {
     public void setWorldLyricsContactShadow(boolean value) { worldLyricsContactShadow = value; }
     public boolean isWorldLyricsWorldLight() { return worldLyricsWorldLight; }
     public void setWorldLyricsWorldLight(boolean value) { worldLyricsWorldLight = value; }
+    public boolean isWorldLyricsVolumetric() { return worldLyricsVolumetric; }
+    public void setWorldLyricsVolumetric(boolean value) { worldLyricsVolumetric = value; }
     public boolean isWorldLyricsCinematic() { return worldLyricsCinematic; }
+    public boolean isWorldLyricsReposition() { return worldLyricsReposition; }
+    public void setWorldLyricsReposition(boolean value) { worldLyricsReposition = value; }
     public void setWorldLyricsCinematic(boolean value) { worldLyricsCinematic = value; }
     public boolean isWorldLyricsAutomatic() {
         return worldLyricsAutomatic == null || worldLyricsAutomatic;

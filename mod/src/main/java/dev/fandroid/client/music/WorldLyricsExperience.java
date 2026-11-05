@@ -12,6 +12,17 @@ public final class WorldLyricsExperience {
     public enum RenderMode { AUTO, SAFE, FULL }
     public record Pose(double lift, double scale, double depth, double glow) { }
 
+    /** Presentation intensity changes composition, never silently disables the Spicy springs. */
+    public static double spicyStrength(Style style, WorldLyricsPresentation.Intensity intensity,
+                                       double configured, boolean animated) {
+        if (!animated) return 0;
+        double amount = Double.isFinite(configured) ? Math.clamp(configured, 0, 2) : 1;
+        double material = style == Style.MINIMAL ? .45 : style == Style.SCULPTED ? .85 : 1;
+        double presentation = intensity == WorldLyricsPresentation.Intensity.EXPRESSIVE ? 1.25
+                : intensity == WorldLyricsPresentation.Intensity.BALANCED ? 1.1 : 1;
+        return Math.min(2, amount * material * presentation);
+    }
+
     /** The very same word/glyph spring used by the popup, sampled once per render frame. */
     public static final class Motion {
         private final LyricsAnimation.ElementMotion element;

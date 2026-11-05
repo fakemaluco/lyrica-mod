@@ -24,7 +24,7 @@ subprojects {
                 from(rootProject.file("THIRD_PARTY_NOTICES.md")) {
                     into("META-INF/lyrica")
                 }
-                from(rootProject.file("youtube-music-extension")) {
+                from(rootProject.file("integrations/youtube-music-extension")) {
                     include("manifest.json", "content.js", "background.js", "README.md")
                     into("youtube-music-extension")
                 }

@@ -32,7 +32,7 @@ public final class MultiSourceLyricsClient implements AutoCloseable {
     }
 
     public record Source(String id, String name, boolean defaultEnabled) { }
-    public record Result(Optional<LyricsDocument> document, String provider, String diagnostics, boolean cached, String sourceId) { }
+    public record Result(Optional<LyricsDocument> document, String provider, String diagnostics, boolean cached, String sourceId, boolean wordTimingAvailable) { }
 
     private static final List<Source> SOURCES = List.of(
             new Source("spicy_lyrics", "Spicy Lyrics", true),
@@ -77,8 +77,15 @@ public final class MultiSourceLyricsClient implements AutoCloseable {
         return converted;
     }
 
+    public CompletableFuture<Result> requestLrcRedSync(PlaybackSnapshot track) {
+        var lookup = engine.requestLrcRedSync(safe(track.title()), safe(track.artist()), safe(track.album()), track.durationMillis());
+        var converted = lookup.thenApply(raw -> convert(raw, track));
+        converted.whenComplete((ignored, error) -> { if (converted.isCancelled()) lookup.cancel(true); });
+        return converted;
+    }
+
     Result convert(DesktopLyricsEngine.Result raw, PlaybackSnapshot track) {
-        if (!raw.found()) return new Result(Optional.empty(), raw.getProvider(), raw.getDiagnostics(), raw.getCached(), raw.getSourceId());
+        if (!raw.found()) return new Result(Optional.empty(), raw.getProvider(), raw.getDiagnostics(), raw.getCached(), raw.getSourceId(), raw.getWordTimingAvailable());
         LyricsDocument document = null;
         String invalid = "";
         if (raw.getTtml() != null && !raw.getTtml().isBlank()) {
@@ -100,7 +107,7 @@ public final class MultiSourceLyricsClient implements AutoCloseable {
             plain = true;
         }
         if (document == null || document.lines().isEmpty()) {
-            return new Result(Optional.empty(), raw.getProvider(), raw.getDiagnostics() + invalid, raw.getCached(), raw.getSourceId());
+            return new Result(Optional.empty(), raw.getProvider(), raw.getDiagnostics() + invalid, raw.getCached(), raw.getSourceId(), raw.getWordTimingAvailable());
         }
         LyricsMetadata previous = document.metadata();
         LyricsSyncMode mode = plain || raw.getQuality().equals("PLAIN") ? LyricsSyncMode.STATIC
@@ -110,7 +117,7 @@ public final class MultiSourceLyricsClient implements AutoCloseable {
                 raw.getWriters().isEmpty() ? previous.songwriters() : String.join(", ", raw.getWriters()),
                 raw.getProvider(), !raw.getMaker().isBlank() || !raw.getUploader().isBlank(),
                 raw.getMaker(), raw.getMakerAvatar(), raw.getUploader(), raw.getUploaderAvatar());
-        return new Result(Optional.of(document.withMetadata(metadata)), raw.getProvider(), raw.getDiagnostics() + invalid, raw.getCached(), raw.getSourceId());
+        return new Result(Optional.of(document.withMetadata(metadata)), raw.getProvider(), raw.getDiagnostics() + invalid, raw.getCached(), raw.getSourceId(), raw.getWordTimingAvailable());
     }
 
     private static String safe(String text) { return text == null ? "" : text; }

@@ -1,0 +1,13 @@
+// Local single-row lyric, paging, waiting and real button/hit-test fixtures. No music services.
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        if (name == 'runClient') {
+            systemProperty 'lyrica.effectsSelfTest', 'true'
+            systemProperty 'lyrica.islandLyricsSelfTest', 'true'
+            systemProperty 'lyrica.islandWaitingSelfTest', providers.gradleProperty('waitingMotion').getOrElse('false')
+            systemProperty 'lyrica.islandCreditsSelfTest', providers.gradleProperty('islandCredits').getOrElse('false')
+            systemProperty 'lyrica.effectsProbeOutput', rootProject.layout.buildDirectory.dir('island-lyrics-qa').get().asFile.absolutePath
+            args '--width', '1280', '--height', '720'
+        }
+    }
+}

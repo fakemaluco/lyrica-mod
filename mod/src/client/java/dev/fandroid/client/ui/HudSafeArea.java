@@ -12,8 +12,14 @@ final class HudSafeArea {
     private HudSafeArea() { }
 
     static Position adjust(int x, int y, int width, int height, int screenWidth, int screenHeight) {
-        return adjust(x, y, width, height, screenWidth, screenHeight,
-                CompatibilityManager.xaeroMinimap(), CompatibilityManager.appleSkin());
+        Position result = adjust(x, y, width, height, screenWidth, screenHeight, false, CompatibilityManager.appleSkin());
+        for (var target : dev.fandroid.client.music.PopupHudTargets.targets(screenWidth, screenHeight, false, System.nanoTime())) {
+            var r = target.bounds();
+            Area area = new Area(r.x(), r.y(), r.width(), r.height());
+            if (intersects(result.x(), result.y(), width, height, area))
+                result = closest(result.x(), result.y(), width, height, screenWidth, screenHeight, area);
+        }
+        return result;
     }
 
     static Position adjust(int x, int y, int width, int height, int screenWidth, int screenHeight,

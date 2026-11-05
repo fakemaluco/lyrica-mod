@@ -44,6 +44,7 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
     dependsOn(":lyrics-popup-1.21.11:prepareStandaloneClientJava")
     from(rootProject.file("lyrics-popup/src/client/java")) {
         include("dev/relaylyrics/client/ClientPreferences.java")
+        include("dev/relaylyrics/mixin/XaeroMinimapAlignmentMixin.java")
         include("dev/relaylyrics/client/MusicPresence.java")
         include("dev/relaylyrics/client/presence/**")
         include("dev/relaylyrics/client/compat/**")

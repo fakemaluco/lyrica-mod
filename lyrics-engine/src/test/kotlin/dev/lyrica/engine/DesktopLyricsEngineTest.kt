@@ -34,6 +34,26 @@ class DesktopLyricsEngineTest {
         }
     }
 
+    @Test fun `LRC red word timing wins over Spicy lines or plain text while Spicy word timing keeps priority`() {
+        val word = RemoteLyricsPayload(ttmlLyrics = """<tt><body><div>
+            <p begin="1s" end="3s"><span begin="1s" end="2s">Hello </span><span begin="2s" end="3s">world</span></p>
+            </div></body></tt>""")
+        for ((spicyPayload, expected) in listOf(
+            RemoteLyricsPayload(syncedLyrics = "[00:01.00]Hello world") to "lrc_red",
+            RemoteLyricsPayload(plainLyrics = "Hello world") to "lrc_red",
+            word to "spicy_lyrics",
+        )) {
+            val spicy = Fake("spicy_lyrics") { ProviderResult.Hit(spicyPayload) }
+            val lrcRed = Fake("lrc_red") { delay(100); ProviderResult.Hit(word) }
+            DesktopLyricsEngine.forTests(Files.createTempDirectory("lyrica-lrc-red-priority").toFile(), linkedSetOf(spicy, lrcRed)).use { engine ->
+                val enabled = listOf("spicy_lyrics", "lrc_red")
+                val result = engine.find("Song", "Artist", "", 180_000, emptyList(), enabled) {}.get(5, TimeUnit.SECONDS)
+                assertEquals(expected, result.sourceId)
+                assertEquals("WORD_SYNCED", result.quality)
+            }
+        }
+    }
+
     @Test fun `unavailable or disabled Spicy never hides a usable fallback`() {
         val spicy = Fake("spicy_lyrics") { ProviderResult.Unavailable(ProviderFailureCategory.NETWORK, "temporary") }
         val fallback = Fake("lrclib") { hit("Fallback") }

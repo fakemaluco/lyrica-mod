@@ -2,9 +2,42 @@ package dev.fandroid.client.music;
 
 /** Spatial reading envelope: reserve the travel corridor and keep a complete phrase ahead. */
 public final class WorldLyricsSpace {
+    /** Reframe on Ji camera cuts and accumulated travel/pans, including while music is paused. */
+    public static final class CinematicCamera {
+        private boolean active;
+        private double x, y, z, lookX, lookY, lookZ;
+        private long placedAt;
+
+        public boolean update(boolean cinematic, double cameraX, double cameraY, double cameraZ,
+                              double directionX, double directionY, double directionZ, long nanos) {
+            boolean changed = cinematic != active;
+            active = cinematic;
+            if (!cinematic) { placedAt = 0; return changed; }
+            double dx = cameraX - x, dy = cameraY - y, dz = cameraZ - z;
+            double distanceSquared = dx * dx + dy * dy + dz * dz;
+            double alignment = lookX * directionX + lookY * directionY + lookZ * directionZ;
+            boolean cut = distanceSquared > 36 || alignment < .5;
+            boolean drift = distanceSquared > 9 || alignment < Math.cos(Math.toRadians(30));
+            if (changed || placedAt == 0 || cut || drift && nanos - placedAt >= 250_000_000L) {
+                x = cameraX; y = cameraY; z = cameraZ;
+                lookX = directionX; lookY = directionY; lookZ = directionZ; placedAt = nanos;
+                return true;
+            }
+            return false;
+        }
+
+        public void reset() { active = false; placedAt = 0; }
+    }
     public enum Position { ADAPTIVE, AROUND, SKY }
     public record Offset(double forward, double side, double up, double yawDegrees) { }
     private WorldLyricsSpace() { }
+
+    /** Keep the phrase inside Ji's letterboxed view, with room for its bottom caption. */
+    public static Offset cinematicOffset(Position position, double distance, double phraseWidth, int side) {
+        double sign = side < 0 ? -1 : 1;
+        return new Offset(distance, sign * (distance * .18 + phraseWidth * .5),
+                position == Position.SKY ? distance * .08 : 0, -sign * 6);
+    }
 
     public static double readingDistance(double speed, double remainingSeconds, int characters,
                                          boolean gliding, double viewLimit) {

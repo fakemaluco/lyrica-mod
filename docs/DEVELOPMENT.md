@@ -11,8 +11,8 @@
 | `lyrics-engine/` | Núcleo JVM de letras, tradução e vídeo, com licenças e atribuições upstream. |
 | `shared-protocol/` | Protocolo compartilhado com a bridge de mídia. |
 | `media-bridge/` | Bridge nativa em Rust para sessões de mídia e áudio. |
-| `spicetify-extension/` | Extensão para Spotify/Spicetify. |
-| `youtube-music-extension/` | Extensão de navegador para YouTube Music. |
+| `integrations/spicetify-extension/` | Extensão para Spotify/Spicetify. |
+| `integrations/youtube-music-extension/` | Extensão de navegador para YouTube Music. |
 | `supabase/` | Serviço Music Presence, migrações e testes. Veja seu README. |
 | `assets-src/` | Fontes e ícones originais, incluindo licenças. |
 | `scripts/` | Exportação de recursos e verificações visuais opcionais. |
@@ -45,13 +45,13 @@ cd ..
 Para verificar as extensões:
 
 ```powershell
-cd spicetify-extension
+cd integrations/spicetify-extension
 npm ci
 npm run typecheck
 npm run build
 cd ../youtube-music-extension
 node --test background.test.cjs content.test.cjs
-cd ..
+cd ../..
 ```
 
 ## Arquivos locais e publicação

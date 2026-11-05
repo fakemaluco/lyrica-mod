@@ -43,7 +43,7 @@ class LrcRedLyricsProvider @Inject constructor(
     )
 
     // The model takes a few seconds on the recording; longer than a lookup is given.
-    private val syncClient by lazy { client.newBuilder().readTimeout(60, TimeUnit.SECONDS).build() }
+    private val syncClient by lazy { client.newBuilder().readTimeout(60, TimeUnit.SECONDS).callTimeout(65, TimeUnit.SECONDS).build() }
 
     override suspend fun fetch(request: LyricsLookupRequest): ProviderResult = guarded {
         val (_, song) = firstSong(request) ?: return@guarded ProviderResult.Miss
@@ -55,7 +55,10 @@ class LrcRedLyricsProvider @Inject constructor(
      * Only for a song lrc.red has; the answer is the model's sync, ranked as lrc.red's AI syncs.
      */
     suspend fun requestSync(request: LyricsLookupRequest): ModelSyncResult = try {
-        val (isrc, _) = firstSong(request) ?: return ModelSyncResult.Failed("lrc.red doesn't have this song.")
+        val (isrc, song) = firstSong(request) ?: return ModelSyncResult.Failed("lrc.red doesn't have this song.")
+        val existing = songPayload(song)
+        if (existing?.measuredQuality() == RemoteLyricsQuality.WORD_SYNCED)
+            return ModelSyncResult.Synced(isrc, existing)
         val post = Request.Builder().url("$BASE/s/$isrc/sync").post(ByteArray(0).toRequestBody()).build()
         val body = syncClient.newCall(post).awaitResponse().use { response ->
             val text = response.body?.string().orEmpty()

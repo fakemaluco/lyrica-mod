@@ -28,20 +28,30 @@ Os JARs standalone são identificados pela versão do jogo: `lyrica-1.21.1`,
 `lyrica-1.21.11` e `lyrica-26.2`. Para Minecraft 26.2, use Java 25 e uma
 versão atual do Fabric Loader e Fabric API. As letras no mundo são opcionais e
 podem ser ativadas diretamente na aba **Mundo 3D**, sempre visível nas configurações.
-Ela reúne oito controles principais e os estilos **Spicy**, **Esculpido** e
-**Volume sutil**, todos com malhas 3D fechadas, sem painel de fundo ou halo.
-A fonte e o peso acompanham o pop-up; os glifos reutilizam suas molas de animação.
-As posições **Ao redor**, **No céu** e **Adaptativa** deixam espaço na mira.
+A direção **Automática** funciona localmente e começa em intensidade **Discreta**:
+texto plano, entrada progressiva e permanência de até uma frase anterior.
+As composições incluem palavras caindo, trechos progressivos, frases coexistindo,
+escadas e palavras de destaque. Fonte e peso acompanham o pop-up.
+**Espessura 3D**, em **Personalizar > Mundo 3D**, ativa volume independentemente
+da animação. **Cinematográfico**, desligado por padrão, permite ocupar o centro da visão.
+Em **Avançado > Experimentos > Gemini · direção das letras**, a direção **Gemini**
+é opcional: envia letra, tempos e metadados da faixa ao Google
+para preparar escolhas por trecho em segundo plano, com cache e retorno ao modo local
+em caso de falha. Sua chave e suas configurações são separadas do experimento de shaders.
+Veja os controles, os limites e a verificação no
+[guia de letras cinematográficas](docs/cinematic-lyrics.md).
 Na elytra, a trajetória, a velocidade e o tamanho da frase determinam o espaço à frente.
 Para iluminar os blocos próximos às palavras, instale também o
 [LambDynamicLights](https://modrinth.com/mod/lambdynamiclights): 4.8.11 para 1.21.1,
 4.9.1 para 1.21.11 ou 4.12.4 para 26.2. A integração é opcional; ele é distribuído
 separadamente pelo autor. Os detalhes ficam em **Personalizar > Mundo 3D**.
-O pop-up guarda tamanhos separados para capa estática, vídeo com letras e vídeo sem letras.
+O pop-up lembra tamanhos separados para capa e Canvas com ou sem letras,
+além de letras sem capa e do estado sem mídia ou letra.
 Os controles de reprodução ficam acima da barra de progresso. Com
 [Ji AFK Cinematic](https://modrinth.com/mod/ji-afk-cinematic), o modo AFK mostra
 apenas a letra atual centralizada embaixo, sem painel, acima das barras pretas.
-As letras 3D continuam funcionando com F1.
+As letras 3D continuam funcionando com F1 e durante o AFK, adaptando a posição às
+mudanças de câmera do Ji.
 O **Music Presence** mostra uma nota musical no Tab, abre um cartão com capa ao
 olhar para outro jogador por três segundos e permite consultar `/music <jogador>`.
 Funciona entre clientes com o mod, sem instalação no servidor Minecraft. Contas
@@ -98,10 +108,31 @@ do cabeçalho do perfil e retorna à capa quando essa foto não está disponíve
 Use **Geral > Posição e tamanho do pop-up > Ajustar na tela** para mover e
 redimensionar por qualquer borda ou canto, com largura e altura independentes. Os
 vídeos têm prioridade nos tamanhos menores e podem ser usados como área de arraste.
+Segure **Shift enquanto arrasta** para mostrar guias e encaixar o pop-up nos centros,
+nas bordas e nos cantos da tela, de inventários e dos painéis EMI/REI. O Xaero's
+Minimap fornece sua posição e suas dimensões reais, incluindo os ajustes de escala.
+Soltar Shift volta ao arraste livre; soltar o mouse salva a posição. Em **Personalizar > Interação e posição**,
+**Tamanho salvo para** identifica a combinação de mídia e letras que está sendo
+redimensionada. Cada combinação lembra largura e altura independentes; ajustes
+antigos continuam como ponto de partida até o primeiro redimensionamento desse modo.
 Em **Geral > Atraso da letra**, ajuste de −5.000 a +5.000 ms em passos de 25 ms.
 Se a letra estiver adiantada, aumente o valor positivo; se estiver atrasada, diminua.
 O ajuste é salvo e também vale para as letras 3D, sem alterar o áudio, o vídeo ou a
 barra de progresso. **Zerar atraso da letra** volta a 0 ms.
+Em **Personalizar > Efeitos > Animação das letras por linha**, o padrão **De cima
+para baixo** preenche a frase verticalmente do início ao fim do tempo da linha.
+**Por tempo** permite voltar ao
+preenchimento horizontal. Letras por palavra mantêm sua sincronização original.
+Na ilha dinâmica, o botão com linhas e nota musical ativa **Letras na ilha**
+(desligado por padrão e salvo entre sessões). A cápsula pequena passa a mostrar
+uma única linha: letras por linha rolam do início ao fim do seu tempo, e letras
+por palavra trocam de trecho quando o canto chega à próxima palavra que não cabe.
+Nos intervalos, pontinhos maiores surgem primeiro no centro. Depois, deslizam para
+o lado enquanto o título aparece suavemente; a volta da letra também usa uma transição.
+No final da letra, a ilha mostra os créditos disponíveis (contribuidores,
+compositores e provedor) durante cinco segundos de reprodução. Se a faixa continuar,
+voltam o título e as barras normais. Sem créditos, a ilha volta direto ao título.
+A opção também fica em **Aparência > Vídeos e Canvas > Ilha de música**.
 A visualização mostra a **música atual**, com sua capa
 e sincronização reais. Os detalhes de fonte, efeitos, fundo, posição e Mundo 3D
 ficam em grupos recolhíveis de **Personalizar**; desempenho e recursos

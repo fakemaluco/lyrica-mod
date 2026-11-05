@@ -23,6 +23,13 @@ contributors, licensed under the SIL Open Font License 1.1. The
 bundled derivative is named Lyrica Settings; the original font and license are
 in `assets-src/settings-font/`, with the license also in the packaged font folder.
 
+## Google Fonts for lyrics direction
+
+Oswald and Caveat are distributed under the SIL Open Font License 1.1. Their
+copyright notices and licenses ship beside the fonts in the packaged font folder.
+Sources: [Oswald](https://github.com/google/fonts/tree/main/ofl/oswald) and
+[Caveat](https://github.com/google/fonts/tree/main/ofl/caveat).
+
 ## Spicy Lyrics
 
 The Lyrica presentation is visually inspired by animation concepts and spring-based
