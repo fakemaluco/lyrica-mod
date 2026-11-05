@@ -112,7 +112,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
         // both passes in handled screens: they would advance the cover-hover
         // animation once toward closed and once toward open every frame.
         HudRenderCallback.EVENT.register((context, tickCounter) -> {
-            dev.relaylyrics.client.karaoke.KaraokePlatform.paintPopups();
+            dev.relaylyrics.client.karaoke.KaraokePlatform.paintPopups(false);
             var screen = MinecraftClient.getInstance().currentScreen;
             if (screen == null) {
                 InventoryLyricsController.renderWorldHud(context);

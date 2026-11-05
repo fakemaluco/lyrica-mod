@@ -73,4 +73,4 @@ See [Privacy and data controls](docs/PRIVACY.md) for settings and details.
 - [Project structure and build instructions](docs/DEVELOPMENT.md)
 - [License](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md)
 
-Created by **fakiz**. Inspired by [Spicy Lyrics](https://github.com/Spikerko/spicy-lyrics).
+Created by **Fakiz**. Inspired by [Spicy Lyrics](https://github.com/Spikerko/spicy-lyrics).

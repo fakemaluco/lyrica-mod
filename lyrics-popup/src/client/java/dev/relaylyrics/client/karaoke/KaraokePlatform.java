@@ -54,7 +54,9 @@ public final class KaraokePlatform {
         return (right ? options.useKey : options.attackKey).isPressed();
     }
 
-    public static void paintPopups() { KaraokeSurfaces.paint(); }
+    public static void paintPopups(boolean hiddenHudPass) {
+        if (MinecraftClient.getInstance().options.hudHidden == hiddenHudPass) KaraokeSurfaces.paint();
+    }
     static void clearPopups() { KaraokeSurfaces.clear(); }
     static KaraokePopup popup(KaraokeClient.Room room) {
         var surface = KaraokeSurfaces.get(room);
@@ -66,7 +68,7 @@ public final class KaraokePlatform {
     }
     static double visibleDistance(KaraokeClient.Room room) {
         var client = MinecraftClient.getInstance();
-        if (client.world == null || client.options.hudHidden) return Double.POSITIVE_INFINITY;
+        if (client.world == null) return Double.POSITIVE_INFINITY;
         return visibleDistance(room, client.world.getRegistryKey().getValue().toString(), WorldLyricsRenderHook.cameraPosition(client));
     }
     private static double visibleDistance(KaraokeClient.Room room, String dimension, Vec3d camera) {
@@ -77,7 +79,7 @@ public final class KaraokePlatform {
 
     static KaraokeClient.Ray ray() {
         var client = MinecraftClient.getInstance();
-        if (client.player == null || client.world == null || client.currentScreen != null || client.options.hudHidden) return null;
+        if (client.player == null || client.world == null || client.currentScreen != null) return null;
         var eye = WorldLyricsRenderHook.cameraPosition(client);
         var direction = new Vector3f(0, 0, -1).rotate(client.gameRenderer.getCamera().getRotation());
         var end = eye.add(direction.x * RANGE, direction.y * RANGE, direction.z * RANGE);
@@ -90,7 +92,7 @@ public final class KaraokePlatform {
 
     public static void render(MatrixStack matrices, VertexConsumerProvider buffers, Vec3d camera) {
         var client = MinecraftClient.getInstance();
-        if (matrices == null || buffers == null || client.world == null || client.options.hudHidden || CompatibilityManager.worldShadowPass()) return;
+        if (matrices == null || buffers == null || client.world == null || CompatibilityManager.worldShadowPass()) return;
         String dimension = client.world.getRegistryKey().getValue().toString();
         var aim = KaraokeClient.rooms().isEmpty() ? null : ray();
         KaraokeClient.captureAim(aim);

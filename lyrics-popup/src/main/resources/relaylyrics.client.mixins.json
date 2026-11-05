@@ -11,6 +11,7 @@
     "KaraokeScrollMixin",
     "KaraokeCrosshairMixin",
     "KaraokeGuiTargetMixin",
+    "KaraokeHiddenHudMixin",
     "JiAfkSessionMixin",
     "JiAfkMusicMixin",
     "SimpleVoiceDuckingMixin",
