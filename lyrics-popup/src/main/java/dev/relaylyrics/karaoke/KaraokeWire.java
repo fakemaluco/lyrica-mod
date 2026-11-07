@@ -3,11 +3,10 @@ package dev.relaylyrics.karaoke;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.UUID;
 
 public final class KaraokeWire {
-    public static final int MAX_BYTES = 30_000, MAX_LYRIC_PARTS = 12;
+    public static final int MAX_BYTES = 30_000;
     public static final double RANGE = 24;
     public static final int WIDTH = 320, HEIGHT = 200;
     public static final double SCALE = 2.4 / WIDTH;
@@ -16,15 +15,22 @@ public final class KaraokeWire {
 
     private KaraokeWire() { }
 
-    public record Song(String title, String artist, String cover, String uri, long position, long duration,
+    public record Preview(String title, String artist) {
+        public Preview {
+            title = text(title, 256);
+            artist = text(artist, 256);
+        }
+    }
+
+    public record Song(String title, String artist, String album, String cover, String uri, long position, long duration,
                        boolean playing, boolean shuffled, String repeat) {
         public Song(String title, String artist, String cover, String uri, long position, long duration, boolean playing) {
-            this(title, artist, cover, uri, position, duration, playing, false, "off");
+            this(title, artist, "", cover, uri, position, duration, playing, false, "off");
         }
         public Song clean() {
             String track = uri != null && uri.matches("spotify:track:[A-Za-z0-9]{22}") ? uri : "";
             long length = Math.clamp(duration, 0, 86_400_000);
-            return new Song(text(title, 256), text(artist, 256), text(cover, 2048), track,
+            return new Song(text(title, 256), text(artist, 256), text(album, 256), text(cover, 2048), track,
                     Math.clamp(position, 0, length > 0 ? length : 86_400_000), length, playing, shuffled,
                     "track".equals(repeat) || "context".equals(repeat) ? repeat : "off");
         }
@@ -60,14 +66,6 @@ public final class KaraokeWire {
             return (x-px)*(x-px) + (y-py)*(y-py) + (z-pz)*(z-pz);
         }
     }
-    public record Mark(long start, long end, String text, String romanization) { }
-    public record Line(long start, long end, String text, List<Mark> marks,
-                       String agent, boolean background, String translation, String romanization) {
-        public Line(long start, long end, String text, List<Mark> marks) {
-            this(start, end, text, marks, "", false, "", "");
-        }
-    }
-    /** Wire coordinates remain independent of the popup's current logical size. */
     public record Pointer(double x, double y) {
         private static final double HALF_WIDTH = 100, HALF_HEIGHT = 48;
 

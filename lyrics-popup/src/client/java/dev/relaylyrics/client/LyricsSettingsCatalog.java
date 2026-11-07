@@ -29,7 +29,7 @@ public final class LyricsSettingsCatalog {
         public final String key;
         Category(String name) { key = PREFIX + "category." + name; }
     }
-    public enum Kind { TOGGLE, CHOICE, SLIDER, ACTION, INFO, GROUP, TEXT }
+    public enum Kind { TOGGLE, CHOICE, SLIDER, ACTION, INFO, GROUP, TEXT, COLOR }
     public interface Actions {
         void run(String action);
         String status(String name);
@@ -54,6 +54,7 @@ public final class LyricsSettingsCatalog {
         public DoubleConsumer setNumber = ignored -> { };
         public double min, max, step;
         public boolean changesStructure, masked;
+        public List<Integer> colorPresets = List.of();
         public Consumer<String> setText = ignored -> { };
         Entry(String name, Kind kind) { this.key = PREFIX + name; this.kind = kind; }
         /** Keep a native control alive while refreshing captured preference values and callbacks. */
@@ -62,7 +63,7 @@ public final class LyricsSettingsCatalog {
             section = next.section; value = next.value; options = next.options; selected = next.selected;
             select = next.select; activate = next.activate; number = next.number; setNumber = next.setNumber;
             min = next.min; max = next.max; step = next.step; changesStructure = next.changesStructure;
-            masked = next.masked; setText = next.setText;
+            masked = next.masked; setText = next.setText; colorPresets = next.colorPresets;
         }
     }
     private final ClientPreferences p;
@@ -209,6 +210,7 @@ public final class LyricsSettingsCatalog {
             case CUSTOM -> custom();
             case SOURCES -> {
                 info("sources.explanation", () -> "@" + PREFIX + "sources.explanation.value");
+                action("sources.import_ttml", "sources.import_ttml.button", () -> actions.run("import_ttml"));
                 if (group("spicy_account")) {
                     info("spicy.key_status", () -> actions.status("spicy_status"));
                     input("spicy.key_input", () -> actions.status("spicy_key_input"), value -> actions.input("spicy_key", value), true);
@@ -382,6 +384,7 @@ public final class LyricsSettingsCatalog {
 
         if (group("typography")) {
             action("font", "font", () -> actions.run("font")).value = () -> p.getGoogleFontFamily().isEmpty() ? "@" + PREFIX + "google_font.minecraft" : p.getGoogleFontFamily();
+            colors("font_color", p::getLyricsFontColor, p::setLyricsFontColor, 0xFFFFFF);
             choice("weight", LyricsFontWeight.values(), p::getLyricsFontWeight, v -> { p.setLyricsFontWeight(v); actions.run("weight"); });
             percent("scale", .6, 1.8, .05, p::getLyricsTextScale, p::setLyricsTextScale);
             choice("alignment", LyricsTextAlignment.values(), p::getLyricsAlignment, p::setLyricsAlignment);
@@ -448,8 +451,10 @@ public final class LyricsSettingsCatalog {
             action("font", "font", () -> actions.run("font"));
             toggle("world_volumetric", p::isWorldLyricsVolumetric, p::setWorldLyricsVolumetric);
             slider("world_depth", .04, .30, .01, p::getWorldLyricsDepth, p::setWorldLyricsDepth, "");
-            colors("world_face_color", new int[]{0xFFFFFF, 0xE4F5FF, 0xFFF0D2, 0xDEF7E4, 0xF5E1FF}, p::getWorldLyricsFaceColor, p::setWorldLyricsFaceColor);
-            colors("world_side_color", new int[]{0x56647A, 0x323A4B, 0x7A5B3C, 0x377B85, 0x805487}, p::getWorldLyricsSideColor, p::setWorldLyricsSideColor);
+            colors("world_face_color", p::getWorldLyricsFaceColor, p::setWorldLyricsFaceColor,
+                    0xFFFFFF, 0xE4F5FF, 0xFFF0D2, 0xDEF7E4, 0xF5E1FF);
+            colors("world_side_color", p::getWorldLyricsSideColor, p::setWorldLyricsSideColor,
+                    0x56647A, 0x323A4B, 0x7A5B3C, 0x377B85, 0x805487);
             percent("world_animation_strength", 0, 1.5, .1, p::getWorldLyricsAnimationIntensity, p::setWorldLyricsAnimationIntensity);
             toggle("world_light", p::isWorldLyricsWorldLight, p::setWorldLyricsWorldLight);
             info("world_light_status", () -> "@" + PREFIX + (WorldLyricsLights.available() ? "world_light_status.ready" : "world_light_status.missing"));
@@ -464,6 +469,7 @@ public final class LyricsSettingsCatalog {
                 p.setMotionVideos(d.isMotionVideos());
                 p.setModernMode(d.isModernMode()); p.setGoogleFontFamily(""); p.setLyricsFontWeight(d.getLyricsFontWeight());
                 p.setLyricsTextScale(d.getLyricsTextScale()); p.setLyricsAlignment(d.getLyricsAlignment());
+                p.setLyricsFontColor(d.getLyricsFontColor());
                 p.setIslandKawarpBackground(d.isIslandKawarpBackground()); p.setIslandVideoCover(d.isIslandVideoCover()); p.setJadeIsland(d.isJadeIsland());
                 p.setIslandLyrics(d.isIslandLyrics());
                 restore("effects"); restore("background"); restore("motion_artwork"); actions.run("font_changed");
@@ -581,14 +587,12 @@ public final class LyricsSettingsCatalog {
         Entry e = entry(name, Kind.ACTION); e.activate = runnable; e.value = () -> "@" + PREFIX + button; e.changesStructure = name.contains("restore") || name.contains("reset"); return e;
     }
     private void info(String name, Supplier<String> value) { entry(name, Kind.INFO).value = value; }
-    private void colors(String name, int[] colors, IntSupplier getter, IntConsumer setter) {
-        List<String> values = new ArrayList<>(); for (int color : colors) values.add(String.format(Locale.ROOT, "#%06X", color));
-        int found = -1; for (int i = 0; i < colors.length; i++) if (colors[i] == getter.getAsInt()) found = i;
-        int current = found;
-        if (found < 0) values.add(String.format(Locale.ROOT, "#%06X", getter.getAsInt()));
-        Entry e = entry(name, Kind.CHOICE); e.options = List.copyOf(values); e.selected = () -> current < 0 ? colors.length : current;
-        e.select = n -> { if (n < colors.length) setter.accept(colors[n]); };
-        e.value = () -> String.format(Locale.ROOT, "#%06X", getter.getAsInt());
+    private void colors(String name, IntSupplier getter, IntConsumer setter, Integer... presets) {
+        Entry entry = entry(name, Kind.COLOR);
+        entry.selected = getter;
+        entry.select = setter;
+        entry.colorPresets = List.of(presets);
+        entry.value = () -> "#" + java.util.HexFormat.of().withUpperCase().toHexDigits(getter.getAsInt(), 6);
     }
     private static String lower(Enum<?> value) { return value.name().toLowerCase(Locale.ROOT); }
 }

@@ -15,6 +15,8 @@ import dev.fandroid.protocol.music.MusicCommand;
 import dev.fandroid.protocol.music.MusicConnector;
 import dev.fandroid.protocol.music.PlaybackSnapshot;
 import net.fabricmc.loader.api.FabricLoader;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.util.tinyfd.TinyFileDialogs;
 import net.minecraft.client.gui.DrawContext;
 
 import dev.lyrica.engine.DesktopMotionArtworkEngine;
@@ -73,6 +75,7 @@ public final class MusicService implements AutoCloseable {
     private long lookupGeneration;
     private volatile String importsPendingKey;
     private volatile String importedLyricsKey;
+    private CompletableFuture<TtmlImportResult> ttmlImport;
     private volatile String spicyLyricsKey;
     private volatile String preferredLyricsKey;
     private String lrcRedWordKey;
@@ -354,6 +357,34 @@ public final class MusicService implements AutoCloseable {
         artwork.setMotionPlaying(snapshot().playing());
     }
 
+    public CompletableFuture<LyricsDocument> lookupKaraokeLyrics(PlaybackSnapshot track) {
+        var result = new CompletableFuture<LyricsDocument>();
+        CompletableFuture.runAsync(() -> {
+            var imported = importedLyrics.find(track).match();
+            if (result.isDone()) return;
+            if (imported.isPresent()) {
+                result.complete(imported.get().document());
+                return;
+            }
+            String id = SpicyLyricsApiClient.spotifyTrackId(track.spotifyUri());
+            var lookup = lyricsClient.find(track, id == null ? List.of() : List.of(id),
+                    preferences.getLyricsSources(), preferences.getLyricsSourceOrder(),
+                    preferences.isPreferSpicyLyrics(), ignored -> { });
+            result.whenComplete((ignored, failure) -> { if (result.isCancelled()) lookup.cancel(true); });
+            lookup.whenComplete((found, failure) -> {
+                if (failure != null) result.completeExceptionally(failure);
+                else result.complete(found.document().orElseGet(() -> new LyricsDocument(List.of())));
+            });
+        }).exceptionally(failure -> { result.completeExceptionally(failure); return null; });
+        return result;
+    }
+
+    public CompletableFuture<DesktopMotionArtworkEngine.Result> lookupKaraokeArtwork(
+            PlaybackSnapshot track, boolean canvas, boolean cover) {
+        return motionEngine.find(track.title(), track.artist(), track.album(), track.durationMillis(),
+                SpicyLyricsApiClient.spotifyTrackId(track.spotifyUri()), canvas, cover, ignored -> { });
+    }
+
     private void beginSourceLookup(PlaybackSnapshot value, String key, String spotifyId) {
         ImportedLyricsClient.SearchResult imported = importedLyrics.find(value);
         synchronized (this) {
@@ -611,6 +642,43 @@ public final class MusicService implements AutoCloseable {
     public List<ImportedLyricsClient.Candidate> importCandidates() { return importCandidates; }
     public Path importsFolder() { return importsFolder; }
     public void reloadImports() { retryLyrics(); }
+
+    public enum TtmlImportResult { SAVED, CANCELLED, NO_TRACK, INVALID_FILE, FAILED }
+
+    public synchronized CompletableFuture<TtmlImportResult> importTtml(String dialogTitle) {
+        if (ttmlImport != null && !ttmlImport.isDone()) return ttmlImport;
+        PlaybackSnapshot target = snapshot();
+        if (closed || target.title() == null || target.title().isBlank()
+                || "Nothing playing".equals(target.title()) || isSpotifyDjSpeaking(target)) {
+            return CompletableFuture.completedFuture(TtmlImportResult.NO_TRACK);
+        }
+        ttmlImport = CompletableFuture.supplyAsync(() -> {
+            try {
+                String file;
+                try (var stack = MemoryStack.stackPush()) {
+                    var patterns = stack.pointers(stack.UTF8("*.ttml"), stack.UTF8("*.TTML"));
+                    file = TinyFileDialogs.tinyfd_openFileDialog(dialogTitle + " — " + target.title(),
+                            "", patterns, "TTML", false);
+                }
+                if (file == null) return TtmlImportResult.CANCELLED;
+                var match = importedLyrics.saveForTrack(target, Path.of(file));
+                synchronized (this) {
+                    // Keep the original target even if playback changed while the dialog was open.
+                    if (!closed && ImportedLyricsClient.trackKey(target).equals(ImportedLyricsClient.trackKey(snapshot()))) {
+                        applyImported(match, lookupKey);
+                    }
+                }
+                return TtmlImportResult.SAVED;
+            } catch (IllegalArgumentException error) {
+                return TtmlImportResult.INVALID_FILE;
+            } catch (java.io.IOException | RuntimeException | LinkageError error) {
+                FanDroidMod.LOGGER.warn("Could not import local TTML", error);
+                return TtmlImportResult.FAILED;
+            }
+        });
+        return ttmlImport;
+    }
+
     public void selectImportCandidate(int index) {
         List<ImportedLyricsClient.Candidate> values = importCandidates;
         if (index < 0 || index >= values.size()) return;
@@ -774,6 +842,8 @@ public final class MusicService implements AutoCloseable {
     private synchronized void applyImported(ImportedLyricsClient.Match match, String key) {
         if (key == null || !key.equals(lookupKey)) return;
         importedLyricsKey = key;
+        importsPendingKey = null;
+        nextLookupRetryMillis = 0;
         spicyLyricsKey = null;
         importCandidates = List.of();
         boolean wordSynced = hasWordTiming(match.document());

@@ -1,6 +1,5 @@
 package dev.relaylyrics.karaoke;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.*;
 
@@ -24,8 +23,6 @@ final class KaraokeHub {
         boolean placed;
         Song song;
         long generation;
-        String lyricSync = "";
-        final Map<Integer, JsonArray> lyrics = new TreeMap<>();
         long lastControl;
         long updated;
         Room(UUID owner, Panel panel, long now) {
@@ -136,7 +133,6 @@ final class KaraokeHub {
             if (room.joined.add(sender)) {
                 peer.send(message("accepted", "room", room.owner));
                 peer.send(track(room, now));
-                room.lyrics.forEach((part, lines) -> peer.send(lyrics(room, part, lines)));
             }
             return;
         }
@@ -147,27 +143,13 @@ final class KaraokeHub {
             Song clean = song == null ? null : song.clean();
             if (room.song == null ? clean != null : clean == null || !room.song.sameTrack(clean)) {
                 room.generation++;
-                room.lyrics.clear();
-                room.lyricSync = "";
                 room.lastControl = 0;
             }
+            boolean previewChanged = !java.util.Objects.equals(preview(room.song), preview(clean));
             room.song = clean;
             room.updated = now;
+            if (previewChanged) broadcast(message("preview", "room", room.owner, "preview", preview(clean)));
             forMembers(room, track(room, now));
-            return;
-        }
-        if (op.equals("lyrics") && owner && room.song != null) {
-            long generation = generation(packet);
-            if (generation != room.generation && !(generation == 0 && room.generation == 1)) return;
-            int part = packet.get("part").getAsInt();
-            var lines = packet.get("lines");
-            if (part >= 0 && part < MAX_LYRIC_PARTS && !room.lyrics.containsKey(part)
-                    && lines != null && lines.isJsonArray() && lines.getAsJsonArray().size() <= 400) {
-                String sync = string(packet, "sync");
-                if (Set.of("WORD", "LINE", "STATIC").contains(sync)) room.lyricSync = sync;
-                room.lyrics.put(part, lines.getAsJsonArray());
-                forMembers(room, lyrics(room, part, lines.getAsJsonArray()));
-            }
             return;
         }
         if (!nearby || now - room.inputs.getOrDefault(sender, 0L) < 45) return;
@@ -223,17 +205,17 @@ final class KaraokeHub {
     private void broadcast(JsonObject packet) { for (Peer p : peers.values()) p.send(packet); }
     private JsonObject panel(Room room) {
         Peer owner = peers.get(room.owner);
-        return message("panel", "room", room.owner, "panel", room.panel, "name", owner == null ? "" : owner.name());
+        return message("panel", "room", room.owner, "panel", room.panel, "name", owner == null ? "" : owner.name(),
+                "preview", preview(room.song));
+    }
+    private static Preview preview(Song song) {
+        return song == null ? null : new Preview(song.title(), song.artist());
     }
     private JsonObject track(Room room, long now) {
         Song song = room.song;
         return message("track", "room", room.owner, "generation", room.generation,
-                "song", song == null ? null : new Song(song.title(), song.artist(), song.cover(),
+                "song", song == null ? null : new Song(song.title(), song.artist(), song.album(), song.cover(),
                         song.uri(), song.at(now - room.updated), song.duration(), song.playing(), song.shuffled(), song.repeat()));
-    }
-    private JsonObject lyrics(Room room, int part, JsonArray lines) {
-        return message("lyrics", "room", room.owner, "generation", room.generation,
-                "part", part, "sync", room.lyricSync, "lines", lines);
     }
     private JsonObject presence(Peer peer, Song song) {
         return message("presence", "player", peer.id(), "name", peer.name(),

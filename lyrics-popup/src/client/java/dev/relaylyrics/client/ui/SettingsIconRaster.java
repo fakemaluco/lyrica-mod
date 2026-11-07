@@ -1,6 +1,9 @@
 package dev.relaylyrics.client.ui;
 
+import java.awt.BasicStroke;
+import java.awt.Color;
 import java.awt.RenderingHints;
+import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,14 +24,26 @@ final class SettingsIconRaster {
             case "close" -> "x";
             default -> name.startsWith("chevron:") ? "chevron-down" : name;
         };
-        BufferedImage source = SOURCES.computeIfAbsent(asset, SettingsIconRaster::load);
         int pixels = Math.max(1, (int) Math.ceil(size * density));
         var image = new BufferedImage(pixels, pixels, BufferedImage.TYPE_INT_ARGB);
         var g = image.createGraphics();
         try {
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
             if (name.startsWith("chevron:")) g.rotate(-Math.PI * Integer.parseInt(name.substring(8)) / 16., pixels / 2., pixels / 2.);
-            g.drawImage(source, 0, 0, pixels, pixels, null);
+            if (asset.equals("check")) {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.scale(pixels / 24.0, pixels / 24.0);
+                g.setColor(Color.WHITE);
+                g.setStroke(new BasicStroke(2.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                var path = new Path2D.Double();
+                path.moveTo(5, 12);
+                path.lineTo(10, 17);
+                path.lineTo(19, 8);
+                g.draw(path);
+            } else {
+                BufferedImage source = SOURCES.computeIfAbsent(asset, SettingsIconRaster::load);
+                g.drawImage(source, 0, 0, pixels, pixels, null);
+            }
         } finally { g.dispose(); }
         byte[] alpha = new byte[pixels * pixels];
         for (int y = 0; y < pixels; y++) for (int x = 0; x < pixels; x++) alpha[y * pixels + x] = (byte) (image.getRGB(x, y) >>> 24);

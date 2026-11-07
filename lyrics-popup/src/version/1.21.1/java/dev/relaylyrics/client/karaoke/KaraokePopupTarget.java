@@ -2,6 +2,7 @@ package dev.relaylyrics.client.karaoke;
 
 import com.mojang.blaze3d.platform.GlStateManager;
 import com.mojang.blaze3d.systems.RenderSystem;
+import dev.relaylyrics.client.ui.KaraokeInvitationRenderer;
 import com.mojang.blaze3d.systems.VertexSorter;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.SimpleFramebuffer;
@@ -16,7 +17,7 @@ import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL30;
 
 public final class KaraokePopupTarget implements AutoCloseable {
-    public static final int DENSITY = 2;
+    private static int density;
     private static int paintHeight;
     private static BufferAllocator allocator;
     private final Identifier texture;
@@ -29,7 +30,10 @@ public final class KaraokePopupTarget implements AutoCloseable {
 
     public static int paintHeight() { return paintHeight; }
 
+    public static int density() { return density; }
+
     void paint(KaraokePopup view, double x, double y) {
+        int scale = KaraokeSurfaces.textureDensity(view.width, view.height);
         if (allocator == null) allocator = new BufferAllocator(256 * 1024);
         var projection = new Matrix4f(RenderSystem.getProjectionMatrix());
         var sorting = RenderSystem.getVertexSorting();
@@ -41,24 +45,27 @@ public final class KaraokePopupTarget implements AutoCloseable {
         modelView.pushMatrix().translation(0, 0, -11000);
         try {
             if (target == null) {
-                target = new SimpleFramebuffer(view.width * DENSITY, view.height * DENSITY, true, false);
+                target = new SimpleFramebuffer(view.width * scale, view.height * scale, true, false);
                 target.setClearColor(0, 0, 0, 0);
                 target.setTexFilter(GL11.GL_LINEAR);
                 MinecraftClient.getInstance().getTextureManager().registerTexture(texture, new AbstractTexture() {
                     @Override public int getGlId() { return target.getColorAttachment(); }
                     @Override public void load(ResourceManager resources) { }
                 });
-            } else if (target.textureWidth != view.width * DENSITY || target.textureHeight != view.height * DENSITY) {
-                target.resize(view.width * DENSITY, view.height * DENSITY, false);
+            } else if (target.textureWidth != view.width * scale || target.textureHeight != view.height * scale) {
+                target.resize(view.width * scale, view.height * scale, false);
                 target.setTexFilter(GL11.GL_LINEAR);
             }
             target.clear(false);
             target.beginWrite(true);
             RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0, view.width, view.height, 0, 1000, 21000), VertexSorter.BY_Z);
             RenderSystem.applyModelViewMatrix();
+            density = scale;
             paintHeight = target.textureHeight;
             var context = new DrawContext(MinecraftClient.getInstance(), VertexConsumerProvider.immediate(allocator));
-            view.overlay.renderWorldPopup(context, view.width, view.height, x, y);
+            if (view.invitation) KaraokeInvitationRenderer.draw(context, view.invitationLayout(), x, y,
+                    view.spotifySync, view.preview, view.buttons, view.motionEnabled);
+            else view.overlay.renderWorldPopup(context, view.width, view.height, x, y);
             context.draw();
         } finally {
             paintHeight = 0;

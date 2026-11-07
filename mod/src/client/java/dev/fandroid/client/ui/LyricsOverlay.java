@@ -139,6 +139,8 @@ public final class LyricsOverlay implements AutoCloseable {
     private boolean renderingInPhone;
     private boolean renderingOverScreen;
     private boolean renderingWorldPopup;
+    private boolean worldPopupShaderActive;
+    private double worldPopupLyricsZoom = 1;
     private boolean bandedTransitionDrawing;
     private LyricsFramePlan bandedLyricsFramePlan;
     private boolean drawingLyricsShadow;
@@ -498,7 +500,7 @@ public final class LyricsOverlay implements AutoCloseable {
                         if (verticalLineHighlight(line)) drawVerticalLineToken(context, token, left + token.x, y,
                                 scale, line, now, 1, top, prepared.rows.size() * rowHeight(scale));
                         else drawTimedToken(context, token, left + token.x, y, scale, now,
-                                0xFFFFFFFF, 0xFFAAAAAA, 1, RenderPass.BASE);
+                                ACTIVE_TEXT, lyricsTextColor(0xFFAAAAAA), 1, RenderPass.BASE);
                     }
                     y += rowHeight(scale);
                 }
@@ -676,17 +678,24 @@ public final class LyricsOverlay implements AutoCloseable {
         if (document != source.document) setLyrics(source.document, source.syncLabel);
     }
 
+    public void setWorldPopupLyricsZoom(double zoom) { worldPopupLyricsZoom = zoom; }
+
+    private double lyricsTextScale() {
+        return preferences.getLyricsTextScale() * (renderingWorldPopup ? worldPopupLyricsZoom : 1);
+    }
+
     /** Paints the HUD popup at fixed logical dimensions with its own pointer and hit regions. */
     public void renderWorldPopup(DrawContext context, int width, int height, double mouseX, double mouseY) {
         clearPopupControlBounds();
         hudHitRegions.clear();
-        adaptivePopupMode = AdaptivePopupLayout.choose(width, height, videoArtworkAspect(),
-                !document.groups().isEmpty(), preferences.getLyricsTextScale());
-        renderingOverScreen = true;
         renderingWorldPopup = true;
+        worldPopupShaderActive = dev.fandroid.client.CompatibilityManager.worldShaderActive();
+        renderingOverScreen = true;
         pointerX = mouseX;
         pointerY = mouseY;
         try {
+            adaptivePopupMode = AdaptivePopupLayout.choose(width, height, videoArtworkAspect(),
+                    !document.groups().isEmpty(), preferences.getLyricsTextScale());
             renderCompactDesign(context, 0, 0, width, height);
             int size = 18, x = width - size - 7, y = 7;
             var close = new ControlBounds(x, y, size, size);
@@ -699,6 +708,7 @@ public final class LyricsOverlay implements AutoCloseable {
         } finally {
             renderingOverScreen = false;
             renderingWorldPopup = false;
+            worldPopupShaderActive = false;
             pointerX = pointerY = Double.NaN;
         }
     }
@@ -950,7 +960,7 @@ public final class LyricsOverlay implements AutoCloseable {
         ManualLyricsScroll manual = inPhone ? phoneManualScroll : hudManualScroll;
         double minimum = inPhone ? phoneMinimumCamera : hudMinimumCamera;
         double maximum = inPhone ? phoneMaximumCamera : hudMaximumCamera;
-        double surfaceScale = preferences.getLyricsTextScale() * (inPhone ? PHONE_LYRICS_SCALE : 1.0);
+        double surfaceScale = lyricsTextScale() * (inPhone ? PHONE_LYRICS_SCALE : 1.0);
         double wheel = Math.clamp(verticalAmount, -3, 3);
         manual.nudge(motion.position(), -wheel * Math.max(30, 42 * surfaceScale),
                 minimum, maximum, System.nanoTime());
@@ -1180,7 +1190,7 @@ public final class LyricsOverlay implements AutoCloseable {
                 if(x+token.x+token.rawWidth*scale<left || x+token.x>right) continue;
                 if(verticalLineHighlight(line)) drawVerticalLineToken(context,token,x+token.x,y,
                         scale,line,now,opacity,y,glyphHeight);
-                else drawTimedToken(context,token,x+token.x,y,scale,now,ACTIVE_TEXT,UNSYNCED_TEXT,opacity,RenderPass.BASE);
+                else drawTimedToken(context,token,x+token.x,y,scale,now,ACTIVE_TEXT,lyricsTextColor(UNSYNCED_TEXT),opacity,RenderPass.BASE);
             }
         } finally { drawingLyricsShadow=previousShadow; context.disableScissor(); }
     }
@@ -1399,7 +1409,7 @@ public final class LyricsOverlay implements AutoCloseable {
         var window = MinecraftClient.getInstance().getWindow();
         double scale = ResponsiveLyricsLayout.scale(window.getScaledWidth(), window.getScaledHeight()) / PlatformTextures.renderScale();
         adaptivePopupMode = AdaptivePopupLayout.choose(width/scale,height/scale,videoArtworkAspect(),
-                !document.groups().isEmpty(),preferences.getLyricsTextScale());
+                !document.groups().isEmpty(),lyricsTextScale());
         if (!adaptivePopupMode.compact()) scale *= ResponsiveLyricsLayout.contentScale(width / scale, height / scale);
         double px = pointerX, py = pointerY;
         GuiTransform.push(context); GuiTransform.scale(context, (float) scale, (float) scale);
@@ -2447,7 +2457,7 @@ public final class LyricsOverlay implements AutoCloseable {
         int visibleTokens;
         enableLyricsScissor(context, clipLeft, clipTop, clipRight, clipBottom);
         boolean previousShadow = drawingLyricsShadow;
-        drawingLyricsShadow = preferences.isLyricsTextShadow();
+        drawingLyricsShadow = renderingWorldPopup || preferences.isLyricsTextShadow();
         try {
             visibleTokens = renderScenePass(context, currentScene, window, x, y, width, height, textWidth,
                     focusY, scroll, active, now, accent, delta, interactive, manualReading,
@@ -2512,7 +2522,7 @@ public final class LyricsOverlay implements AutoCloseable {
                     : LyricsAnimation.activeGlowProfile(command.glowAmount(), intensity, command.emphasized());
             bloomRenderer.drawGlyph(context, renderer(), styledText(command.text()),
                     command.x(), command.y(), command.scale(),
-                    multiplyAlpha(0xFFFFFFFF, command.opacity() * glow.coreOpacity() * lyricsSurfaceOpacity),
+                    multiplyAlpha(lyricsTextColor(ACTIVE_TEXT), command.opacity() * glow.coreOpacity() * lyricsSurfaceOpacity),
                     bounds.left(), bounds.top(), bounds.right(), bounds.bottom(),
                     Integer.MIN_VALUE, Integer.MAX_VALUE, glow.coreRadius());
         }
@@ -2816,7 +2826,7 @@ public final class LyricsOverlay implements AutoCloseable {
         boolean romanization = preferences.isLyricsRomanization();
         LyricsFont font = preferences.getLyricsFont();
         LyricsFontWeight weight = preferences.getLyricsFontWeight();
-        double preferenceScale = preferences.getLyricsTextScale();
+        double preferenceScale = lyricsTextScale();
         if (sceneDocument != current || sceneTranslation != translation || sceneRomanization != romanization
                 || sceneRomanizationUnderLine != preferences.isRomanizationUnderLine()
                 || sceneFont != font || sceneFontWeight != weight
@@ -3069,7 +3079,7 @@ public final class LyricsOverlay implements AutoCloseable {
                     boolean previousShadow = drawingLyricsShadow;
                     drawingLyricsShadow = false;
                     try {
-                        drawDistant(context, token.text, tokenX, rowY, FUTURE_TEXT, baseScale * focusScale,
+                        drawDistant(context, token.text, tokenX, rowY, lyricsTextColor(FUTURE_TEXT), baseScale * focusScale,
                                 opacity, textBrightness, blur, bloomOpacity, pass);
                     } finally {
                         drawingLyricsShadow = previousShadow;
@@ -3080,7 +3090,7 @@ public final class LyricsOverlay implements AutoCloseable {
                                 baseScale * focusScale, line, now, opacity,
                                 y, Math.max(stableTextHeight, (layout.rows.size() - 1) * stableRowHeight + stableTextHeight));
                     } else drawTimedToken(context, token, tokenX, rowY, baseScale * focusScale, now, accent,
-                                line.background() ? 0xFF746B80 : UNSYNCED_TEXT, opacity, pass);
+                                lyricsTextColor(line.background() ? 0xFF746B80 : UNSYNCED_TEXT), opacity, pass);
                 }
             }
         }
@@ -3111,15 +3121,15 @@ public final class LyricsOverlay implements AutoCloseable {
         double screenHeight = GuiTransform.screenY(context, x, top + height) - screenTop;
         if (screenHeight <= 0) return;
         double physicalScale = scale * screenHeight / height * PlatformTextures.guiScale() / PlatformTextures.renderScale();
-        if (physicalScale < .8 && bloomRenderer.drawMinifiedLineFill(context, styledText(token.text), x, y, scale,
-                opacity * lyricsSurfaceOpacity, progress, top, height, UNSYNCED_TEXT, ACTIVE_TEXT)) return;
+        if (!worldPopupShaderActive && physicalScale < .8 && bloomRenderer.drawMinifiedLineFill(context, styledText(token.text), x, y, scale,
+                opacity * lyricsSurfaceOpacity, progress, top, height, lyricsTextColor(UNSYNCED_TEXT), lyricsTextColor(ACTIVE_TEXT))) return;
 
         // The native font retains its own sampling. Disjoint bands change only its tint.
         int firstRow = (int) Math.floor(GuiTransform.screenY(context, x, y - 2 * scale));
         int endRow = (int) Math.ceil(GuiTransform.screenY(context, x, y + (renderer().fontHeight + 2) * scale));
         var bands = LyricsEffectRaster.verticalTintBands(endRow - firstRow,
                 (firstRow + .5 - screenTop) / screenHeight, 1 / screenHeight,
-                progress, UNSYNCED_TEXT, ACTIVE_TEXT);
+                progress, lyricsTextColor(UNSYNCED_TEXT), lyricsTextColor(ACTIVE_TEXT));
         if (bands.size() == 1) {
             drawScaledWithoutShadow(context, renderer(), token.text, x, y,
                     multiplyAlpha(bands.getFirst().color(), opacity), scale);
@@ -3156,6 +3166,7 @@ public final class LyricsOverlay implements AutoCloseable {
         var motionPlan = token.motionPlan(simple);
         double fillOffset = token.fillOffset(now);
         var fill = fillInterval(token.rawWidth, fillOffset / token.rawWidth, isRightToLeft(token.text));
+        int activeColor = lyricsTextColor(ACTIVE_TEXT);
         for (Glyph glyph : token.glyphs) {
             Segment segment = token.segments.get(glyph.segmentIndex);
             boolean glyphMotion = motionPlan.glyphMotionForFragment(segment.durationMillis());
@@ -3175,7 +3186,7 @@ public final class LyricsOverlay implements AutoCloseable {
             double segmentProgress = timedProgress(now, segment.startMillis, segment.endMillis);
             if (glyph.startMillis == Long.MIN_VALUE) {
                 if (pass != RenderPass.BASE) continue;
-                int color = segmentProgress >= 1 ? ACTIVE_TEXT : futureColor;
+                int color = segmentProgress >= 1 ? activeColor : futureColor;
                 if (segmentProgress >= 1) {
                     drawScaled(context, renderer(), glyph.text, drawX, drawY,
                             multiplyAlpha(color, opacity), animatedScale);
@@ -3189,7 +3200,7 @@ public final class LyricsOverlay implements AutoCloseable {
             double fillRight = containerCenter + (x + fill.end() * scale - containerCenter) * containerScale;
             if (pass != RenderPass.BASE) continue;
             drawProgressiveGlyph(context, glyph, drawX, drawY, animatedScale,
-                    futureColor, ACTIVE_TEXT, opacity, fillLeft, fillRight);
+                    futureColor, activeColor, opacity, fillLeft, fillRight);
         }
     }
 
@@ -3247,7 +3258,7 @@ public final class LyricsOverlay implements AutoCloseable {
     private void drawAuxiliaryText(DrawContext context, PreparedLine prepared, int x, double y, int width,
                                    boolean opposite, boolean centered, double opacity,
                                    double textBrightness, double focusScale) {
-        double currentY = y + prepared.layout.height + 5 * preferences.getLyricsTextScale();
+        double currentY = y + prepared.layout.height + 5 * lyricsTextScale();
         double auxiliaryScale = .78 * lyricsRenderScale() * focusScale;
         double auxiliaryOpacity = opacity * .58;
         if (preferences.isLyricsRomanization() && preferences.isRomanizationUnderLine()) {
@@ -3257,7 +3268,7 @@ public final class LyricsOverlay implements AutoCloseable {
                 double drawX = centered ? x + (width - textWidth(text) * auxiliaryScale) / 2.0
                         : opposite ? x + width - textWidth(text) * auxiliaryScale : x;
                 drawScaledWithoutShadow(context, renderer(), text, drawX, currentY,
-                        multiplyAlpha(multiplyBrightness(AUXILIARY_TEXT, textBrightness), auxiliaryOpacity), auxiliaryScale);
+                        multiplyAlpha(multiplyBrightness(lyricsTextColor(AUXILIARY_TEXT), textBrightness), auxiliaryOpacity), auxiliaryScale);
                 currentY += rowHeight(auxiliaryScale) + 2;
             }
         }
@@ -3266,7 +3277,7 @@ public final class LyricsOverlay implements AutoCloseable {
             double drawX = centered ? x + (width - textWidth(text) * auxiliaryScale) / 2.0
                     : opposite ? x + width - textWidth(text) * auxiliaryScale : x;
             drawScaledWithoutShadow(context, renderer(), text, drawX, currentY,
-                    multiplyAlpha(multiplyBrightness(AUXILIARY_TEXT, textBrightness), auxiliaryOpacity), auxiliaryScale);
+                    multiplyAlpha(multiplyBrightness(lyricsTextColor(AUXILIARY_TEXT), textBrightness), auxiliaryOpacity), auxiliaryScale);
         }
     }
 
@@ -3332,7 +3343,7 @@ public final class LyricsOverlay implements AutoCloseable {
             int dotY = (int) Math.round(dotsY - lift * 5.0);
             int dotX = dotsStartX + index * dotStep;
             drawScaledWithoutShadow(context, renderer(), "•", dotX, dotY - renderer().fontHeight * dotScale / 2,
-                    multiplyAlpha(blend(0xFF747C87, ACTIVE_TEXT, .20 + fill * .55),
+                    multiplyAlpha(lyricsTextColor(blend(0xFF747C87, ACTIVE_TEXT, .20 + fill * .55)),
                             (.62 + lift * .24) * dot.opacity()),
                     dotScale * (simple ? 1 : dot.scale()));
         }
@@ -3611,7 +3622,7 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     private boolean enhancedEffects() {
-        if (preferences.isSimpleLyricsMode()) return false;
+        if (worldPopupShaderActive || preferences.isSimpleLyricsMode()) return false;
         return renderingInPhone ? !phoneEnhancedFailed : !hudEnhancedFailed;
     }
 
@@ -3629,7 +3640,7 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     private double lyricsRenderScale() {
-        return preferences.getLyricsTextScale() * (renderingInPhone ? PHONE_LYRICS_SCALE : 1.0);
+        return lyricsTextScale() * (renderingInPhone ? PHONE_LYRICS_SCALE : 1.0);
     }
 
     private static String localizeEmptyMessage(String message) {
@@ -3729,6 +3740,11 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     private void drawShadowAtOrigin(DrawContext context, TextRenderer renderer, String value, int sourceAlpha) {
+        if (renderingWorldPopup) {
+            int alpha = Math.max(4, (int) Math.round(sourceAlpha * .7));
+            context.drawText(renderer, styledText(value), 1, 1, alpha << 24, false);
+            return;
+        }
         bloomRenderer.drawShadow(context, renderer, styledText(value), 0, 0, 1,
                 sourceAlpha << 24 | 0xFFFFFF, preferences.getLyricsShadowOpacity() / 100.0,
                 preferences.getLyricsShadowDistance(), preferences.getLyricsShadowSoftness());
@@ -3807,6 +3823,15 @@ public final class LyricsOverlay implements AutoCloseable {
 
     private static int multiplyAlpha(int color, double opacity) {
         return withAlpha(color, (int) Math.round((color >>> 24) * Math.clamp(opacity, 0, 1)));
+    }
+
+    private int lyricsTextColor(int original) {
+        int tint = preferences.getLyricsFontColor();
+        if (tint == 0xFFFFFF) return original;
+        int red = (original >> 16 & 255) * (tint >> 16 & 255) / 255;
+        int green = (original >> 8 & 255) * (tint >> 8 & 255) / 255;
+        int blue = (original & 255) * (tint & 255) / 255;
+        return (original & 0xFF000000) | red << 16 | green << 8 | blue;
     }
 
     private static int multiplyBrightness(int color, double brightness) {

@@ -254,6 +254,7 @@ public final class ClientPreferences {
     private boolean simpleLyricsMode;
     private LyricsTextAlignment lyricsAlignment = LyricsTextAlignment.LEFT;
     private LyricsFontWeight lyricsFontWeight;
+    private int lyricsFontColor = 0xFFFFFF;
     private LyricsGlowIntensity lyricsGlowIntensity = LyricsGlowIntensity.NORMAL;
     private LyricsTransitionSpeed lyricsTransitionSpeed = LyricsTransitionSpeed.SMOOTH;
     private int lyricsShadowOpacity = 72;
@@ -402,6 +403,9 @@ public final class ClientPreferences {
     public void setLyricsAlignment(LyricsTextAlignment value) {
         lyricsAlignment = value == null ? LyricsTextAlignment.LEFT : value;
     }
+    public int getLyricsFontColor() { return lyricsFontColor & 0xFFFFFF; }
+    public void setLyricsFontColor(int rgb) { lyricsFontColor = rgb & 0xFFFFFF; }
+
     public LyricsFontWeight getLyricsFontWeight() {
         return lyricsFontWeight == null
             ? (lyricsBold ? LyricsFontWeight.BOLD : LyricsFontWeight.REGULAR)

@@ -9,6 +9,7 @@ import dev.relaylyrics.client.LyricsSettingsCatalog.Kind;
 import dev.relaylyrics.client.MusicSource;
 import dev.relaylyrics.client.RelayLyricsClient;
 import dev.relaylyrics.client.music.MusicService;
+import dev.relaylyrics.client.music.WindowsBridgeInstaller;
 import dev.relaylyrics.client.music.PlatformTextures;
 import dev.relaylyrics.client.music.ResponsiveLyricsLayout;
 import net.minecraft.client.Minecraft;
@@ -50,6 +51,18 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     private final List<PanelButton> navigation = new ArrayList<>();
     private Category category = Category.GENERAL;
     private String expandedChoice = "", searchQuery = "", revealChoice = "";
+    private Entry colorEntry;
+    private SettingsColor colorDraft;
+    private SearchField colorHex;
+    private PanelButton colorApply;
+    private ColorDrag colorDrag = ColorDrag.NONE;
+    private boolean syncingHex;
+    private int colorX, colorY, colorWidth, toneHeight, hueY, hexY;
+
+    private enum ColorDrag { NONE, TONE, HUE }
+
+    private boolean bridgePrompt, bridgePromptChecked, installingBridge;
+    private String bridgePromptStatus = "";
     private boolean confirmRestore, editing, dragging, resizing, peeking, selectingSearch;
     private int dragX, dragY, editX, editY, editWidth, editHeight;
     private boolean resizeSquareVideo;
@@ -64,6 +77,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     private boolean compactNavigation, stacked;
     private int saveDelay;
     private String notice = "";
+    private boolean importingTtml;
     private SearchField searchField, selectionField;
     private java.net.URI authorizationLink;
     private java.nio.file.Path companionDirectory;
@@ -140,6 +154,10 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     }
     private void savePreferences() { if (preferences == RelayLyricsClient.preferences()) preferences.save(); }
     @Override protected void init() {
+        if (!bridgePromptChecked) {
+            bridgePromptChecked = true;
+            bridgePrompt = preferences == RelayLyricsClient.preferences() && WindowsBridgeInstaller.missing();
+        }
         viewportWidth = width; viewportHeight = height;
         applyUiScale();
     }
@@ -164,6 +182,8 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         stacked = rowWidth < (compactNavigation ? 260 : 410);
         listTop = modalY + (modalHeight < 250 ? 58 : 82);
         listBottom = modalY + modalHeight - (notice.isEmpty() ? 20 : 52);
+        if (bridgePrompt) { buildBridgePrompt(); return; }
+        if (colorEntry != null) { buildColorEditor(); return; }
         if (confirmRestore) { buildRestoreConfirmation(); return; }
         if (editing) { buildEditor(); return; }
 
@@ -312,6 +332,11 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             ButtonKind kind = entry.kind == Kind.TOGGLE ? ButtonKind.TOGGLE : entry.kind == Kind.GROUP ? ButtonKind.GROUP : ButtonKind.ACTION;
             PanelButton control = addPanelButton(valueText(entry), x, 0, controlWidth, entry.kind == Kind.TOGGLE ? 24 : 28, () -> {
                 if (entry.kind == Kind.CHOICE) openChoice(entry);
+                else if (entry.kind == Kind.COLOR) {
+                    colorEntry = entry;
+                    colorDraft = new SettingsColor(entry.selected.getAsInt());
+                    rebuild();
+                }
                 else { entry.activate.run(); changed(entry, true); }
             }, kind, entry);
             row.add(control, 0);
@@ -407,6 +432,148 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             }
         }
     }
+    private void buildColorEditor() {
+        modalWidth = Math.min(350, modalWidth);
+        modalHeight = Math.min(252, modalHeight);
+        modalX = (width - modalWidth) / 2;
+        modalY = (height - modalHeight) / 2;
+        colorX = modalX + 14;
+        colorY = modalY + 26;
+        colorWidth = modalWidth - 28;
+        toneHeight = modalHeight - 100;
+        hueY = colorY + toneHeight + 5;
+        hexY = hueY + 16;
+
+        int footer = modalY + modalHeight - 31;
+        int buttonWidth = (colorWidth - 8) / 2;
+        button(Component.translatable("gui.cancel"), colorX, footer, buttonWidth, () -> closeColorEditor(false));
+        colorApply = button(Component.translatable("gui.done"), colorX + buttonWidth + 8, footer, buttonWidth, () -> closeColorEditor(true));
+
+        colorHex = addRenderableWidget(new SearchField(colorX + 24, hexY, 84, 20, colorEntry));
+        colorHex.setMaxLength(16);
+        colorHex.setValue(SettingsColor.hex(colorDraft.rgb()));
+        colorHex.setResponder(value -> {
+            if (syncingHex) return;
+            String digits = value.startsWith("#") ? value.substring(1) : value;
+            colorApply.active = digits.matches("[0-9a-fA-F]{6}");
+            if (colorApply.active) colorDraft.setRgb(Integer.parseInt(digits, 16));
+        });
+        int swatchSize = colorWidth < 176 ? 9 : 12;
+        for (int i = 0; i < colorEntry.colorPresets.size(); i++) {
+            int rgb = colorEntry.colorPresets.get(i);
+            PanelButton preset = addPanelButton(Component.literal(SettingsColor.hex(rgb)),
+                    colorX + colorWidth - swatchSize - (colorEntry.colorPresets.size() - 1 - i) * (swatchSize + 2),
+                    hexY + (20 - swatchSize) / 2, swatchSize, swatchSize, () -> { colorDraft.setRgb(rgb); syncColorHex(); }, ButtonKind.SWATCH, null);
+            preset.swatch = 0xFF000000 | rgb;
+            preset.setTooltip(Tooltip.create(Component.literal(SettingsColor.hex(rgb))));
+        }
+    }
+
+    private void closeColorEditor(boolean apply) {
+        if (apply && !colorApply.active) return;
+        if (apply) {
+            colorEntry.select.accept(colorDraft.rgb());
+            savePreferences();
+        }
+        colorEntry = null;
+        colorDraft = null;
+        selectionField = null;
+        selectingSearch = false;
+        colorHex = null;
+        colorApply = null;
+        colorDrag = ColorDrag.NONE;
+        rebuild();
+    }
+
+    private void syncColorHex() {
+        syncingHex = true;
+        try { colorHex.setValue(SettingsColor.hex(colorDraft.rgb())); }
+        finally { syncingHex = false; }
+        colorApply.active = true;
+    }
+
+    private void updateColorDrag(double x, double y) {
+        float horizontal = (float) Math.clamp((x - colorX) / (colorWidth - 1), 0, 1);
+        if (colorDrag == ColorDrag.HUE) colorDraft.setHue(horizontal);
+        else colorDraft.setTone(horizontal, (float) (1 - Math.clamp((y - colorY) / (toneHeight - 1), 0, 1)));
+        syncColorHex();
+    }
+
+    private void drawColorEditor(GuiGraphicsExtractor context) {
+        RoundedGui.smoothFill(context, modalX, modalY, modalWidth, modalHeight, 12, ink(DEEP));
+        RoundedGui.smoothOutline(context, modalX, modalY, modalWidth, modalHeight, 12, ink(0x38D9CAFF));
+        drawUi(context, Component.translatable(colorEntry.key), colorX, modalY + 10, INK, 1, true);
+        for (int dx = 0; dx < colorWidth; dx += 2) {
+            float fraction = dx / (float) (colorWidth - 1);
+            int left = colorX + dx, right = Math.min(left + 2, colorX + colorWidth);
+            int tone = SettingsColor.argb(colorDraft.hue(), fraction, 1);
+            context.fillGradient(left, colorY, right, colorY + toneHeight, ink(tone), ink(0xFF000000));
+            context.fill(left, hueY, right, hueY + 10, ink(SettingsColor.argb(fraction, 1, 1)));
+        }
+        drawBorder(context, colorX - 1, colorY - 1, colorWidth + 2, toneHeight + 2, 0x38FFFFFF);
+        int toneX = colorX + Math.round(colorDraft.saturation() * (colorWidth - 1));
+        int toneY = colorY + Math.round((1 - colorDraft.brightness()) * (toneHeight - 1));
+        drawSwatch(context, toneX - 5, toneY - 5, 10, 0xFF000000 | colorDraft.rgb(), true);
+        int hueX = colorX + Math.round(colorDraft.hue() * (colorWidth - 1));
+        RoundedGui.smoothOutline(context, hueX - 3, hueY - 2, 7, 14, 3, ink(0xFF14101B));
+        RoundedGui.smoothOutline(context, hueX - 2, hueY - 1, 5, 12, 2, ink(0xFFFFFFFF));
+        drawSwatch(context, colorX, hexY + 1, 18, 0xFF000000 | colorDraft.rgb(), false);
+    }
+
+    private void drawSwatch(GuiGraphicsExtractor context, int x, int y, int size, int color, boolean selected) {
+        int radius = size / 2;
+        RoundedGui.smoothFill(context, x, y, size, size, radius, ink(color));
+        RoundedGui.smoothOutline(context, x, y, size, size, radius, ink(selected ? 0xFFFFFFFF : 0x50FFFFFF));
+        if (selected) RoundedGui.smoothOutline(context, x - 1, y - 1, size + 2, size + 2, radius + 1, ink(0xFF17121D));
+    }
+
+    private void buildBridgePrompt() {
+        modalWidth = Math.min(420, modalWidth);
+        modalHeight = Math.min(185, modalHeight);
+        modalX = (width - modalWidth) / 2;
+        modalY = (height - modalHeight) / 2;
+        int half = (modalWidth - 38) / 2;
+        int y = modalY + modalHeight - 38;
+        button(Component.translatable("config.relaylyrics.bridge.later"), modalX + 15, y, half, this::dismissBridgePrompt);
+        String action = WindowsBridgeInstaller.manualOnly() ? "manual" : "download";
+        var download = button(Component.translatable("config.relaylyrics.bridge." + action),
+                modalX + 23 + half, y, half, this::installWindowsBridge);
+        download.active = !installingBridge && !bridgePromptStatus.equals("ready");
+    }
+
+    private void dismissBridgePrompt() {
+        bridgePrompt = false;
+        rebuild();
+    }
+
+    private void installWindowsBridge() {
+        if (WindowsBridgeInstaller.manualOnly()) { browse(WindowsBridgeInstaller.releasePage()); return; }
+        installingBridge = true;
+        bridgePromptStatus = "downloading";
+        rebuild();
+        var client = Minecraft.getInstance();
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try { WindowsBridgeInstaller.install(); }
+            catch (Exception error) { throw new java.util.concurrent.CompletionException(error); }
+        }).whenComplete((ignored, error) -> client.execute(() -> {
+            installingBridge = false;
+            bridgePromptStatus = error == null ? "ready" : "failed";
+            if (client.gui.screen() == this && bridgePrompt) rebuild();
+        }));
+    }
+
+    private void drawBridgePrompt(GuiGraphicsExtractor context) {
+        RoundedGui.smoothFill(context, modalX, modalY, modalWidth, modalHeight, 16, ink(DEEP));
+        RoundedGui.smoothOutline(context, modalX, modalY, modalWidth, modalHeight, 16, ink(0x38D9CAFF));
+        drawUi(context, Component.translatable("config.relaylyrics.bridge.title"), modalX + 15, modalY + 15, INK, 1, true);
+        String detail = bridgePromptStatus.isEmpty() ? WindowsBridgeInstaller.manualOnly() ? "setup" : "prompt" : bridgePromptStatus;
+        int y = modalY + 36;
+        for (var line : font.split(ui(Component.translatable("config.relaylyrics.bridge." + detail)), modalWidth - 30)) {
+            drawOrdered(context, line, modalX + 15, y, MUTED, .85);
+            y += 11;
+        }
+    }
+
     private void buildRestoreConfirmation() {
         rowLeft = paneX + 28; rowWidth = Math.max(100, paneWidth - 56);
         button(Component.translatable("gui.cancel"), rowLeft, modalY + modalHeight - 52, Math.max(60, (rowWidth - 8) / 2),
@@ -466,6 +633,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             if (key.endsWith(".spotify.disconnect")) row.widgets.get(0).active = RelayLyricsClient.music() != null && RelayLyricsClient.music().spotifyAccountConnected();
             if (key.endsWith(".spotify.setup.reopen")) row.widgets.get(0).active = authorizationLink != null;
             if (key.endsWith(".youtube.setup.prepare")) row.widgets.get(0).active = !installingCompanion;
+            if (key.endsWith(".sources.import_ttml")) row.widgets.get(0).active = !importingTtml;
         }
     }
     @Override public void tick() {
@@ -557,6 +725,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             }
             case "motion_artwork" -> { if (music != null) music.refreshMotionArtwork(); }
             case "lyrics_sources" -> { if (music != null) music.retryLyrics(); }
+            case "import_ttml" -> importTtml(music);
             case "retry" -> { if (music != null) { music.syncMusicSource(); music.retryLyrics(); } }
             case "audio" -> { if (music != null) music.reloadReactiveAudioOutput(); }
             case "restore_all" -> { confirmRestore = true; rebuild(); }
@@ -601,6 +770,25 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             rebuild();
         }));
     }
+    private void importTtml(MusicService music) {
+        if (importingTtml) return;
+        if (music == null) {
+            notice = "@config.relaylyrics.sources.import_ttml.no_track";
+            rebuild();
+            return;
+        }
+        importingTtml = true;
+        var client = Minecraft.getInstance();
+        music.importTtml(I18n.get("config.relaylyrics.sources.import_ttml"))
+                .whenComplete((result, error) -> client.execute(() -> {
+                    importingTtml = false;
+                    if (client.gui.screen() != this || result == MusicService.TtmlImportResult.CANCELLED) return;
+                    String status = error == null ? result.name().toLowerCase(Locale.ROOT) : "failed";
+                    notice = "@config.relaylyrics.sources.import_ttml." + status;
+                    rebuild();
+                }));
+    }
+
     private void installCompanion() {
         if (installingCompanion) return;
         installingCompanion = true; notice = "@config.relaylyrics.youtube.preparing"; rebuild();
@@ -740,6 +928,8 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         if (!drawingPanel || peeking || editing) return;
         paintAlpha = modalAlpha;
         if (paintAlpha <= 0) return;
+        if (bridgePrompt) { drawBridgePrompt(context); return; }
+        if (colorEntry != null) { drawColorEditor(context); return; }
         for (int spread = 12; spread >= 3; spread -= 3)
             RoundedGui.smoothFill(context, modalX - spread, modalY - spread / 2, modalWidth + spread * 2,
                     modalHeight + spread, 16, ink(0x08000000));
@@ -889,6 +1079,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
     }
 
     @Override protected boolean handleMouseScrolled(double x, double y, double horizontal, double vertical) {
+        if (colorEntry != null) return true;
         if (peeking || vertical == 0) return false;
         revealChoice = "";
         if (controlDown() && !editing) {
@@ -900,6 +1091,17 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         scroll = Math.clamp(scroll + (vertical > 0 ? -40 : 40), 0, maxScroll()); setFocused(null); positionRows(); return true;
     }
     @Override protected boolean handleKeyPressed(int key, int scanCode, int modifiers) {
+        if (bridgePrompt) {
+            if (key == GLFW.GLFW_KEY_ESCAPE) { dismissBridgePrompt(); return true; }
+            return false;
+        }
+        if (colorEntry != null) {
+            if (key == GLFW.GLFW_KEY_ESCAPE) { closeColorEditor(false); return true; }
+            if ((key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) && getFocused() == colorHex) {
+                closeColorEditor(true); return true;
+            }
+            return false;
+        }
         if (controlDown() && key == GLFW.GLFW_KEY_0 && !editing) {
             preferences.setSettingsUiScale(1); savePreferences(); applyUiScale(); return true;
         }
@@ -930,6 +1132,21 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         return false;
     }
     @Override protected boolean handleMouseClicked(double x, double y, int button) {
+        if (colorEntry != null && button == 0) {
+            if (x < modalX || x >= modalX + modalWidth || y < modalY || y >= modalY + modalHeight) {
+                closeColorEditor(false);
+                return true;
+            }
+            if (x >= colorX - 2 && x < colorX + colorWidth + 2) {
+                if (y >= colorY && y < colorY + toneHeight) colorDrag = ColorDrag.TONE;
+                else if (y >= hueY - 2 && y < hueY + 12) colorDrag = ColorDrag.HUE;
+                if (colorDrag != ColorDrag.NONE) {
+                    setFocused(null);
+                    updateColorDrag(x, y);
+                    return true;
+                }
+            }
+        }
         for (Row row : rows) for (var control : row.widgets) {
             if (control.visible && control.isMouseOver(x,y) && (row.leaving || y < rowTop(row)+row.inset || y >= rowBottom(row))) return true;
         }
@@ -968,6 +1185,10 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         dragging = !resizing; dragX = (int) x; dragY = (int) y; return true;
     }
     @Override protected boolean handleMouseDragged(double x, double y, int button, double dx, double dy) {
+        if (colorDrag != ColorDrag.NONE && button == 0) {
+            updateColorDrag(x, y);
+            return true;
+        }
         if (selectingSearch && selectionField != null && button == 0) { selectionField.moveCursorTo(selectionField.cursorAt(x), true); return true; }
         if (!editing || (!resizing && !dragging)) return false;
         int mx = (int) x, my = (int) y;
@@ -1014,6 +1235,10 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         preferences.setPopupHeight(popupSizeProfile(), editHeight); saveDelay = 10;
     }
     @Override protected boolean handleMouseReleased(double x, double y, int button) {
+        if (colorDrag != ColorDrag.NONE && button == 0) {
+            colorDrag = ColorDrag.NONE;
+            return true;
+        }
         if (button == 0) { pointerHeld = false; pressedKey = ""; }
         boolean handled = dragging || resizing || peeking || selectingSearch; selectingSearch = false; peeking = false; dragging = false; resizing = false;
         if (saveDelay > 0) { savePreferences(); saveDelay = 0; } return handled;
@@ -1254,7 +1479,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         }
         void add(AbstractWidget widget, int offset) { widgets.add(widget); widgetOffsets.add(offset); }
     }
-    private enum ButtonKind { ACTION, NAV, CLOSE, PEEK, TOGGLE, GROUP, OPTION, INFO }
+    private enum ButtonKind { ACTION, NAV, CLOSE, PEEK, TOGGLE, GROUP, OPTION, INFO, SWATCH }
     private final class PanelButton extends Button {
         private final ButtonKind kind;
         private final Entry entry;
@@ -1263,6 +1488,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         private final ButtonMotion motion;
         private final Runnable invoke;
         private boolean selected;
+        private int swatch;
         private double glassEngagement;
         PanelButton(int x, int y, int width, int height, net.minecraft.network.chat.Component label, Runnable action, ButtonKind kind, Entry entry) {
             super(x, y, width, height, ui(label), ignored -> activate(motionKey(kind, entry, kind == ButtonKind.OPTION || entry == null || entry.kind == Kind.SLIDER ? label.getString() : ""), entry, action), DEFAULT_NARRATION);
@@ -1278,7 +1504,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         }
         private void drawAnimatedControl(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
             if (peeking || kind == ButtonKind.INFO) return;
-            paintAlpha = modalAlpha * (kind == ButtonKind.NAV || kind == ButtonKind.CLOSE || kind == ButtonKind.PEEK ? 1 : paneAlpha) * rowOpacity(this);
+            paintAlpha = modalAlpha * (kind == ButtonKind.NAV || kind == ButtonKind.CLOSE || kind == ButtonKind.PEEK || colorEntry != null ? 1 : paneAlpha) * rowOpacity(this);
             if (paintAlpha <= 0) return;
             boolean over = isHovered() || isFocused();
             double hover = motion.hover.to(over ? 1 : 0, SettingsMotion.FAST, SettingsMotion.Curve.STANDARD, frameNanos, motionEnabled());
@@ -1297,6 +1523,10 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         }
         private void paintButton(GuiGraphicsExtractor context, double hover) {
             int x = getX(), y = getY(), w = getWidth(), h = getHeight();
+            if (kind == ButtonKind.SWATCH) {
+                drawSwatch(context, x, y, w, swatch, isFocused() || colorDraft != null && colorDraft.rgb() == (swatch & 0xFFFFFF));
+                return;
+            }
             if (kind == ButtonKind.CLOSE) {
                 LiquidGlass.draw(context, x, y, w, h, h / 2, paintAlpha, glassEngagement);
                 if (isFocused()) RoundedGui.smoothOutline(context, x - 2, y - 2, w + 4, h + 4, h / 2 + 2, ink(0xB3D9CAFF));
@@ -1345,6 +1575,11 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
                     drawUi(context, net.minecraft.network.chat.Component.literal(value), x + 34, textY(y + h / 2.0, .95), SettingsMotion.mix(selected ? INK : MUTED, INK, hover), .95, selected);
                 }
             } else {
+                if (entry != null && entry.kind == Kind.COLOR) {
+                    drawSwatch(context, x + 9, y + (h - 14) / 2, 14, 0xFF000000 | entry.selected.getAsInt(), false);
+                    x += 19;
+                    w -= 19;
+                }
                 net.minecraft.network.chat.Component label = ui(getMessage());
                 String value = font.substrByWidth(label, Math.max(20, w - 18)).getString();
                 net.minecraft.network.chat.Component visible = ui(net.minecraft.network.chat.Component.literal((kind == ButtonKind.OPTION && selected ? "✓ " : "") + value));
@@ -1395,6 +1630,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         SearchField(int x, int y, int width, int height, Entry binding) {
             this(x,y,width,height); this.binding = binding;
         }
+        private double inputScale() { return this == colorHex ? .75 : .9; }
         private String displayInput() {
             String raw = getValue();
             return binding != null && binding.masked ? "•".repeat(raw.length()) : raw;
@@ -1406,13 +1642,16 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         }
         private void drawAnimatedControl(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {
             if (peeking) return;
-            paintAlpha = modalAlpha * (binding == null ? 1 : paneAlpha * rowOpacity(this));
+            paintAlpha = modalAlpha * (binding == null || this == colorHex ? 1 : paneAlpha * rowOpacity(this));
             if (paintAlpha <= 0) return;
             int x = getX(), y = getY(), w = getWidth(), h = getHeight();
             RoundedGui.smoothFill(context, x, y, w, h, 9, ink(0x3D000000));
-            RoundedGui.smoothOutline(context, x, y, w, h, 9, ink(isFocused() ? 0x6BD9CAFF : 0x1FD9CAFF));
-            SettingsTypography.icon(context, binding == null ? "search" : "CONNECTION", x + 8, y + h / 2 - 8, 16, ink(MUTED));
-            int available = Math.max(20, (int) ((w - 40) / .9));
+            int outline = this == colorHex && !colorApply.active ? 0xAAFF8294 : isFocused() ? 0x6BD9CAFF : 0x1FD9CAFF;
+            RoundedGui.smoothOutline(context, x, y, w, h, 9, ink(outline));
+            if (this == colorHex) drawUi(context, Component.literal("HEX"), x + 5, textY(y + h / 2.0, .7), MUTED, .7, true);
+            else SettingsTypography.icon(context, binding == null ? "search" : "CONNECTION", x + 8, y + h / 2 - 8, 16, ink(MUTED));
+            double scale = inputScale();
+            int available = Math.max(20, (int) ((w - (this == colorHex ? 34 : 40)) / scale));
             String input = displayInput();
             int cursor = getCursorPosition();
             visibleStart = Math.clamp(visibleStart, 0, input.length());
@@ -1421,27 +1660,27 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             int end = visibleStart;
             while (end < input.length() && font.width(ui(Component.literal(input.substring(visibleStart, end + 1)))) <= available) end++;
             String visible = input.substring(visibleStart, end);
-            Component shown = input.isEmpty() ? net.minecraft.network.chat.Component.translatable(binding == null ? "config.relaylyrics.settings.search" : binding.key + ".placeholder") : net.minecraft.network.chat.Component.literal(visible);
+            Component shown = input.isEmpty() ? net.minecraft.network.chat.Component.translatable(this == colorHex ? "config.relaylyrics.color.hex" : binding == null ? "config.relaylyrics.settings.search" : binding.key + ".placeholder") : net.minecraft.network.chat.Component.literal(visible);
             String trimmed = font.substrByWidth(ui(shown), available).getString();
             String selected = getHighlighted();
             if (!selected.isEmpty()) {
                 int selectionStart = getValue().startsWith(selected, cursor) ? cursor : cursor - selected.length();
                 int selectionEnd = selectionStart + selected.length();
                 int a = Math.clamp(selectionStart, visibleStart, end), b = Math.clamp(selectionEnd, visibleStart, end);
-                int left = x + 29 + (int) Math.round(font.width(ui(net.minecraft.network.chat.Component.literal(input.substring(visibleStart, a)))) * .9);
-                int right = x + 29 + (int) Math.round(font.width(ui(net.minecraft.network.chat.Component.literal(input.substring(visibleStart, b)))) * .9);
+                int left = x + 29 + (int) Math.round(font.width(ui(net.minecraft.network.chat.Component.literal(input.substring(visibleStart, a)))) * scale);
+                int right = x + 29 + (int) Math.round(font.width(ui(net.minecraft.network.chat.Component.literal(input.substring(visibleStart, b)))) * scale);
                 if (right > left) context.fill(left, y + h / 2 - 7, right, y + h / 2 + 7, ink(0x55D9CAFF));
             }
-            drawUi(context, net.minecraft.network.chat.Component.literal(trimmed), x + 29, textY(y + h / 2.0, .9), input.isEmpty() ? TERTIARY : INK, .9, false);
+            drawUi(context, net.minecraft.network.chat.Component.literal(trimmed), x + 29, textY(y + h / 2.0, scale), input.isEmpty() ? TERTIARY : INK, scale, false);
             if (isFocused() && System.currentTimeMillis() / 500 % 2 == 0) {
-                int at = x + 29 + (int) Math.round(font.width(ui(net.minecraft.network.chat.Component.literal(input.substring(visibleStart, Math.clamp(cursor, visibleStart, end))))) * .9);
+                int at = x + 29 + (int) Math.round(font.width(ui(net.minecraft.network.chat.Component.literal(input.substring(visibleStart, Math.clamp(cursor, visibleStart, end))))) * scale);
                 context.fill(at, y + h / 2 - 7, at + 1, y + h / 2 + 7, ink(INK));
             }
         }
         int cursorAt(double mouseX) {
             String value = displayInput();
             int start = Math.clamp(visibleStart, 0, value.length());
-            double target = (mouseX - getX() - 29) / .9;
+            double target = (mouseX - getX() - 29) / inputScale();
             for (int index = start; index < value.length(); index++) {
                 int before = font.width(ui(net.minecraft.network.chat.Component.literal(value.substring(start, index))));
                 int after = font.width(ui(net.minecraft.network.chat.Component.literal(value.substring(start, index + 1))));

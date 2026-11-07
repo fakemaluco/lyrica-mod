@@ -8,12 +8,20 @@ import dev.fandroid.protocol.lyrics.LyricsSource;
 import dev.fandroid.protocol.lyrics.SecureTtmlParser;
 import dev.fandroid.protocol.music.PlaybackSnapshot;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Stream;
 
@@ -25,10 +33,13 @@ public final class ImportedLyricsClient {
     private static final double AMBIGUITY_MARGIN = .04;
 
     private final Path imports;
+    private final Path manualCache;
     private final SecureTtmlParser parser = new SecureTtmlParser();
 
     public ImportedLyricsClient(Path imports) {
         this.imports = imports;
+        // A subdirectory of the lyrics cache, outside its automatic provider-entry pruning.
+        manualCache = imports.resolveSibling("sources").resolve("manual-ttml");
     }
 
     public Path folder() {
@@ -36,6 +47,11 @@ public final class ImportedLyricsClient {
     }
 
     public SearchResult find(PlaybackSnapshot track) {
+        Path override = manualCache.resolve(trackKey(track) + ".ttml");
+        if (Files.isRegularFile(override)) {
+            var match = parsed(override, 1);
+            if (match.isPresent()) return new SearchResult(match, List.of());
+        }
         try {
             Files.createDirectories(imports);
             String spotifyId = SpicyLyricsApiClient.spotifyTrackId(track.spotifyUri());
@@ -84,23 +100,71 @@ public final class ImportedLyricsClient {
         }
     }
 
+    Match saveForTrack(PlaybackSnapshot track, Path source) throws IOException {
+        if (!source.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".ttml") || !Files.isRegularFile(source)) {
+            throw new IllegalArgumentException("Expected a TTML file");
+        }
+        byte[] contents = readTtml(source);
+        LyricsDocument document = parse(contents);
+        Files.createDirectories(manualCache);
+        Path destination = manualCache.resolve(trackKey(track) + ".ttml");
+        Path temporary = Files.createTempFile(manualCache, "import-", ".tmp");
+        try {
+            Files.write(temporary, contents);
+            try {
+                Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+        return new Match(destination, document, 1);
+    }
+
+    static String trackKey(PlaybackSnapshot track) {
+        String spotifyId = SpicyLyricsApiClient.spotifyTrackId(track.spotifyUri());
+        String identity = spotifyId != null ? "spotify:" + spotifyId
+                : "metadata:" + metadataPart(track.title()) + metadataPart(track.artist()) + metadataPart(track.album());
+        try {
+            return HexFormat.of().formatHex(
+                    MessageDigest.getInstance("SHA-256").digest(identity.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    private static String metadataPart(String value) {
+        String normalized = Objects.toString(value, "").strip().toLowerCase(Locale.ROOT);
+        return normalized.length() + ":" + normalized;
+    }
+
     public Optional<Match> load(Candidate candidate) {
+        if (!candidate.path().normalize().startsWith(imports.normalize())) return Optional.empty();
         return parsed(candidate.path(), candidate.score());
     }
 
     private Optional<Match> parsed(Path path, double score) {
         try {
-            if (!path.normalize().startsWith(imports.normalize()) || Files.size(path) > MAX_FILE_BYTES) {
-                return Optional.empty();
-            }
-            LyricsDocument parsed = parser.parse(Files.readAllBytes(path));
-            if (parsed.lines().isEmpty()) return Optional.empty();
-            LyricsMetadata metadata = parsed.metadata().withSource(LyricsSource.IMPORTED);
-            return Optional.of(new Match(path, parsed.withMetadata(metadata), score));
+            return Optional.of(new Match(path, parse(readTtml(path)), score));
         } catch (Exception error) {
             FanDroidMod.LOGGER.debug("Ignored invalid imported TTML {}: {}", path.getFileName(), error.getMessage());
             return Optional.empty();
         }
+    }
+
+    private byte[] readTtml(Path path) throws IOException {
+        try (var stream = Files.newInputStream(path)) {
+            byte[] bytes = stream.readNBytes((int) MAX_FILE_BYTES + 1);
+            if (bytes.length > MAX_FILE_BYTES) throw new IllegalArgumentException("TTML exceeds 4 MiB");
+            return bytes;
+        }
+    }
+
+    private LyricsDocument parse(byte[] bytes) {
+        LyricsDocument document = parser.parse(bytes);
+        if (document.lines().isEmpty()) throw new IllegalArgumentException("TTML has no lyrics");
+        return document.withMetadata(document.metadata().withSource(LyricsSource.IMPORTED));
     }
 
     public record Candidate(Path path, String title, String artist, String album, double score) { }

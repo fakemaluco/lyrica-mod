@@ -2,6 +2,7 @@ use crate::{MusicCapabilities, MusicCommand, PlaybackSnapshot};
 use anyhow::Result;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::Utc;
+use std::os::windows::ffi::OsStrExt;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -17,7 +18,7 @@ use windows::Media::Control::{
 use windows::Storage::Streams::DataReader;
 use windows::Win32::Media::Audio::{
     eConsole, eRender, AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED,
-    AUDCLNT_STREAMFLAGS_LOOPBACK, IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator,
+    AUDCLNT_STREAMFLAGS_LOOPBACK, IAudioCaptureClient, IAudioClient, IAudioSessionControl, IMMDeviceEnumerator,
     MMDeviceEnumerator,
 };
 
@@ -25,10 +26,17 @@ use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
 };
 
+use windows::core::{PCWSTR, w};
+use windows_future::{AsyncStatus, IAsyncOperation};
+
 // Direct COM interface pointers obtained on an MTA are safe to call from the
 // dedicated capture thread; the wrapper only restores `Send`.
-struct SendCaptureClient(IAudioCaptureClient);
-unsafe impl Send for SendCaptureClient {}
+struct CaptureStream {
+    capture: IAudioCaptureClient,
+    _session: Option<IAudioSessionControl>,
+    _client: IAudioClient,
+}
+unsafe impl Send for CaptureStream {}
 
 const FFT_SIZE: usize = 512;
 const BAND_COUNT: usize = 16;
@@ -68,9 +76,18 @@ fn spawn_loopback_capture(shared: IntensityCapture) -> Option<()> {
             .ok()?;
         CoTaskMemFree(Some(format as *const core::ffi::c_void));
         let capture: IAudioCaptureClient = client.GetService().ok()?;
+        let session = client.GetService::<IAudioSessionControl>().ok();
+        if let Some(session) = &session {
+            let _ = session.SetDisplayName(w!("Lyrica Song Identifier"), std::ptr::null());
+            if let Ok(exe) = std::env::current_exe() {
+                let icon: Vec<u16> = exe.as_os_str().encode_wide()
+                    .chain(",0".encode_utf16()).chain(std::iter::once(0)).collect();
+                let _ = session.SetIconPath(PCWSTR(icon.as_ptr()), std::ptr::null());
+            }
+        }
         client.Start().ok()?;
-        let capture = SendCaptureClient(capture);
-        thread::spawn(move || capture_loop(capture, shared, channels, block_align, sample_rate));
+        let stream = CaptureStream { capture, _session: session, _client: client };
+        thread::spawn(move || capture_loop(stream, shared, channels, block_align, sample_rate));
     }
     Some(())
 }
@@ -122,13 +139,13 @@ fn fft(re: &mut [f32], im: &mut [f32]) {
 }
 
 fn capture_loop(
-    capture: SendCaptureClient,
+    stream: CaptureStream,
     shared: IntensityCapture,
     channels: usize,
     block_align: usize,
     sample_rate: u32,
 ) {
-    let capture = capture.0;
+    let capture = &stream.capture;
     let silent_flag = AUDCLNT_BUFFERFLAGS_SILENT.0 as u32;
     let mut envelope = 0.0f64;
     let mut ring = vec![0.0f32; FFT_SIZE];
@@ -309,9 +326,14 @@ fn capture_loop(
 }
 
 const MAX_ARTWORK_BYTES: u64 = 8 * 1024 * 1024;
+const MEDIA_RETRY_DELAY: Duration = Duration::from_secs(5);
+const MEDIA_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct SystemMedia {
-    manager: GlobalSystemMediaTransportControlsSessionManager,
+    manager: Option<GlobalSystemMediaTransportControlsSessionManager>,
+    manager_request: Option<IAsyncOperation<GlobalSystemMediaTransportControlsSessionManager>>,
+    request_started: Instant,
+    retry_at: Instant,
     selected: Option<GlobalSystemMediaTransportControlsSession>,
     selected_source: String,
     artwork_key: String,
@@ -320,8 +342,12 @@ pub struct SystemMedia {
 
 impl SystemMedia {
     pub fn new() -> Result<Self> {
+        let now = Instant::now();
         Ok(Self {
-            manager: GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.get()?,
+            manager: None,
+            manager_request: None,
+            request_started: now,
+            retry_at: now,
             selected: None,
             selected_source: String::new(),
             artwork_key: String::new(),
@@ -329,14 +355,59 @@ impl SystemMedia {
         })
     }
 
+    fn poll_manager(&mut self) -> Result<()> {
+        if self.manager.is_some() {
+            return Ok(());
+        }
+        let now = Instant::now();
+        if let Some(request) = self.manager_request.take() {
+            match request.Status() {
+                Ok(status) if status == AsyncStatus::Started => {
+                    if now.duration_since(self.request_started) < MEDIA_REQUEST_TIMEOUT {
+                        self.manager_request = Some(request);
+                        return Ok(());
+                    }
+                    let _ = request.Cancel();
+                    self.retry_at = now + MEDIA_RETRY_DELAY;
+                    anyhow::bail!("Windows media session request timed out");
+                }
+                status => {
+                    self.retry_at = now + MEDIA_RETRY_DELAY;
+                    status?;
+                    self.manager = Some(request.GetResults()?);
+                }
+            }
+        } else if now >= self.retry_at {
+            self.request_started = now;
+            self.retry_at = now + MEDIA_RETRY_DELAY;
+            self.manager_request = Some(GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?);
+        }
+        Ok(())
+    }
+
     fn session_for(&mut self, source: &str) -> Result<GlobalSystemMediaTransportControlsSession> {
-        let current = self.manager.GetCurrentSession().ok();
+        if let Err(error) = self.poll_manager() {
+            eprintln!("Windows media session unavailable, retrying: {error}");
+            return Err(error);
+        }
+        let manager = self.manager.as_ref().ok_or_else(|| anyhow::anyhow!("Waiting for Windows media session manager"))?;
+        let current = manager.GetCurrentSession().ok();
         let mut available = Vec::new();
         let mut candidates = Vec::new();
-        let sessions = self.manager.GetSessions()?;
+        let sessions = match manager.GetSessions() {
+            Ok(sessions) => sessions,
+            Err(error) => {
+                self.manager = None;
+                self.selected = None;
+                self.retry_at = Instant::now() + MEDIA_RETRY_DELAY;
+                eprintln!("Windows media sessions unavailable, retrying: {error}");
+                return Err(error.into());
+            }
+        };
         for index in 0..sessions.Size()? {
-            let session = sessions.GetAt(index)?;
-            let id = session.SourceAppUserModelId()?.to_string().to_lowercase();
+            let Ok(session) = sessions.GetAt(index) else { continue };
+            let Ok(id) = session.SourceAppUserModelId() else { continue };
+            let id = id.to_string().to_lowercase();
             if source == "YOUTUBE_MUSIC" && !(id.contains("youtube") || id.contains("music.youtube")
                 || id.contains("cinhimbnkkaeohfgghhklpknlkffjgod")) {
                 continue;

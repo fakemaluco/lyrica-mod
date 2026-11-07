@@ -26,7 +26,7 @@ class KaraokeHubTest {
     }
 
     @Test
-    void onlyConsentingPlayersGetTrackAndLyricsAndUpdatesContinueOutOfRange() {
+    void onlyConsentingPlayersGetTrackAndLegacyLyricsAreIgnored() {
         var hub = new KaraokeHub();
         var host = new Player();
         var guest = new Player();
@@ -35,7 +35,7 @@ class KaraokeHubTest {
         assertTrue(hub.open(host, host.position, 1000));
         hub.receive(host, message("update", "room", host.id, "song", song("Song")), 1250);
         hub.receive(host, message("lyrics", "room", host.id, "part", 0, "sync", "WORD", "lines",
-                List.of(new Line(1000, 2000, "Lyrics", List.of()))), 1300);
+                List.of(Map.of("start", 1000, "end", 2000, "text", "Legacy lyrics"))), 1300);
         assertNull(guest.packet("track"));
         assertNull(guest.packet("lyrics"));
         guest.position = new Panel("world", 35, 0, 0, 0);
@@ -45,7 +45,7 @@ class KaraokeHubTest {
         hub.receive(guest, message("accept", "room", host.id), 1500);
         assertNotNull(guest.packet("accepted"));
         assertEquals(1250, read(guest.packet("track"), "song", Song.class).position());
-        assertEquals("WORD", string(guest.packet("lyrics"), "sync"));
+        assertNull(guest.packet("lyrics"));
 
         hub.receive(guest, message("cursor", "room", host.id, "pointer", Pointer.fromPanel(150, 90)), 1600);
         assertNull(guest.packet("cursor"));
@@ -71,12 +71,9 @@ class KaraokeHubTest {
         var next = guest.packet("track");
         assertEquals("Different", read(next, "song", Song.class).title());
         assertEquals(2, generation(next));
-        var oldLyrics = List.of(new Line(1000, 2000, "Old lyrics", List.of()));
-        hub.receive(host, message("lyrics", "room", host.id, "generation", 1, "part", 0, "lines", oldLyrics), 2400);
+        hub.receive(host, message("lyrics", "room", host.id, "generation", 2, "part", 0, "lines",
+                List.of(Map.of("text", "Legacy lyrics"))), 2500);
         assertNull(guest.packet("lyrics"));
-        var newLyrics = List.of(new Line(1000, 2000, "New lyrics", List.of()));
-        hub.receive(host, message("lyrics", "room", host.id, "generation", 2, "part", 0, "lines", newLyrics), 2500);
-        assertEquals(GSON.toJsonTree(newLyrics), guest.packet("lyrics").get("lines"));
 
         hub.receive(host, message("update", "room", host.id, "song", null), 2800);
         assertEquals(3, generation(guest.packet("track")));
@@ -89,6 +86,38 @@ class KaraokeHubTest {
         assertEquals("Third", read(guest.packet("track"), "song", Song.class).title());
         hub.stop(host.id);
         assertNotNull(guest.packet("close"));
+    }
+
+    @Test
+    void invitationShowsCurrentMetadataAndHostingKeepsExistingMembership() {
+        var hub = new KaraokeHub();
+        var host = new Player();
+        var guest = new Player();
+        hub.join(host);
+        hub.join(guest);
+        assertTrue(hub.open(host, host.position, 1_000));
+        var playing = new Song("Track", "Artist", "https://example.org/cover", "spotify:track:0123456789ABCDEFGHIJKL",
+                1_000, 60_000, true);
+        hub.receive(host, message("update", "room", host.id, "song", playing), 1_250);
+        var invitation = guest.packet("preview").getAsJsonObject("preview");
+        assertEquals(Set.of("title", "artist"), invitation.keySet());
+        assertEquals(new Preview("Track", "Artist"), read(guest.packet("preview"), "preview", Preview.class));
+        assertNull(guest.packet("track"));
+
+        var lateGuest = new Player();
+        hub.join(lateGuest);
+        assertEquals(new Preview("Track", "Artist"), read(lateGuest.packet("panel"), "preview", Preview.class));
+
+        hub.receive(guest, message("accept", "room", host.id), 1_500);
+        assertTrue(hub.open(guest, guest.position, 1_600));
+        hub.receive(host, message("update", "room", host.id, "song", song("Next track")), 1_800);
+        assertEquals(host.id, id(guest.packet("track"), "room"));
+        assertEquals("Next track", read(guest.packet("track"), "song", Song.class).title());
+        assertEquals(new Preview("Next track", "Artist"), read(lateGuest.packet("preview"), "preview", Preview.class));
+        assertNull(lateGuest.packet("track"));
+
+        hub.receive(host, message("update", "room", host.id, "song", null), 2_100);
+        assertNull(read(lateGuest.packet("preview"), "preview", Preview.class));
     }
 
     @Test

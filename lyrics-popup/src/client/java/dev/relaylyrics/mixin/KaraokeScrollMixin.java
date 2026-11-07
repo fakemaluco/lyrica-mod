@@ -10,7 +10,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(Mouse.class)
 abstract class KaraokeScrollMixin {
     @Inject(method = "onMouseScroll", at = @At("HEAD"), cancellable = true)
-    private void lyrica$movePanelDepth(long window, double horizontal, double vertical, CallbackInfo ci) {
-        if (KaraokeClient.scrollDrag(vertical)) ci.cancel();
+    private void lyrica$scrollFloatingPopup(long window, double horizontal, double vertical, CallbackInfo ci) {
+        if (KaraokeClient.scrollPopup(vertical)) ci.cancel();
     }
 }

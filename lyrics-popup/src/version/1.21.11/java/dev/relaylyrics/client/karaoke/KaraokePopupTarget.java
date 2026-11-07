@@ -1,6 +1,7 @@
 package dev.relaylyrics.client.karaoke;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+import dev.relaylyrics.client.ui.KaraokeInvitationRenderer;
 import com.mojang.blaze3d.textures.FilterMode;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.Framebuffer;
@@ -19,14 +20,14 @@ import java.util.List;
 import static dev.relaylyrics.karaoke.KaraokeWire.*;
 
 public final class KaraokePopupTarget implements AutoCloseable {
-    public static final int DENSITY = 2;
+    private static int density;
     private static Framebuffer active;
     private static BufferAllocator allocator;
     private static FogRenderer fog;
     private static GuiRenderer renderer;
     private static GuiRenderState state;
     private final Identifier texture;
-    private final SimpleFramebuffer target = new SimpleFramebuffer("Lyrica karaoke", WIDTH * DENSITY, HEIGHT * DENSITY, true);
+    private final SimpleFramebuffer target = new SimpleFramebuffer("Lyrica karaoke", WIDTH * 2, HEIGHT * 2, true);
 
     KaraokePopupTarget(int slot) {
         texture = Identifier.of("lyrica", "karaoke/" + slot);
@@ -47,9 +48,12 @@ public final class KaraokePopupTarget implements AutoCloseable {
     Identifier texture() { return texture; }
     public static Framebuffer active() { return active; }
 
+    public static int density() { return density; }
+
     void paint(KaraokePopup view, double x, double y) {
+        int scale = KaraokeSurfaces.textureDensity(view.width, view.height);
         var client = MinecraftClient.getInstance();
-        int width = view.width * DENSITY, height = view.height * DENSITY;
+        int width = view.width * scale, height = view.height * scale;
         if (target.textureWidth != width || target.textureHeight != height) {
             target.resize(width, height);
             registerTexture();
@@ -65,9 +69,12 @@ public final class KaraokePopupTarget implements AutoCloseable {
         var projection = RenderSystem.getProjectionMatrixBuffer();
         var projectionType = RenderSystem.getProjectionType();
         try {
-            view.overlay.renderWorldPopup(context, view.width, view.height, x, y);
+            if (view.invitation) KaraokeInvitationRenderer.draw(context, view.invitationLayout(), x, y,
+                    view.spotifySync, view.preview, view.buttons, view.motionEnabled);
+            else view.overlay.renderWorldPopup(context, view.width, view.height, x, y);
             RenderSystem.getDevice().createCommandEncoder().clearColorAndDepthTextures(
                     target.getColorAttachment(), 0, target.getDepthAttachment(), 1);
+            density = scale;
             active = target;
             renderer.render(fog.getFogBuffer(FogRenderer.FogType.NONE));
             renderer.incrementFrame();

@@ -18,6 +18,6 @@ abstract class KaraokeGuiTargetMixin {
     @Redirect(method = "setScissor", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/util/Window;getScaleFactor()D"))
     private double lyrica$scale(Window window) {
-        return KaraokePopupTarget.painting() ? KaraokePopupTarget.DENSITY : window.getScaleFactor();
+        return KaraokePopupTarget.painting() ? KaraokePopupTarget.density() : window.getScaleFactor();
     }
 }

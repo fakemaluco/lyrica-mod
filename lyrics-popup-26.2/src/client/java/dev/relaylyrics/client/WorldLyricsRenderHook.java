@@ -15,7 +15,7 @@ public final class WorldLyricsRenderHook {
         LevelRenderEvents.COLLECT_SUBMITS.register(context -> {
             WorldBuffers buffers = new WorldBuffers();
             dev.relaylyrics.client.ui.MusicPresenceRenderer.renderWorld(context.poseStack(), buffers, context.gameRenderer().mainCamera().position());
-            dev.relaylyrics.client.karaoke.KaraokePlatform.render(context.poseStack(), buffers, context.gameRenderer().mainCamera().position());
+            dev.relaylyrics.client.karaoke.KaraokePlatform.render(context.poseStack(), buffers, context.gameRenderer().mainCamera().position(), context.gameRenderer().mainCamera().getCullFrustum());
             WorldLyricsRenderer.render(context.poseStack(), buffers,
                     context.gameRenderer().mainCamera().position());
             buffers.submit(context.submitNodeCollector());

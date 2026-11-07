@@ -1,6 +1,7 @@
 package dev.relaylyrics.client;
 
 import dev.relaylyrics.client.ui.WorldLyricsRenderer;
+import net.minecraft.client.render.Frustum;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 
 /** Minecraft 1.21.11 world-render adapter. */
@@ -11,10 +12,16 @@ public final class WorldLyricsRenderHook {
     public static net.minecraft.util.math.Vec3d cameraPosition(net.minecraft.client.MinecraftClient client) { return client.gameRenderer.getCamera().getCameraPos(); }
     public static boolean gliding(net.minecraft.client.network.ClientPlayerEntity player) { return player.isGliding(); }
 
+    private static Frustum karaokeFrustum;
+
+    public static void captureKaraokeFrustum(Frustum frustum) {
+        karaokeFrustum = frustum;
+    }
+
     public static void register() {
         WorldRenderEvents.AFTER_ENTITIES.register(context -> {
             dev.relaylyrics.client.ui.MusicPresenceRenderer.renderWorld(context.matrices(), context.consumers(), context.gameRenderer().getCamera().getCameraPos());
-            dev.relaylyrics.client.karaoke.KaraokePlatform.render(context.matrices(), context.consumers(), context.gameRenderer().getCamera().getCameraPos());
+            dev.relaylyrics.client.karaoke.KaraokePlatform.render(context.matrices(), context.consumers(), context.gameRenderer().getCamera().getCameraPos(), karaokeFrustum);
             WorldLyricsRenderer.render(context.matrices(), context.consumers(), context.gameRenderer().getCamera().getCameraPos());
         });
     }

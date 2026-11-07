@@ -1,16 +1,10 @@
 package dev.relaylyrics.client.karaoke;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import dev.relaylyrics.client.RelayLyricsClient;
 import dev.relaylyrics.client.presence.PresenceTrack;
+import dev.relaylyrics.client.ui.KaraokePanelMotion;
 import dev.relaylyrics.karaoke.KaraokeWire.*;
-import dev.relaylyrics.protocol.lyrics.LyricLine;
-import dev.relaylyrics.protocol.lyrics.LyricsDocument;
-import dev.relaylyrics.protocol.lyrics.LyricsMetadata;
-import dev.relaylyrics.protocol.lyrics.LyricsSource;
-import dev.relaylyrics.protocol.lyrics.LyricsSyncMode;
-import dev.relaylyrics.protocol.lyrics.TimedWord;
 import dev.relaylyrics.protocol.music.MusicAction;
 import dev.relaylyrics.protocol.music.PlaybackSnapshot;
 
@@ -38,21 +32,21 @@ public final class KaraokeClient {
     private KaraokeClient() { }
 
     public static final class Room {
+        double lyricsZoom = 1;
+        final KaraokePanelMotion motion = new KaraokePanelMotion();
+        Preview preview;
         public final UUID id;
         public final String name;
         public Panel panel;
         public boolean accepted, dismissed;
         public Song song;
         public String status = "";
-        long lyricRevision;
         double lastAudibleVolume = .5;
-        private volatile long generation;
+        volatile long generation;
         private long received;
         private long nextSync, mismatchSince;
         private boolean loading, matched, spotifyFailed, spotifySync;
         private String resolvedUri;
-        private final TreeMap<Integer, List<Line>> lyrics = new TreeMap<>();
-        private LyricsSyncMode lyricSync;
         public final Map<UUID, Cursor> cursors = new HashMap<>();
 
         private Room(UUID id, String name, Panel panel) { this.id = id; this.name = name; this.panel = panel; }
@@ -61,22 +55,10 @@ public final class KaraokeClient {
         boolean isListeningOnSpotify() { return spotifySync && matched && !spotifyFailed; }
         private void resetTrack(long generation) {
             this.generation = generation;
-            lyrics.clear();
-            lyricSync = null;
-            lyricRevision++;
             loading = matched = spotifyFailed = false;
             nextSync = mismatchSince = 0;
             resolvedUri = null;
             status = "";
-        }
-        LyricsDocument document() {
-            var document = new LyricsDocument(lyrics.values().stream().flatMap(List::stream)
-                    .map(line -> new LyricLine(line.start(), line.end(), line.text(), line.marks().stream()
-                            .map(mark -> new TimedWord(mark.start(), mark.end(), mark.text().stripLeading(),
-                                    !mark.text().startsWith(" "), mark.romanization())).toList(),
-                            line.agent(), line.background(), line.translation(), line.romanization())).toList());
-            return lyricSync == null ? document
-                    : document.withMetadata(new LyricsMetadata(LyricsSource.REMOTE, lyricSync, "", "", "", ""));
         }
     }
     public record Cursor(Pointer from, Pointer to, long received) {
@@ -134,14 +116,19 @@ public final class KaraokeClient {
                 var panel = read(data, "panel", Panel.class);
                 if (panel == null || !panel.valid()) return;
                 var room = ROOMS.get(id);
-                if (room == null) ROOMS.put(id, new Room(id, text(string(data, "name"), 16), panel));
-                else if (drag == null || drag.room != room) room.panel = panel;
+                if (room == null) {
+                    room = new Room(id, text(string(data, "name"), 16), panel);
+                    ROOMS.put(id, room);
+                } else if (drag == null || drag.room != room) room.panel = panel;
+                room.preview = read(data, "preview", Preview.class);
                 return;
             }
             var room = ROOMS.get(id);
             if (room == null) return;
             switch (op) {
+                case "preview" -> room.preview = read(data, "preview", Preview.class);
                 case "close" -> {
+                    KaraokeSurfaces.beginClose(room);
                     ROOMS.remove(id);
                     if (room.owned()) { hosting = null; placing = false; }
                     if (following == room) stopFollowing();
@@ -149,7 +136,6 @@ public final class KaraokeClient {
                 }
                 case "left" -> leave(room, false);
                 case "hosting" -> {
-                    if (following != null) leave(following, true);
                     hosting = id;
                     placing = true;
                     room.accepted = true;
@@ -169,9 +155,6 @@ public final class KaraokeClient {
                     if (generation != room.generation) room.resetTrack(generation);
                     room.song = song == null ? null : song.clean();
                     room.received = System.nanoTime();
-                }
-                case "lyrics" -> {
-                    if (room.accepted && room.song != null && generation(data) == room.generation) readLyrics(room, data);
                 }
                 case "cursor" -> {
                     UUID player = id(data, "player");
@@ -242,65 +225,14 @@ public final class KaraokeClient {
 
     private static Song song(PlaybackSnapshot snapshot, long position) {
         if (snapshot.title() == null || snapshot.title().isBlank() || "Nothing playing".equals(snapshot.title())) return null;
-        return new Song(snapshot.title(), snapshot.artist(), snapshot.artworkUrl(), snapshot.spotifyUri(),
+        return new Song(snapshot.title(), snapshot.artist(), snapshot.album(), snapshot.artworkUrl(), snapshot.spotifyUri(),
                 position, snapshot.durationMillis(), snapshot.playing(), snapshot.shuffled(), snapshot.repeatMode()).clean();
     }
 
     private static void publish(Room room) {
         var music = RelayLyricsClient.music();
-        var overlay = RelayLyricsClient.overlay();
         var song = music == null ? null : song(music.snapshot(), music.positionMillis());
         send("update", "room", room.id, "song", song);
-        // Wait for the server's track acknowledgement before sending that track's lyrics.
-        if (song != null && room.song != null && room.song.sameTrack(song) && room.lyrics.isEmpty()
-                && overlay != null && !overlay.document().lines().isEmpty()) {
-            var document = overlay.document();
-            String sync = document.metadata().syncMode().name();
-            var batch = new JsonArray();
-            int part = 0, bytes = 128;
-            for (var line : document.lines()) {
-                List<Mark> marks = line.words().stream().limit(160).map(word -> new Mark(word.startMillis(), word.endMillis(),
-                        (word.joinPrevious() ? "" : " ") + text(word.text(), 120), text(word.romanization(), 120))).toList();
-                var encoded = GSON.toJsonTree(new Line(line.startMillis(), line.endMillis(), text(line.text(), 500), marks,
-                        text(line.agent(), 48), line.background(), text(line.translation(), 500), text(line.romanization(), 500)));
-                int size = GSON.toJson(encoded).getBytes(java.nio.charset.StandardCharsets.UTF_8).length + 1;
-                if (size > MAX_BYTES - 256) continue;
-                if (bytes + size > MAX_BYTES || batch.size() >= 400) {
-                    if (!batch.isEmpty()) send("lyrics", "room", room.id, "generation", room.generation,
-                            "part", part++, "sync", sync, "lines", batch);
-                    batch = new JsonArray();
-                    bytes = 128;
-                    if (part == MAX_LYRIC_PARTS) break;
-                }
-                batch.add(encoded);
-                bytes += size;
-            }
-            if (!batch.isEmpty()) send("lyrics", "room", room.id, "generation", room.generation,
-                    "part", part, "sync", sync, "lines", batch);
-        }
-    }
-
-    private static void readLyrics(Room room, JsonObject data) {
-        int part = data.get("part").getAsInt();
-        var input = data.getAsJsonArray("lines");
-        if (part < 0 || part >= MAX_LYRIC_PARTS || input.size() > 400) return;
-        List<Line> lines = new ArrayList<>();
-        for (var element : input) {
-            var line = GSON.fromJson(element, Line.class);
-            if (line == null || line.start() < 0 || line.end() < line.start() || line.end() > 86_400_000) continue;
-            var marks = line.marks() == null ? List.<Mark>of() : line.marks().stream().filter(Objects::nonNull)
-                    .filter(mark -> mark.start() >= 0 && mark.end() >= mark.start() && mark.end() <= 86_400_000)
-                    .limit(160).map(mark -> new Mark(mark.start(), mark.end(),
-                            (mark.text() != null && mark.text().startsWith(" ") ? " " : "") + text(mark.text(), 120),
-                            text(mark.romanization(), 120))).toList();
-            lines.add(new Line(line.start(), line.end(), text(line.text(), 500), marks,
-                    text(line.agent(), 48), line.background(), text(line.translation(), 500), text(line.romanization(), 500)));
-        }
-        if (room.lyrics.putIfAbsent(part, List.copyOf(lines)) == null) {
-            String sync = string(data, "sync");
-            for (var mode : LyricsSyncMode.values()) if (mode.name().equals(sync)) room.lyricSync = mode;
-            room.lyricRevision++;
-        }
     }
 
     private static Hit find(Ray ray) {
@@ -338,7 +270,7 @@ public final class KaraokeClient {
 
     public static boolean hideVanillaCrosshair() {
         var target = captureAim(ROOMS.isEmpty() ? null : KaraokePlatform.ray());
-        return target != null && (!target.room.accepted || KaraokePlatform.popup(target.room) != null);
+        return target != null && KaraokePlatform.popup(target.room) != null;
     }
 
     public static boolean click(boolean right) {
@@ -356,22 +288,35 @@ public final class KaraokeClient {
             return true;
         }
         if (!room.accepted) {
-            if (current.y >= 24 && current.y <= 63 && Math.abs(current.x) >= 18 && Math.abs(current.x) <= 125) {
-                if (current.x > 0) {
+            var popup = KaraokePlatform.popup(room);
+            if (popup == null) return true;
+            switch (popup.invitationLayout().actionAt(popup.pointerX(current.x), popup.pointerY(current.y))) {
+                case ACCEPT -> {
+                    popup.buttons.pressAccept(System.nanoTime());
                     if (following != null && following != room) leave(following, true);
                     following = room;
-                    room.spotifySync = RelayLyricsClient.music() != null && RelayLyricsClient.music().spotifyAccountConnected();
+                    room.spotifySync = popup.spotifySync && canSyncSpotify();
                     send("accept", "room", room.id);
-                } else room.dismissed = true;
+                }
+                case DECLINE -> {
+                    KaraokeSurfaces.beginClose(room);
+                    room.dismissed = true;
+                }
+                case NONE -> { }
             }
         } else clickPopup(current);
         return true;
     }
 
+    static boolean canSyncSpotify() {
+        var music = RelayLyricsClient.music();
+        return music != null && music.spotifyAccountConnected();
+    }
+
     private static void clickPopup(Hit hit) {
         Room room = hit.room;
         var view = KaraokePlatform.popup(room);
-        if (view == null) return;
+        if (view == null || view.invitation) return;
         var overlay = view.overlay;
         double x = view.pointerX(hit.x), y = view.pointerY(hit.y);
         var control = overlay.popupControlAt(x, y);
@@ -460,7 +405,17 @@ public final class KaraokeClient {
         return panel;
     }
 
-    public static boolean scrollDrag(double amount) {
+    public static boolean scrollPopup(double amount) {
+        if (amount == 0 || !Double.isFinite(amount)) return false;
+        if (drag != null) return scrollDrag(amount);
+        if (ROOMS.isEmpty() || !KaraokePlatform.popupZoomModifierHeld()) return false;
+        Hit target = captureAim(KaraokePlatform.ray());
+        if (target == null || !target.room.accepted || KaraokePlatform.popup(target.room) == null) return false;
+        target.room.lyricsZoom = Math.clamp(target.room.lyricsZoom * Math.pow(1.1, Math.clamp(amount, -4, 4)), .65, 2.5);
+        return true;
+    }
+
+    private static boolean scrollDrag(double amount) {
         var target = drag;
         if (target == null || target.resizing || amount == 0 || !Double.isFinite(amount)
                 || !KaraokePlatform.buttonHeld(target.right)) return false;
@@ -481,11 +436,11 @@ public final class KaraokeClient {
     }
 
     private static void leave(Room room, boolean notify) {
+        KaraokeSurfaces.beginClose(room);
         if (notify) send("leave", "room", room.id);
         room.accepted = false;
         room.dismissed = true;
         room.song = null;
-        room.lyrics.clear();
         if (following == room) stopFollowing();
     }
 

@@ -39,6 +39,9 @@ jobs:
           Get-ChildItem lyrics-popup/build/libs,lyrics-popup-1.21.11/build/libs,lyrics-popup-26.2/build/libs -Filter "lyrica-*.jar" |
             Where-Object { $_.Name -notmatch "sources|dev" } |
             Copy-Item -Destination release-assets
+          Copy-Item media-bridge/target/release/fandroid-media-bridge.exe release-assets/relaylyrics-media-bridge.exe
+          $bridgeHash = (Get-FileHash release-assets/relaylyrics-media-bridge.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Encoding ascii release-assets/relaylyrics-media-bridge.exe.sha256 $bridgeHash
           Compress-Archive -Path integrations/youtube-music-extension/manifest.json,integrations/youtube-music-extension/content.js,integrations/youtube-music-extension/background.js,integrations/youtube-music-extension/README.md `
             -DestinationPath release-assets/lyrica-youtube-music-bridge-$releaseVersion.zip
       - name: Publish standalone jars
@@ -50,3 +53,5 @@ jobs:
           files: |
             release-assets/*.jar
             release-assets/*.zip
+            release-assets/*.exe
+            release-assets/*.sha256

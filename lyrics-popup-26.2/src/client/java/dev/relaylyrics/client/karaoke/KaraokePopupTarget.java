@@ -4,6 +4,7 @@ import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
+import dev.relaylyrics.client.ui.KaraokeInvitationRenderer;
 import com.mojang.blaze3d.textures.FilterMode;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -19,19 +20,13 @@ import java.util.List;
 import static dev.relaylyrics.karaoke.KaraokeWire.*;
 
 public final class KaraokePopupTarget implements AutoCloseable {
-    private static final int DENSITY = 2;
     private static final Vector4f CLEAR = new Vector4f();
     private static final WindowRenderState WINDOW = new WindowRenderState();
-    static {
-        WINDOW.width = WIDTH * DENSITY;
-        WINDOW.height = HEIGHT * DENSITY;
-        WINDOW.guiScale = DENSITY;
-    }
     private static RenderTarget active;
     private static GuiRenderer renderer;
     private static GuiRenderState state;
     private final Identifier texture;
-    private final TextureTarget target = new TextureTarget("Lyrica karaoke", WINDOW.width, WINDOW.height, true, GpuFormat.RGBA8_UNORM);
+    private final TextureTarget target = new TextureTarget("Lyrica karaoke", WIDTH * 2, HEIGHT * 2, true, GpuFormat.RGBA8_UNORM);
 
     KaraokePopupTarget(int slot) {
         texture = Identifier.fromNamespaceAndPath("lyrica", "karaoke/" + slot);
@@ -54,8 +49,9 @@ public final class KaraokePopupTarget implements AutoCloseable {
     public static WindowRenderState window() { return WINDOW; }
 
     void paint(KaraokePopup view, double x, double y) {
+        int scale = KaraokeSurfaces.textureDensity(view.width, view.height);
         var client = Minecraft.getInstance();
-        int width = view.width * DENSITY, height = view.height * DENSITY;
+        int width = view.width * scale, height = view.height * scale;
         if (target.width != width || target.height != height) {
             target.resize(width, height);
             registerTexture();
@@ -68,9 +64,14 @@ public final class KaraokePopupTarget implements AutoCloseable {
         var projection = RenderSystem.getProjectionMatrixBuffer();
         var projectionType = RenderSystem.getProjectionType();
         try {
-            view.overlay.renderWorldPopup(context, view.width, view.height, x, y);
+            if (view.invitation) KaraokeInvitationRenderer.draw(context, view.invitationLayout(), x, y,
+                    view.spotifySync, view.preview, view.buttons, view.motionEnabled);
+            else view.overlay.renderWorldPopup(context, view.width, view.height, x, y);
             RenderSystem.getDevice().createCommandEncoder().clearColorAndDepthTextures(
                     target.getColorTexture(), CLEAR, target.getDepthTexture(), 0);
+            WINDOW.width = width;
+            WINDOW.height = height;
+            WINDOW.guiScale = scale;
             active = target;
             renderer.render();
             renderer.endFrame();
