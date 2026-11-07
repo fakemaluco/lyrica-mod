@@ -1,4 +1,6 @@
-# Lyrica
+# Lyrica - Minecraft Music & Synced Lyrics Mod
+
+Lyrica is a Fabric Minecraft mod that displays real-time synchronized lyrics from Spotify, YouTube Music, Apple Music, and more. Enjoy customizable 2D and 3D lyrics, playback controls, and multiplayer karaoke.
 
 ![Lyrica banner](https://i.postimg.cc/ryYtqpRn/lyricabanner.png)
 
