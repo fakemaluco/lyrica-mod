@@ -22,6 +22,7 @@ import java.util.Optional;
 
 /** Backend-native full-resolution world pass; HUD and hand are submitted afterwards. */
 public final class WorldGeminiRenderer {
+    private static final String SHADER_HEADER = "#version 330\n#extension GL_ARB_separate_shader_objects : require\n";
     private static GeminiShaderSession probe;
     private static CompiledRenderPipeline pipeline;
     private static GpuTexture copy;
@@ -53,8 +54,16 @@ public final class WorldGeminiRenderer {
                         .withColorTargetState(new ColorTargetState(Optional.empty(),color.getFormat(),ColorTargetState.WRITE_ALL)).build();
                 var compiled = device.compilePipeline(description, new ShaderSource() {
                     @Override public String getShader(Identifier name, ShaderType type) {
-                        return type == ShaderType.VERTEX ? GeminiShaderSpec.vertexSource(true)
-                                : GeminiShaderSpec.fragmentSource(effect.shader().glsl(), true);
+                        if (type == ShaderType.VERTEX) {
+                            return GeminiShaderSpec.vertexSource(true)
+                                    .replace("#version 330\n", SHADER_HEADER)
+                                    .replace("out vec2 texCoord;", "layout(location = 0) out vec2 texCoord;")
+                                    .replace("gl_VertexID", "gl_VertexIndex");
+                        }
+                        return GeminiShaderSpec.fragmentSource(effect.shader().glsl(), true)
+                                .replace("#version 330\n", SHADER_HEADER)
+                                .replace("in vec2 texCoord;", "layout(location = 0) in vec2 texCoord;")
+                                .replace("out vec4 fragColor;", "layout(location = 0) out vec4 fragColor;");
                     }
                     @Override public CachedIncludeSource getInclude(Identifier name) { return null; }
                     @Override public void close() { }
