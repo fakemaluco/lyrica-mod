@@ -1,6 +1,7 @@
 package dev.fandroid.client.ui;
 
 import dev.fandroid.client.ClientPreferences;
+import dev.fandroid.client.SungTextColor.Scope;
 import dev.fandroid.client.LyricsFont;
 import dev.fandroid.client.LyricsFontWeight;
 import dev.fandroid.client.LyricsTextAlignment;
@@ -679,6 +680,19 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     public void setWorldPopupLyricsZoom(double zoom) { worldPopupLyricsZoom = zoom; }
+
+    public void renderKaraokeQueueBackdrop(DrawContext context, int x, int y, int width, int height, int radius) {
+        double speed = preferences.isLyricsAnimations() && (!preferences.isPauseMotionWithMusic() || playback.playing())
+                ? preferences.getLyricsBackgroundSpeedMultiplier() * getLyricsBackgroundReactiveMultiplier()
+                  * dev.fandroid.client.music.KawarpRaster.speed(playback.playing(), playback.bpm(), playback.intensity(), playback.beatPhase())
+                : 0;
+        RoundedGui.smoothFill(context, x, y, width, height, radius, blend(0xFF15131C, accentColor(), .22));
+        if (artworkTexture != null && artworkTexture.drawQueueBackdrop(context, x, y, width, height,
+                preferences.getLyricsBlurStrength(), speed, radius)) {
+            RoundedGui.smoothFill(context, x, y, width, height, radius, 0x390C0C15);
+        }
+        RoundedGui.smoothOutline(context, x, y, width, height, radius, 0x62E6DCFC);
+    }
 
     private double lyricsTextScale() {
         return preferences.getLyricsTextScale() * (renderingWorldPopup ? worldPopupLyricsZoom : 1);
@@ -3074,13 +3088,30 @@ public final class LyricsOverlay implements AutoCloseable {
             for (Token token : row.tokens) {
                 double tokenX = rowX + token.x * focusScale;
                 if (!active) {
+                    if (pass != RenderPass.BASE) continue;
                     // The drop shadow turns dim distant text into black blocks; only the
                     // phrase being sung may carry the user's shadow.
                     boolean previousShadow = drawingLyricsShadow;
                     drawingLyricsShadow = false;
                     try {
-                        drawDistant(context, token.text, tokenX, rowY, lyricsTextColor(FUTURE_TEXT), baseScale * focusScale,
-                                opacity, textBrightness, blur, bloomOpacity, pass);
+                        double scale = baseScale * focusScale;
+                        if (preferences.getSungTextColor().mode() != dev.fandroid.client.SungTextColor.Mode.DEFAULT && !staticLyrics() && now >= line.endMillis()) {
+                            int sung = lyricsTextColor(ACTIVE_TEXT);
+                            if (preferences.getSungTextColor().mode() == dev.fandroid.client.SungTextColor.Mode.SOLID) {
+                                drawDistant(context, token.text, tokenX, rowY, preferences.sungLyricsColor(sung, 1, 1),
+                                        scale, opacity, textBrightness, blur, bloomOpacity, pass);
+                            } else {
+                                boolean rtl = isRightToLeft(token.text);
+                                for (Glyph glyph : token.glyphs) {
+                                    int tint = sungTokenGlyphColor(sung, 1, token, glyph, rtl);
+                                    drawDistant(context, glyph.text, tokenX + glyph.x * scale, rowY, tint, scale,
+                                            opacity, textBrightness, blur, bloomOpacity, pass);
+                                }
+                            }
+                        } else {
+                            drawDistant(context, token.text, tokenX, rowY, lyricsTextColor(FUTURE_TEXT), scale,
+                                    opacity, textBrightness, blur, bloomOpacity, pass);
+                        }
                     } finally {
                         drawingLyricsShadow = previousShadow;
                     }
@@ -3115,23 +3146,38 @@ public final class LyricsOverlay implements AutoCloseable {
     private void drawVerticalLineToken(DrawContext context, Token token, double x, double y, double scale,
                                        LyricLine line, long now, double opacity, double top, double height) {
         double progress = LyricsAnimation.lineProgress(now, line.startMillis(), line.endMillis(), !reducedLyricsMotion());
-        drawScaledShadowOnly(context, renderer(), token.text, x, y, opacity * progress, scale);
+        int original = lyricsTextColor(ACTIVE_TEXT);
+        if (preferences.getSungTextColor().mode() == dev.fandroid.client.SungTextColor.Mode.GRADIENT) {
+            boolean rtl = isRightToLeft(token.text);
+            for (Glyph glyph : token.glyphs) {
+                int tint = sungTokenGlyphColor(original, 1, token, glyph, rtl);
+                drawVerticalLineFill(context, glyph.text, x + glyph.x * scale, y, scale, opacity, top, height, progress, tint);
+            }
+        } else {
+            int tint = preferences.sungLyricsColor(original, progress, 0);
+            drawVerticalLineFill(context, token.text, x, y, scale, opacity, top, height, progress, tint);
+        }
+    }
+
+    private void drawVerticalLineFill(DrawContext context, String text, double x, double y, double scale,
+                                      double opacity, double top, double height, double progress, int sungColor) {
+        drawScaledShadowOnly(context, renderer(), text, x, y, opacity * progress, scale);
 
         double screenTop = GuiTransform.screenY(context, x, top);
         double screenHeight = GuiTransform.screenY(context, x, top + height) - screenTop;
         if (screenHeight <= 0) return;
         double physicalScale = scale * screenHeight / height * PlatformTextures.guiScale() / PlatformTextures.renderScale();
-        if (!worldPopupShaderActive && physicalScale < .8 && bloomRenderer.drawMinifiedLineFill(context, styledText(token.text), x, y, scale,
-                opacity * lyricsSurfaceOpacity, progress, top, height, lyricsTextColor(UNSYNCED_TEXT), lyricsTextColor(ACTIVE_TEXT))) return;
+        if (!worldPopupShaderActive && physicalScale < .8 && bloomRenderer.drawMinifiedLineFill(context, styledText(text), x, y, scale,
+                opacity * lyricsSurfaceOpacity, progress, top, height, lyricsTextColor(UNSYNCED_TEXT), sungColor)) return;
 
         // The native font retains its own sampling. Disjoint bands change only its tint.
         int firstRow = (int) Math.floor(GuiTransform.screenY(context, x, y - 2 * scale));
         int endRow = (int) Math.ceil(GuiTransform.screenY(context, x, y + (renderer().fontHeight + 2) * scale));
         var bands = LyricsEffectRaster.verticalTintBands(endRow - firstRow,
                 (firstRow + .5 - screenTop) / screenHeight, 1 / screenHeight,
-                progress, lyricsTextColor(UNSYNCED_TEXT), lyricsTextColor(ACTIVE_TEXT));
+                progress, lyricsTextColor(UNSYNCED_TEXT), sungColor);
         if (bands.size() == 1) {
-            drawScaledWithoutShadow(context, renderer(), token.text, x, y,
+            drawScaledWithoutShadow(context, renderer(), text, x, y,
                     multiplyAlpha(bands.getFirst().color(), opacity), scale);
             return;
         }
@@ -3139,7 +3185,7 @@ public final class LyricsOverlay implements AutoCloseable {
             GuiTransform.enableScreenBand(context, firstRow + band.firstRow(),
                     firstRow + band.endRow(), context.getScaledWindowWidth());
             try {
-                drawScaledWithoutShadow(context, renderer(), token.text, x, y,
+                drawScaledWithoutShadow(context, renderer(), text, x, y,
                         multiplyAlpha(band.color(), opacity), scale);
             } finally {
                 context.disableScissor();
@@ -3165,9 +3211,12 @@ public final class LyricsOverlay implements AutoCloseable {
         boolean simple = reducedLyricsMotion();
         var motionPlan = token.motionPlan(simple);
         double fillOffset = token.fillOffset(now);
-        var fill = fillInterval(token.rawWidth, fillOffset / token.rawWidth, isRightToLeft(token.text));
-        int activeColor = lyricsTextColor(ACTIVE_TEXT);
+        boolean rtl = isRightToLeft(token.text);
+        double progress = fillOffset / Math.max(1, token.rawWidth);
+        var fill = fillInterval(token.rawWidth, progress, rtl);
+        int defaultColor = lyricsTextColor(ACTIVE_TEXT);
         for (Glyph glyph : token.glyphs) {
+            int activeColor = sungTokenGlyphColor(defaultColor, progress, token, glyph, rtl);
             Segment segment = token.segments.get(glyph.segmentIndex);
             boolean glyphMotion = motionPlan.glyphMotionForFragment(segment.durationMillis());
             double containerScale = simple ? 1 : segment.motion.scale();
@@ -3202,6 +3251,13 @@ public final class LyricsOverlay implements AutoCloseable {
             drawProgressiveGlyph(context, glyph, drawX, drawY, animatedScale,
                     futureColor, activeColor, opacity, fillLeft, fillRight);
         }
+    }
+
+    private int sungTokenGlyphColor(int original, double progress, Token token, Glyph glyph, boolean rtl) {
+        if (preferences.getSungTextColor().scope() == Scope.PHRASE)
+            return preferences.sungGlyphColor(original, progress, glyph.x, glyph.rawWidth, token.rawWidth, rtl,
+                    token.phraseOffset, token.phraseWidth);
+        return preferences.sungGlyphColor(original, progress, glyph.x, glyph.rawWidth, token.rawWidth, rtl);
     }
 
     private void drawProgressiveGlyph(DrawContext context, Glyph glyph, double x, double y, double scale,
@@ -3403,9 +3459,10 @@ public final class LyricsOverlay implements AutoCloseable {
         int layoutWidth = width;
         List<Row> rows = new ArrayList<>();
         List<Token> current = new ArrayList<>();
-        double rowWidth = 0;
+        double rowWidth = 0, phraseWidth = 0;
+        String previousPhraseWord = null;
         String previousWord = null;
-        double spaceWidth = textWidth(" ") * scale;
+        double space = textWidth(" "), spaceWidth = space * scale;
         for (LyricsRenderText.VisualWord visualWord : visualWords) {
             List<LyricsRenderText.VisualWord> pieces = List.of(visualWord);
             for (LyricsRenderText.VisualWord piece : pieces) {
@@ -3422,7 +3479,11 @@ public final class LyricsOverlay implements AutoCloseable {
                     separated = false;
                 }
                 if (separated) rowWidth += spaceWidth;
-                current.add(new Token(piece, rowWidth));
+                if (LyricsRenderText.needsWordSeparator(previousPhraseWord, piece.text())) phraseWidth += space;
+                var token = new Token(piece, rowWidth, phraseWidth);
+                current.add(token);
+                phraseWidth += token.rawWidth;
+                previousPhraseWord = piece.text();
                 rowWidth += visualWidth;
                 previousWord = piece.text();
             }
@@ -3430,7 +3491,10 @@ public final class LyricsOverlay implements AutoCloseable {
         if (!current.isEmpty()) rows.add(new Row(List.copyOf(current), rowWidth));
         int height = Math.max(rowHeight(scale), (int) Math.ceil(rows.size() * rowHeight(scale)));
         int tokenCount = 0;
-        for (Row row : rows) tokenCount += row.tokens.size();
+        for (Row row : rows) {
+            tokenCount += row.tokens.size();
+            for (Token token : row.tokens) token.phraseWidth = phraseWidth;
+        }
         return new LineLayout(List.copyOf(rows), height, tokenCount);
     }
 
@@ -3916,13 +3980,15 @@ public final class LyricsOverlay implements AutoCloseable {
         private final TimedWord timing;
         private final String text;
         private final double x;
-        private final double rawWidth;
+        private final double rawWidth, phraseOffset;
+        private double phraseWidth;
         private final List<Glyph> glyphs;
         private final List<Segment> segments;
         private final long visualWordDurationMillis;
         private final SpringValue glow = new SpringValue(0, 1.18, .56);
 
-        private Token(LyricsRenderText.VisualWord word, double x) {
+        private Token(LyricsRenderText.VisualWord word, double x, double phraseOffset) {
+            this.phraseOffset = phraseOffset;
             this.text = word.text();
             this.x = x;
             this.timing = new TimedWord(word.startMillis(), word.endMillis(), word.text());

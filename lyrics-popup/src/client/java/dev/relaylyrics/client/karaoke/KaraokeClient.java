@@ -12,6 +12,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import static dev.relaylyrics.karaoke.KaraokeWire.*;
+import static org.lwjgl.glfw.GLFW.*;
 
 public final class KaraokeClient {
     private static final Map<UUID, Room> ROOMS = new LinkedHashMap<>();
@@ -21,8 +22,13 @@ public final class KaraokeClient {
     private static volatile Room following;
     private static Hit hit;
     private static Drag drag;
+    private static QueuePull queuePull;
+    private static Room queueFocus;
+    private static boolean consumedEscape;
     private static Room pointerRoom;
     private static boolean usedAttack, usedInteract;
+    private static boolean queueSupported;
+    private static boolean listenSupported;
     private static long ticks;
     private static final long SECOND = TimeUnit.SECONDS.toNanos(1);
     private static final long CURSOR_TRAVEL = TimeUnit.MILLISECONDS.toNanos(150);
@@ -48,6 +54,8 @@ public final class KaraokeClient {
         private boolean loading, matched, spotifyFailed, spotifySync;
         private String resolvedUri;
         public final Map<UUID, Cursor> cursors = new HashMap<>();
+        final KaraokeQueueView queue = new KaraokeQueueView();
+        volatile UUID executingQueue;
 
         private Room(UUID id, String name, Panel panel) { this.id = id; this.name = name; this.panel = panel; }
         public long position() { return song == null ? 0 : song.at(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - received)); }
@@ -72,12 +80,13 @@ public final class KaraokeClient {
     public record Hit(Room room, double x, double y, double distance) { }
     private record Drag(Room room, boolean right, boolean resizing, Panel start,
                         double x, double y, double distance) { }
+    private record QueuePull(Room room, boolean right, int side, double start) { }
 
     public static void initialize() { KaraokePlatform.register(); }
     public static boolean supported() { return KaraokePlatform.supported(); }
     public static Collection<Room> rooms() { return ROOMS.values(); }
     public static Hit hit() { return hit; }
-    public static boolean consumesAttack() { return usedAttack || drag != null; }
+    public static boolean consumesAttack() { return usedAttack || drag != null || queuePull != null; }
     static Room draggedRoom() { return drag == null ? null : drag.room; }
     static boolean handleAt(double x, double y) {
         return Math.abs(x) <= HANDLE_HALF_WIDTH && y >= HANDLE_TOP && y <= HANDLE_BOTTOM;
@@ -92,17 +101,54 @@ public final class KaraokeClient {
     }
     public static void clear() {
         stopFollowing();
+        blurQueue(queueFocus);
         KaraokePlatform.clearPopups();
+        ROOMS.values().forEach(room -> room.executingQueue = null);
         ROOMS.clear(); PRESENCE.clear(); hosting = null; placing = false; hit = null; drag = null; ticks = 0;
         pointerRoom = null;
-        usedAttack = usedInteract = false;
+        queuePull = null;
+        consumedEscape = false;
+        usedAttack = usedInteract = queueSupported = listenSupported = false;
     }
     private static void send(String op, Object... fields) { KaraokePlatform.send(message(op, fields)); }
 
     static void receive(JsonObject data) {
         try {
             String op = string(data, "op");
-            if (op.equals("hello")) return;
+            if (op.equals("hello")) {
+                queueSupported = data.has("queue") && data.get("queue").getAsBoolean();
+                listenSupported = data.has("listen") && data.get("listen").getAsBoolean();
+                return;
+            }
+            switch (op) {
+                case "listen_started" -> {
+                    if (!canSyncSpotify()) { send("listen_stop"); return; }
+                    if (following != null && following.panel != null) leave(following, true);
+                    var listener = new Room(id(data, "player"), text(string(data, "name"), 16), null);
+                    listener.accepted = listener.spotifySync = true;
+                    following = listener;
+                    RelayLyricsClient.music().setKaraokeSpotifyWatching(true);
+                    KaraokePlatform.listenNotice("started", listener.name);
+                    return;
+                }
+                case "listen_track" -> {
+                    var listener = following;
+                    if (listener != null && listener.panel == null && listener.id.equals(id(data, "player"))) applyTrack(listener, data);
+                    return;
+                }
+                case "listen_stopped" -> {
+                    if (following != null && following.panel == null) {
+                        stopFollowing();
+                        KaraokePlatform.listenNotice("stopped");
+                    }
+                    return;
+                }
+                case "listen_error" -> {
+                    KaraokePlatform.listenNotice("cycle".equals(string(data, "reason")) ? "cycle" : "unavailable");
+                    return;
+                }
+                default -> { }
+            }
             if (op.equals("presence")) {
                 UUID player = id(data, "player");
                 var song = read(data, "song", Song.class);
@@ -128,6 +174,8 @@ public final class KaraokeClient {
             switch (op) {
                 case "preview" -> room.preview = read(data, "preview", Preview.class);
                 case "close" -> {
+                    blurQueue(room);
+                    room.executingQueue = null;
                     KaraokeSurfaces.beginClose(room);
                     ROOMS.remove(id);
                     if (room.owned()) { hosting = null; placing = false; }
@@ -149,12 +197,29 @@ public final class KaraokeClient {
                 }
                 case "track" -> {
                     if (!room.accepted) return;
-                    var song = read(data, "song", Song.class);
-                    long generation = generation(data);
-                    if (generation < room.generation) return;
-                    if (generation != room.generation) room.resetTrack(generation);
-                    room.song = song == null ? null : song.clean();
-                    room.received = System.nanoTime();
+                    boolean changed = applyTrack(room, data);
+                    if (changed && room.queue.side != 0 && !room.queue.searching && room.queue.request == null)
+                        requestQueue(room, "list", "", 0);
+                }
+                case "queue_execute" -> { if (room.owned()) executeQueue(room, data); }
+                case "queue_result" -> {
+                    if (!room.accepted || !id(data, "request").equals(room.queue.request)) return;
+                    var result = read(data, "result", QueueResult.class);
+                    room.queue.request = null;
+                    if (result == null) return;
+                    boolean search = string(data, "action").equals("search");
+                    if (search && (!room.queue.searching || !room.queue.submittedQuery.equals(text(room.queue.field.value(), 100)))) return;
+                    room.queue.status = result.status().equals("ok") ? "" : result.status();
+                    if (search) room.queue.results = result.tracks();
+                    else if (Set.of("ok", "changed", "added", "jumped").contains(result.status())) room.queue.queue = result;
+                    if (search || string(data, "action").equals("list")) room.queue.first = 0;
+                }
+                case "queue_snapshot" -> {
+                    if (!room.accepted) return;
+                    var result = read(data, "result", QueueResult.class);
+                    if (result != null) {
+                        room.queue.queue = result;
+                    }
                 }
                 case "cursor" -> {
                     UUID player = id(data, "player");
@@ -174,6 +239,33 @@ public final class KaraokeClient {
         } catch (RuntimeException ignored) { /* Malformed or obsolete packet. */ }
     }
 
+    private static boolean applyTrack(Room room, JsonObject data) {
+        long generation = generation(data);
+        if (generation < room.generation) return false;
+        boolean changed = generation != room.generation;
+        var song = read(data, "song", Song.class);
+        if (changed) room.resetTrack(generation);
+        room.song = song == null ? null : song.clean();
+        room.received = System.nanoTime();
+        return changed;
+    }
+
+    public static int listen(String name) {
+        if (!supported() || !listenSupported) { KaraokePlatform.listenNotice("unsupported"); return 0; }
+        if (!canSyncSpotify()) { KaraokePlatform.listenNotice("spotify"); return 0; }
+        send("listen", "name", name);
+        return 1;
+    }
+
+    public static int stopListening() {
+        if (following == null || following.panel != null) {
+            KaraokePlatform.listenNotice("idle");
+            return 0;
+        }
+        leave(following, true);
+        return 1;
+    }
+
     public static void tick() {
         if (!supported()) {
             if (!ROOMS.isEmpty() || !PRESENCE.isEmpty()) clear();
@@ -185,13 +277,17 @@ public final class KaraokeClient {
         if (ticks % 60 == 1) {
             var p = RelayLyricsClient.preferences();
             var music = RelayLyricsClient.music();
-            var shared = music != null && p.isMusicPresenceEnabled() && p.isMusicPresenceSharing()
-                    ? song(music.snapshot(), 0) : null;
-            send("presence", "song", shared == null ? null : new Song(shared.title(), shared.artist(),
-                    shared.cover(), "", 0, 0, shared.playing()));
+            boolean sharing = music != null && p.isMusicPresenceEnabled() && p.isMusicPresenceSharing();
+            var shared = sharing ? song(music.snapshot(), listenSupported ? music.positionMillis() : 0) : null;
+            if (shared != null && !listenSupported)
+                shared = new Song(shared.title(), shared.artist(), shared.cover(), "", 0, 0, shared.playing());
+            // The server strips playback details from the public presence, as with older clients.
+            send("presence", "listen", listenSupported && sharing, "song", shared);
             PRESENCE.values().removeIf(track -> !track.alive(System.nanoTime()));
         }
         Ray ray = ROOMS.isEmpty() ? null : KaraokePlatform.ray();
+        if (queueFocus != null && (ray == null || KaraokePlatform.visibleDistance(queueFocus) > RANGE * RANGE))
+            blurQueue(queueFocus);
         if (placing && ray != null) {
             var room = ROOMS.get(hosting);
             if (room != null && room.panel.dimension().equals(ray.dimension)) {
@@ -203,12 +299,14 @@ public final class KaraokeClient {
             placing = false;
         }
         var target = ray == null ? null : find(ray);
+        if (queuePull != null) pullQueue(ray);
         if (drag != null) {
             boolean held = ray != null && KaraokePlatform.buttonHeld(drag.right);
             if (ray != null && (!held || ticks % 2 == 0)) move(ray);
             if (!held) drag = null;
         }
         var pointed = drag == null && target != null && target.room.accepted && !handleAt(target.x, target.y)
+                && Math.abs(target.x) <= WIDTH / 2.0
                 ? target.room : null;
         if (pointerRoom != pointed && pointerRoom != null) send("cursor_leave", "room", pointerRoom.id);
         if (pointed != null && (pointed != pointerRoom || ticks % 3 == 0))
@@ -220,7 +318,14 @@ public final class KaraokeClient {
         }
         if (following != null && following.accepted && following.song != null) syncSpotify(following);
         long now = System.nanoTime();
-        for (Room room : ROOMS.values()) room.cursors.values().removeIf(cursor -> now - cursor.received > SECOND);
+        for (Room room : ROOMS.values()) {
+            room.cursors.values().removeIf(cursor -> now - cursor.received > SECOND);
+            if (room.queue.request != null && now >= room.queue.deadline) {
+                room.queue.request = null;
+                room.queue.status = "timeout";
+            }
+            room.queue.submit(room, now);
+        }
     }
 
     private static Song song(PlaybackSnapshot snapshot, long position) {
@@ -232,7 +337,118 @@ public final class KaraokeClient {
     private static void publish(Room room) {
         var music = RelayLyricsClient.music();
         var song = music == null ? null : song(music.snapshot(), music.positionMillis());
-        send("update", "room", room.id, "song", song);
+        send("update", "room", room.id, "song", song, "queue", music != null && music.spotifyAccountConnected());
+    }
+
+    static boolean hasQueue(Room room) { return queueSupported && room.accepted; }
+
+    static void requestQueue(Room room, String action, String value, int index) {
+        if (!hasQueue(room) || room.queue.request != null || ROOMS.get(room.id) != room
+                || KaraokePlatform.visibleDistance(room) > RANGE * RANGE) return;
+        var queue = room.queue;
+        queue.request = UUID.randomUUID();
+        queue.lastRequestAt = System.nanoTime();
+        queue.deadline = queue.lastRequestAt + TimeUnit.MILLISECONDS.toNanos(QUEUE_TIMEOUT_MILLIS + 1_500);
+        queue.status = "loading";
+        send("queue_request", "room", room.id, "request", queue.request, "action", action,
+                "value", text(value, 100), "index", index, "version", queue.queue.version());
+    }
+
+    static void focusQueue(Room room) {
+        if (queueFocus == room) return;
+        blurQueue(queueFocus);
+        queueFocus = room;
+        room.queue.focused = true;
+        room.queue.field.end(false);
+        KaraokePlatform.releaseKeys();
+        KaraokePlatform.queueTextInput(true);
+    }
+
+    static void blurQueue(Room room) {
+        if (room == null || queueFocus != room) return;
+        room.queue.focused = false;
+        queueFocus = null;
+        KaraokePlatform.queueTextInput(false);
+    }
+
+    public static boolean queueKey(int key, int action, int modifiers) {
+        if (key == GLFW_KEY_ESCAPE && consumedEscape) {
+            if (action == GLFW_RELEASE) consumedEscape = false;
+            return true;
+        }
+        Room room = queueFocus;
+        if (room == null) return false;
+        if (action == GLFW_RELEASE) return true;
+        var queue = room.queue;
+        var field = queue.field;
+        boolean extend = (modifiers & GLFW_MOD_SHIFT) != 0;
+        boolean shortcut = (modifiers & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER)) != 0;
+        boolean changed = false;
+        switch (key) {
+            case GLFW_KEY_ESCAPE -> {
+                blurQueue(room);
+                consumedEscape = true;
+            }
+            case GLFW_KEY_ENTER, GLFW_KEY_KP_ENTER -> {
+                String query = text(field.value(), 100);
+                if (!query.isBlank() && (queue.request == null || !query.equals(queue.submittedQuery)))
+                    queue.searchAt = System.nanoTime();
+            }
+            case GLFW_KEY_BACKSPACE -> changed = field.erase(-1);
+            case GLFW_KEY_DELETE -> changed = field.erase(1);
+            case GLFW_KEY_LEFT -> field.step(-1, extend);
+            case GLFW_KEY_RIGHT -> field.step(1, extend);
+            case GLFW_KEY_HOME -> field.home(extend);
+            case GLFW_KEY_END -> field.end(extend);
+            case GLFW_KEY_A -> { if (shortcut) field.selectAll(); }
+            case GLFW_KEY_V -> { if (shortcut) changed = field.insert(KaraokePlatform.clipboard()); }
+            case GLFW_KEY_C, GLFW_KEY_X -> {
+                if (shortcut && !field.selection().isEmpty()) {
+                    KaraokePlatform.clipboard(field.selection());
+                    if (key == GLFW_KEY_X) changed = field.insert("");
+                }
+            }
+            default -> { }
+        }
+        if (changed) queue.edited(System.nanoTime());
+        return true;
+    }
+
+    public static boolean queueCharacter(int codepoint) {
+        Room room = queueFocus;
+        if (room == null) return false;
+        if (Character.isValidCodePoint(codepoint) && room.queue.field.insert(Character.toString(codepoint)))
+            room.queue.edited(System.nanoTime());
+        return true;
+    }
+
+    private static void executeQueue(Room room, JsonObject packet) {
+        UUID request = id(packet, "request");
+        var music = RelayLyricsClient.music();
+        if (music == null || room.executingQueue != null) {
+            send("queue_result", "room", room.id, "request", request, "result",
+                    new QueueResult(List.of(), 0, music == null ? "inactive" : "busy"));
+            return;
+        }
+        String action = string(packet, "action");
+        String current = string(packet, "current");
+        if (!current.equals(music.snapshot().spotifyUri())) {
+            send("queue_result", "room", room.id, "request", request, "result", new QueueResult(List.of(), 0, "inactive"));
+            return;
+        }
+        room.executingQueue = request;
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(QUEUE_TIMEOUT_MILLIS - 1_000);
+        music.karaokeQueue(action, string(packet, "value"), packet.get("index").getAsInt(),
+                packet.get("version").getAsInt(), current, QUEUE_LIMIT,
+                () -> request.equals(room.executingQueue) && System.nanoTime() < deadline)
+                .whenComplete((reply, failure) -> KaraokePlatform.execute(() -> {
+                    if (!request.equals(room.executingQueue)) return;
+                    room.executingQueue = null;
+                    var result = failure == null ? new QueueResult(reply.entries().stream()
+                            .map(entry -> new QueueTrack(entry.uri(), entry.title(), entry.artist())).toList(),
+                            reply.version(), reply.status()) : new QueueResult(List.of(), 0, "error");
+                    send("queue_result", "room", room.id, "request", request, "result", result);
+                }));
     }
 
     private static Hit find(Ray ray) {
@@ -250,7 +466,8 @@ public final class KaraokeClient {
             double y = (pose.y() - ray.y - ray.dy * distance) / pose.pixelHeight();
             boolean handle = room.owned() && room.accepted && handleAt(x, y);
             boolean panel = dot < 0 && Math.abs(x) <= WIDTH / 2.0 && Math.abs(y) <= HEIGHT / 2.0;
-            if (panel || handle) closest = new Hit(room, x, y, distance);
+            boolean wing = dot < 0 && hasQueue(room) && KaraokeQueueView.contains(x, y, room.queue.side);
+            if (panel || handle || wing) closest = new Hit(room, x, y, distance);
         }
         return closest;
     }
@@ -268,20 +485,62 @@ public final class KaraokeClient {
         return hit;
     }
 
+    private static void pullQueue(Ray ray) {
+        var pull = queuePull;
+        if (ray == null || !hasQueue(pull.room) || ROOMS.get(pull.room.id) != pull.room
+                || !ray.dimension.equals(pull.room.panel.dimension())) {
+            queuePull = null;
+            return;
+        }
+        var panel = pull.room.panel;
+        double yaw = Math.toRadians(panel.yaw()), sin = Math.sin(yaw), cos = Math.cos(yaw);
+        double dot = sin * ray.dx + cos * ray.dz;
+        if (dot >= -.0001) {
+            queuePull = null;
+            return;
+        }
+        double distance = planeDistance(ray, panel, sin, cos, dot);
+        double x = planeX(ray, panel, distance, sin, cos) / panel.pixelSize();
+        if (distance <= 0 || distance > ray.limit) {
+            if (!KaraokePlatform.buttonHeld(pull.right)) queuePull = null;
+            return;
+        }
+        if (!KaraokePlatform.buttonHeld(pull.right) || (x - pull.start) * pull.side >= 7) {
+            pull.room.queue.open(pull.room, pull.side);
+            queuePull = null;
+        }
+    }
+
     public static boolean hideVanillaCrosshair() {
-        var target = captureAim(ROOMS.isEmpty() ? null : KaraokePlatform.ray());
+        var target = hit;
         return target != null && KaraokePlatform.popup(target.room) != null;
     }
 
     public static boolean click(boolean right) {
-        if (drag != null || (right ? usedInteract : usedAttack)) return true;
+        if (drag != null || queuePull != null || (right ? usedInteract : usedAttack)) return true;
         if (ROOMS.isEmpty()) return false;
         Ray ray = KaraokePlatform.ray();
         Hit current = ray == null ? null : find(ray);
-        if (current == null) return false;
+        if (current == null) {
+            blurQueue(queueFocus);
+            return false;
+        }
         Room room = current.room;
         if (right) usedInteract = true;
         else usedAttack = true;
+        int tab = hasQueue(room) ? KaraokeQueueView.tabAt(current.x, current.y, room.queue.side) : 0;
+        if (hasQueue(room) && (tab != 0 || Math.abs(current.x) > WIDTH / 2.0)) {
+            var view = KaraokePlatform.popup(room);
+            if (view != null && !view.invitation) {
+                if (tab != 0) {
+                    blurQueue(queueFocus);
+                    queuePull = new QueuePull(room, right, tab, current.x);
+                } else if (view.drawerProgress >= .98)
+                    room.queue.click(room, current.x, current.y, view.height, view.wingPixels(KaraokeQueueView.DRAWER_WIDTH));
+            }
+            return true;
+        }
+        blurQueue(queueFocus);
         boolean resizing = resizeAt(current.x, current.y);
         if (room.owned() && room.accepted && (handleAt(current.x, current.y) || resizing)) {
             drag = new Drag(room, right, resizing, room.panel, current.x, current.y, current.distance);
@@ -408,8 +667,16 @@ public final class KaraokeClient {
     public static boolean scrollPopup(double amount) {
         if (amount == 0 || !Double.isFinite(amount)) return false;
         if (drag != null) return scrollDrag(amount);
-        if (ROOMS.isEmpty() || !KaraokePlatform.popupZoomModifierHeld()) return false;
+        if (ROOMS.isEmpty()) return false;
         Hit target = captureAim(KaraokePlatform.ray());
+        if (target != null && hasQueue(target.room) && Math.abs(target.x) > WIDTH / 2.0) {
+            var popup = KaraokePlatform.popup(target.room);
+            if (popup != null && target.room.queue.side == (target.x < 0 ? -1 : 1)) {
+                target.room.queue.scroll(amount < 0 ? 1 : -1, popup.wingPixels(KaraokeQueueView.DRAWER_WIDTH), popup.height);
+                return true;
+            }
+        }
+        if (!KaraokePlatform.popupZoomModifierHeld()) return false;
         if (target == null || !target.room.accepted || KaraokePlatform.popup(target.room) == null) return false;
         target.room.lyricsZoom = Math.clamp(target.room.lyricsZoom * Math.pow(1.1, Math.clamp(amount, -4, 4)), .65, 2.5);
         return true;
@@ -436,6 +703,14 @@ public final class KaraokeClient {
     }
 
     private static void leave(Room room, boolean notify) {
+        if (room.panel == null) {
+            if (notify) send("listen_stop");
+            if (following == room) stopFollowing();
+            KaraokePlatform.listenNotice("stopped");
+            return;
+        }
+        blurQueue(room);
+        room.executingQueue = null;
         KaraokeSurfaces.beginClose(room);
         if (notify) send("leave", "room", room.id);
         room.accepted = false;
@@ -479,6 +754,7 @@ public final class KaraokeClient {
                         if (following == room && (failure != null || resolved == null)) {
                             room.spotifyFailed = true;
                             room.status = "karaoke.lyrica.spotify_match";
+                            if (room.panel == null) KaraokePlatform.listenNotice("match");
                         }
                     }));
             return;
@@ -510,6 +786,7 @@ public final class KaraokeClient {
                     if (following == room && failure != null) {
                         room.spotifyFailed = true;
                         room.status = "karaoke.lyrica.spotify_error";
+                        if (room.panel == null) KaraokePlatform.listenNotice("playback");
                     }
                 }));
     }

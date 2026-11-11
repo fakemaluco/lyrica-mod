@@ -1,6 +1,7 @@
 package dev.fandroid.client.music;
 
 import dev.fandroid.protocol.lyrics.LyricAlignment;
+import dev.fandroid.protocol.lyrics.LyricLine;
 import dev.fandroid.protocol.lyrics.LyricsDocument;
 import dev.fandroid.protocol.lyrics.LyricsSyncMode;
 
@@ -10,8 +11,10 @@ import java.util.*;
 public final class WorldLyricsPresentation {
     public static final int CONTRACT_VERSION = 3;
     public static final int MAX_GROUPS = 4, MAX_WORDS = 48;
-    public static final long DEFAULT_HOLD_MILLIS = 1_500, FADE_MILLIS = 350, MAX_HOLD_MILLIS = 6_000;
+    public static final long DEFAULT_HOLD_MILLIS = 1_500, FADE_MILLIS = 220, MAX_HOLD_MILLIS = 6_000;
     private static final double ENTRY_MILLIS = 240;
+    private static final int LETTER_FADE_MILLIS = 125;
+    private static final Entrance[] LOCAL_ENTRANCES = { Entrance.FADE, Entrance.RISE, Entrance.DEPTH, Entrance.FALL };
 
     private WorldLyricsPresentation() { }
 
@@ -19,7 +22,7 @@ public final class WorldLyricsPresentation {
     public enum Intensity { DISCREET, BALANCED, EXPRESSIVE }
     public enum Composition { FALLING_WORDS, PROGRESSIVE, COEXIST, STAIRCASE, SPOTLIGHT }
     public enum Region { AUTO, LEFT, RIGHT, TOP, BOTTOM, CENTER }
-    public enum Entrance { FADE, FALL, RISE, POP }
+    public enum Entrance { FADE, FALL, RISE, POP, DEPTH }
 
     public static Region safeRegion(Region region, boolean cinematic) {
         return region == Region.CENTER && !cinematic ? Region.RIGHT : region;
@@ -105,14 +108,41 @@ public final class WorldLyricsPresentation {
     }
 
     /** Distances are fractions of the laid-out line height; the adapter supplies actual world scale. */
-    public record Appearance(double alpha, double offsetY, double scale, double offsetX,
+    public record Appearance(double alpha, double offsetY, double scale, double offsetX, double offsetDepth,
                              int color, boolean volumetric) { }
     public record Window(int firstToken, int lastStartedToken, int newestGroup) { }
 
     public static double lineVisibility(Cue cue, long now) {
         if (now < cue.source().line().startMillis() || now >= cue.visibleUntil()) return 0;
-        return smooth((cue.visibleUntil() - now) / (double) Math.min(FADE_MILLIS,
-                Math.max(1, cue.visibleUntil() - cue.source().line().startMillis())));
+        return 1 - smooth(exitProgress(cue, now));
+    }
+
+    public static double exitProgress(Cue cue, long now) {
+        long duration = Math.min(cue.source().backing() ? 180 : FADE_MILLIS,
+                Math.max(1, cue.visibleUntil() - cue.source().line().startMillis()));
+        return Math.clamp(1 - (cue.visibleUntil() - now) / (double) duration, 0, 1);
+    }
+
+    public record ExitMotion(double offsetY, double offsetDepth, double scale) { }
+
+    /** Keep the exit visible in shader packs that give translucent text a hard alpha cutoff. */
+    public static ExitMotion exitMotion(Cue cue, double progress, double glyphPosition) {
+        double delay = Math.clamp(glyphPosition, 0, 1) * .16;
+        double phase = Math.clamp((progress - delay) / (1 - delay), 0, 1);
+        double eased = 1 - (1 - phase) * (1 - phase);
+        if (cue.source().backing()) return new ExitMotion(-.52 * eased, 0, 1 - .24 * eased);
+        return switch (cue.entrance()) {
+            case RISE -> new ExitMotion(-.26 * eased, 0, 1 - .26 * eased);
+            case FALL -> new ExitMotion(.26 * eased, 0, 1 - .26 * eased);
+            case DEPTH -> new ExitMotion(0, -.32 * eased, 1 - .26 * eased);
+            case POP, FADE -> new ExitMotion(0, 0, 1 - .34 * eased);
+        };
+    }
+
+    private static long localHold(WorldLyricsPlan.WorldLine source) {
+        String text = source.line().text();
+        int characters = text.codePointCount(0, text.length());
+        return (source.backing() ? 260 : 360) + Math.clamp((characters - 28L) * 14, 0, 760);
     }
 
     public static int groupIndex(Cue cue, int tokenIndex) {
@@ -170,22 +200,43 @@ public final class WorldLyricsPresentation {
 
     public static Appearance sample(Cue cue, List<WorldLyricsPlan.Token> tokens, Window window,
                                     int tokenIndex, long now, boolean animated) {
-        if (tokenIndex < 0 || tokenIndex >= tokens.size()) return new Appearance(0, 0, 1, 0, -1, cue.volumetric());
+        if (tokenIndex < 0 || tokenIndex >= tokens.size()) return new Appearance(0, 0, 1, 0, 0, -1, cue.volumetric());
+        return sampleAt(cue, window, tokenIndex, now, revealStart(cue, tokens, tokenIndex), ENTRY_MILLIS, animated);
+    }
+
+    /** Compress the existing grapheme timing into a short entrance while the sung token is active. */
+    public static long letterStart(WorldLyricsPlan.Token token, long glyphStart, boolean timed, double lineFraction) {
+        long duration = token.durationMillis();
+        if (duration == 0) return token.startMillis();
+        long delay = timed ? Math.round((glyphStart - token.startMillis()) * Math.min(1, 420.0 / duration))
+                : Math.round(Math.min(ENTRY_MILLIS, duration * .5) * Math.clamp(lineFraction, 0, 1));
+        return token.startMillis() + Math.clamp(delay, 0, duration);
+    }
+
+    /** Keep the window and accent from the cue, with a separate entrance clock for each letter. */
+    public static Appearance sampleLetter(Cue cue, Window window, int tokenIndex, long now,
+                                          long start, long end, boolean animated) {
+        double duration = Math.clamp((end - start) * .65, 1, LETTER_FADE_MILLIS);
+        return sampleAt(cue, window, tokenIndex, now, start, duration, animated);
+    }
+
+    private static Appearance sampleAt(Cue cue, Window window, int tokenIndex, long now,
+                                       long start, double duration, boolean animated) {
         int group = groupIndex(cue, tokenIndex);
-        long start = revealStart(cue, tokens, tokenIndex);
         double alpha = lineVisibility(cue, now);
         if (now < start || group < window.newestGroup() - MAX_GROUPS + 1
                 || tokenIndex < window.firstToken() || tokenIndex > window.lastStartedToken()) alpha = 0;
-        double progress = Math.clamp((now - start) / ENTRY_MILLIS, 0, 1);
+        double progress = Math.clamp((now - start) / duration, 0, 1);
         double ease = 1 - Math.pow(1 - progress, 3);
-        if (animated) alpha *= smooth(progress);
-        double y = 0, scale = 1;
+        if (animated) alpha *= ease;
+        double y = 0, depth = 0, scale = 1;
         Accent accent = cue.accentAt(tokenIndex);
         Entrance entrance = accent != null && accent.entrance() != null ? accent.entrance() : cue.entrance();
         if (animated) switch (entrance) {
-            case FALL -> y = .7 * (1 - ease);
+            case FALL -> y = .35 * (1 - ease);
             case RISE -> y = -.35 * (1 - ease);
             case POP -> scale = .88 + .12 * ease + .08 * Math.sin(progress * Math.PI);
+            case DEPTH -> depth = -.30 * (1 - ease);
             case FADE -> { }
         }
         // Geometry never depends on which earlier tokens are currently visible.
@@ -197,7 +248,7 @@ public final class WorldLyricsPresentation {
             if (accent.color() >= 0) color = accent.color();
             volumetric |= accent.volumetric();
         }
-        return new Appearance(alpha, y, scale, 0, color, volumetric);
+        return new Appearance(alpha, y, scale, 0, depth, color, volumetric);
     }
 
     /** Enforces a word window without cutting a retained syllable from the start of its word. */
@@ -221,18 +272,31 @@ public final class WorldLyricsPresentation {
         private final List<Cue> cues;
         private final Map<String, List<WorldLyricsPlan.Token>> tokens = new HashMap<>();
         private final Map<WorldLyricsPlan.WorldLine, String> ids = new HashMap<>();
+        private final Map<WorldLyricsPlan.WorldLine, WorldLyricsPlan.WorldLine> backingLeads = new HashMap<>();
+        private final Set<WorldLyricsPlan.WorldLine> pairedLeads;
         private final EnumMap<Intensity, Map<String, Cue>> locals = new EnumMap<>(Intensity.class);
         private final long[] maximumEnd;
 
         public Timeline(LyricsDocument document) {
             List<WorldLyricsPlan.WorldLine> lines = new ArrayList<>();
             if (document != null && document.metadata().syncMode() != LyricsSyncMode.STATIC) {
-                if (document.groups().isEmpty()) for (var line : document.lines())
-                    lines.add(new WorldLyricsPlan.WorldLine(line, LyricAlignment.NORMAL, line.background()));
-                else for (var group : document.groups()) {
-                    lines.add(new WorldLyricsPlan.WorldLine(group.lead(), group.alignment(), false));
-                    for (var backing : group.backingVocals()) lines.add(new WorldLyricsPlan.WorldLine(backing, group.alignment(), true));
+                Set<LyricLine> grouped = Collections.newSetFromMap(new IdentityHashMap<>());
+                for (var group : document.groups()) {
+                    var lead = new WorldLyricsPlan.WorldLine(group.lead(), group.alignment(), group.lead().background());
+                    lines.add(lead);
+                    grouped.add(group.lead());
+                    for (var backing : group.backingVocals()) {
+                        var voice = new WorldLyricsPlan.WorldLine(backing, group.alignment(), true);
+                        lines.add(voice);
+                        grouped.add(backing);
+                        if (!lead.backing() && !lead.line().text().isBlank() && !backing.text().isBlank()
+                                && backing.startMillis() < lead.line().endMillis() && lead.line().startMillis() < backing.endMillis()) {
+                            backingLeads.put(voice, lead);
+                        }
+                    }
                 }
+                for (var line : document.lines()) if (!grouped.contains(line))
+                    lines.add(new WorldLyricsPlan.WorldLine(line, LyricAlignment.NORMAL, line.background()));
             }
             lines.sort(Comparator.comparingLong(l -> l.line().startMillis()));
             List<Cue> built = new ArrayList<>();
@@ -250,31 +314,43 @@ public final class WorldLyricsPresentation {
             cues = List.copyOf(built);
             maximumEnd = new long[cues.size()]; long end = Long.MIN_VALUE;
             for (int i = 0; i < cues.size(); i++) maximumEnd[i] = end = Math.max(end, cues.get(i).source().line().endMillis());
+            pairedLeads = Set.copyOf(backingLeads.values());
             for (Intensity intensity : Intensity.values()) {
                 Map<String, Cue> map = new LinkedHashMap<>();
-                for (int i = 0; i < cues.size(); i++) {
-                    Cue base = cues.get(i);
+                int previousLeadStyle = -1, previousBackingStyle = -1;
+                for (Cue base : cues) {
+                    var random = new SplittableRandom(base.id().hashCode());
+                    boolean backing = base.source().backing();
+                    int previousStyle = backing ? previousBackingStyle : previousLeadStyle;
+                    int style = random.nextInt(LOCAL_ENTRANCES.length - (previousStyle < 0 ? 0 : 1));
+                    if (previousStyle >= 0 && style >= previousStyle) style++;
+                    Entrance entrance = LOCAL_ENTRANCES[style];
+                    if (backing) previousBackingStyle = style;
+                    else previousLeadStyle = style;
+                    Region region = random.nextBoolean() ? Region.LEFT : Region.RIGHT;
+                    boolean singlePanel = backing || pairedLeads.contains(base.source());
                     Composition composition = !WorldLyricsPlan.hasWordTiming(base.source().line()) ? Composition.COEXIST
-                            : intensity == Intensity.DISCREET
-                            ? new Composition[]{Composition.PROGRESSIVE, Composition.FALLING_WORDS, Composition.SPOTLIGHT, Composition.COEXIST}[i % 4]
-                            : Composition.values()[i % Composition.values().length];
-                    Entrance entrance = switch (composition) {
-                        case FALLING_WORDS -> Entrance.FALL;
-                        case STAIRCASE -> Entrance.RISE;
-                        case SPOTLIGHT -> intensity == Intensity.EXPRESSIVE ? Entrance.POP : Entrance.FADE;
-                        default -> Entrance.FADE;
-                    };
+                            : singlePanel || intensity == Intensity.DISCREET ? Composition.PROGRESSIVE
+                            : switch (random.nextInt(4)) {
+                                case 0 -> Composition.FALLING_WORDS;
+                                case 1 -> Composition.STAIRCASE;
+                                case 2 -> Composition.SPOTLIGHT;
+                                default -> Composition.PROGRESSIVE;
+                            };
                     List<Accent> accents = composition == Composition.SPOTLIGHT
                             ? List.of(new Accent(longestToken(tokens.get(base.id())), 1.35, -1, intensity == Intensity.EXPRESSIVE)) : List.of();
-                    Region region = i % 2 == 0 ? Region.LEFT : Region.RIGHT;
+                    var fragments = tokens.get(base.id());
+                    var ends = singlePanel ? List.of(fragments.size()) : groups(fragments, composition, intensity);
                     map.put(base.id(), new Cue(base.id(), base.source(), composition, region, entrance, false,
-                            DEFAULT_HOLD_MILLIS, accents, groups(tokens.get(base.id()), composition, intensity)));
+                            localHold(base.source()), accents, ends));
                 }
                 locals.put(intensity, Collections.unmodifiableMap(map));
             }
         }
 
         public List<Cue> cues() { return cues; }
+        public WorldLyricsPlan.WorldLine leadFor(WorldLyricsPlan.WorldLine backing) { return backingLeads.get(backing); }
+        public boolean hasBacking(WorldLyricsPlan.WorldLine lead) { return pairedLeads.contains(lead); }
         public Map<String, Cue> local(Intensity intensity) { return locals.get(intensity == null ? Intensity.DISCREET : intensity); }
         public List<WorldLyricsPlan.Token> tokens(Cue cue) { return tokens.getOrDefault(cue.id(), List.of()); }
         public Cue cueFor(WorldLyricsPlan.WorldLine line, Map<String, Cue> overrides, Intensity intensity) {
@@ -304,15 +380,19 @@ public final class WorldLyricsPresentation {
                     .thenComparing(cue -> cue.source().backing())
                     .thenComparing(Comparator.comparingLong((Cue cue) -> cue.source().line().startMillis()).reversed()));
             List<Cue> selected = new ArrayList<>();
-            int groups = 0, words = 0, previous = 0;
+            int groups = 0, words = 0;
+            boolean retainedLead = false, retainedBacking = false;
             for (Cue cue : candidates) {
                 if (selected.size() >= MAX_GROUPS) break;
                 boolean old = now >= cue.source().line().endMillis();
-                if (intensity == Intensity.DISCREET && old && previous >= 1
+                boolean backing = cue.source().backing();
+                if (intensity == Intensity.DISCREET && old && (backing ? retainedBacking : retainedLead)
                         && (overrides == null || !overrides.containsKey(cue.id()))) continue;
                 int[] cost = cost(cue, tokens.get(cue.id()), now);
                 if (groups + cost[0] > MAX_GROUPS || words + cost[1] > MAX_WORDS) continue;
-                selected.add(cue); groups += cost[0]; words += cost[1]; if (old) previous++;
+                selected.add(cue); groups += cost[0]; words += cost[1];
+                if (old && backing) retainedBacking = true;
+                if (old && !backing) retainedLead = true;
             }
             selected.sort(Comparator.comparingLong(cue -> cue.source().line().startMillis()));
             return List.copyOf(selected);

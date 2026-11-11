@@ -11,9 +11,19 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.time.Instant;
 import java.net.http.HttpClient;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import com.sun.net.httpserver.HttpServer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -27,7 +37,6 @@ class SpotifyAccountClientTest {
         assertThat(SpotifyAccountClient.preferredSource(MusicSource.AUTOMATIC, false)).isFalse();
         assertThat(SpotifyAccountClient.preferredSource(MusicSource.SPOTIFY_ACCOUNT, false)).isTrue();
         assertThat(SpotifyAccountClient.preferredSource(MusicSource.WINDOWS_MEDIA, true)).isFalse();
-        assertThat(SpotifyAccountClient.preferredSource(MusicSource.SPICETIFY_BRIDGE, true)).isFalse();
     }
 
     @Test
@@ -161,6 +170,68 @@ class SpotifyAccountClientTest {
                   "artists":[{"name":"BTS"}],"album":{"name":"BE"}}]
                 """);
         assertThat(SpotifyAccountClient.bestTrackId(youtube, items)).isEqualTo(EXACT_ID);
+    }
+
+    @Test
+    void searchesAddsAndAdvancesTheActualQueueOnlyFromItsCurrentVersion() throws Exception {
+        String current = "spotify:track:" + EXACT_ID;
+        String first = "spotify:track:" + "a".repeat(22);
+        String target = "spotify:track:" + "b".repeat(22);
+        String addition = "spotify:track:" + "c".repeat(22);
+        var playing = new AtomicReference<>(current);
+        var tracks = new ArrayDeque<>(List.of(first, target));
+        var skips = new AtomicInteger();
+        var added = new AtomicReference<String>();
+        var staleReadsAfterAdd = new AtomicInteger();
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1", exchange -> {
+            try (exchange) {
+                var uri = exchange.getRequestURI();
+                if (exchange.getRequestMethod().equals("POST")) {
+                    if (uri.getPath().endsWith("/next")) {
+                        skips.incrementAndGet();
+                        playing.set(tracks.removeFirst());
+                    } else {
+                        added.set(uri.getQuery());
+                        tracks.add(addition);
+                        staleReadsAfterAdd.set(1);
+                    }
+                    exchange.sendResponseHeaders(204, -1);
+                } else {
+                    boolean staleRead = staleReadsAfterAdd.getAndUpdate(count -> Math.max(0, count - 1)) > 0;
+                    Object body = uri.getPath().endsWith("/search")
+                            ? Map.of("tracks", Map.of("items", List.of(Map.of("uri", addition, "name", "New track"))))
+                            : Map.of("currently_playing", Map.of("uri", playing.get()),
+                                    "queue", tracks.stream().filter(track -> !staleRead || !addition.equals(track))
+                                            .map(track -> Map.of("uri", track, "name", "Track")).toList());
+                    byte[] bytes = ProtocolCodec.mapper().writeValueAsBytes(body);
+                    exchange.sendResponseHeaders(200, bytes.length);
+                    exchange.getResponseBody().write(bytes);
+                }
+            }
+        });
+        server.start();
+        Path tokens = directory.resolve("queue-tokens.json");
+        Files.write(tokens, ProtocolCodec.mapper().writeValueAsBytes(Map.of("accessToken", "fixture",
+                "expiresAtMillis", System.currentTimeMillis() + 600_000)));
+        URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/v1");
+        try (var client = new SpotifyAccountClient(new ClientPreferences(), ignored -> { }, () -> true,
+                HttpClient.newHttpClient(), tokens, false, endpoint)) {
+            var search = client.karaokeQueue("search", "New track", 0, 0, current, 12, () -> true).get(5, TimeUnit.SECONDS);
+            assertThat(search.entries()).extracting(SpotifyAccountClient.QueueEntry::uri).containsExactly(addition);
+            var original = client.karaokeQueue("list", "", 0, 0, current, 12, () -> true).get(5, TimeUnit.SECONDS);
+            var appended = client.karaokeQueue("add", addition, 0, 0, current, 12, () -> true).get(5, TimeUnit.SECONDS);
+            assertThat(added.get()).isEqualTo("uri=" + addition);
+            assertThat(appended.status()).isEqualTo("added");
+            var stale = client.karaokeQueue("jump", target, 1, original.version(), current, 12, () -> true).get(5, TimeUnit.SECONDS);
+            assertThat(stale.status()).isEqualTo("changed");
+            assertThat(skips.get()).isZero();
+            var jumped = client.karaokeQueue("jump", target, 1, appended.version(), current, 12, () -> true).get(5, TimeUnit.SECONDS);
+            assertThat(jumped.status()).isEqualTo("jumped");
+            assertThat(skips.get()).isEqualTo(2);
+            assertThat(playing.get()).isEqualTo(target);
+            assertThat(jumped.entries()).extracting(SpotifyAccountClient.QueueEntry::uri).containsExactly(addition);
+        } finally { server.stop(0); }
     }
 
     private static PlaybackSnapshot snapshot(String title, String artist, String album, long duration) {

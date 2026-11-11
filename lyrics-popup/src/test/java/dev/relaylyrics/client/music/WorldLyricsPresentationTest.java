@@ -24,15 +24,30 @@ class WorldLyricsPresentationTest {
         assertThat(sample(cue, 0, 2_000, true).alpha()).isEqualTo(1);
     }
 
-    @Test void singingEndsBeforeVisibilityAndTheLast350MillisecondsFade() {
+    @Test void shortLinesFadeQuicklyAndLongLinesGetMoreReadingTime() {
         var timeline = new Timeline(new LyricsDocument(List.of(words(0, "hold", "me"))));
-        var cue = timeline.cues().getFirst();
+        var cue = timeline.local(Intensity.DISCREET).values().iterator().next();
         assertThat(cue.source().line().endMillis()).isEqualTo(1_000);
-        assertThat(lineVisibility(cue, 1_500)).isEqualTo(1);
-        assertThat(lineVisibility(cue, 2_150)).isEqualTo(1);
-        assertThat(lineVisibility(cue, 2_325)).isEqualTo(.5);
-        assertThat(timeline.visible(2_499, Map.of(), Intensity.DISCREET)).hasSize(1);
-        assertThat(timeline.visible(2_500, Map.of(), Intensity.DISCREET)).isEmpty();
+        assertThat(lineVisibility(cue, 1_140)).isEqualTo(1);
+        assertThat(lineVisibility(cue, 1_250)).isEqualTo(.5);
+        assertThat(timeline.visible(1_359, Map.of(), Intensity.DISCREET)).hasSize(1);
+        assertThat(timeline.visible(1_360, Map.of(), Intensity.DISCREET)).isEmpty();
+        var longLine = new Timeline(new LyricsDocument(List.of(words(0, "this", "line", "takes", "a", "little", "longer", "to", "read"))));
+        assertThat(longLine.local(Intensity.DISCREET).values().iterator().next().holdMillis()).isGreaterThan(cue.holdMillis());
+    }
+
+    @Test void backingVocalsFallAsTheyFadeOnlyWhenMotionIsEnabled() {
+        var line = words(0, "hold");
+        var source = new WorldLyricsPlan.WorldLine(line, LyricAlignment.NORMAL, true);
+        var cue = new Cue("backing", source, Composition.PROGRESSIVE, Region.BOTTOM, Entrance.FADE,
+                false, 260, List.of(), List.of(1));
+        var exiting = sample(cue, 0, 670, true);
+        assertThat(exiting.alpha()).isEqualTo(.5);
+        var early = exitMotion(cue, exitProgress(cue, 670), 0);
+        var late = exitMotion(cue, exitProgress(cue, 670), 1);
+        assertThat(early.offsetY()).isNegative().isLessThan(late.offsetY());
+        assertThat(early.scale()).isBetween(.75, 1.0).isLessThan(late.scale());
+        assertThat(sample(cue, 0, 670, false).offsetY()).isZero();
     }
 
     @Test void reconstructsIdenticallyAfterPauseAndForwardBackwardSeek() {
@@ -107,12 +122,9 @@ class WorldLyricsPresentationTest {
         assertThat(cue.source().line()).isSameAs(line);
     }
 
-    @Test void expressiveSequenceDemonstratesAllFiveCompositionsAndFallingSettles() {
-        var timeline = new Timeline(new LyricsDocument(java.util.stream.IntStream.range(0, 5)
-                .mapToObj(i -> words(i * 2_000, "look", "here")).toList()));
-        assertThat(timeline.local(Intensity.EXPRESSIVE).values()).extracting(Cue::composition)
-                .containsExactly(Composition.values());
-        var falling = timeline.local(Intensity.EXPRESSIVE).values().iterator().next();
+    @Test void fallingWordsSettleAndWaitForTheirOwnOnset() {
+        var source = new WorldLyricsPlan.WorldLine(words(0, "look", "here"), LyricAlignment.NORMAL, false);
+        var falling = demonstration(source, Composition.FALLING_WORDS);
         assertThat(sample(falling, 0, 50, true).offsetY()).isPositive();
         assertThat(sample(falling, 0, 500, true).offsetY()).isZero();
         assertThat(sample(falling, 1, 499, true).alpha()).isZero();
@@ -126,17 +138,56 @@ class WorldLyricsPresentationTest {
                 false, 1_500, List.of(new Accent(3, 1, -1, false)), List.of(2))).isInstanceOf(IllegalArgumentException.class);
     }
 
-    @Test void centerRequiresCinematicModeAndLocalPhrasesAlternateRegions() {
+    @Test void centerRequiresCinematicModeAndDemoSupportsEveryComposition() {
         assertThat(safeRegion(Region.CENTER, false)).isEqualTo(Region.RIGHT);
         assertThat(safeRegion(Region.CENTER, true)).isEqualTo(Region.CENTER);
         assertThat(safeRegion(Region.LEFT, false)).isEqualTo(Region.LEFT);
         var timeline = new Timeline(new LyricsDocument(List.of(words(0, "first"), words(1_000, "next"))));
-        assertThat(timeline.local(Intensity.DISCREET).values()).extracting(Cue::region)
-                .containsExactly(Region.LEFT, Region.RIGHT);
         for (Composition composition : Composition.values()) {
             var demo = demonstration(timeline.cues().getFirst().source(), composition);
             assertThat(demo.composition()).isEqualTo(composition);
         }
+    }
+
+    @Test void timedLettersEnterInOrderAndFinishWithinShortWords() {
+        var timeline = new Timeline(new LyricsDocument(List.of(words(100, "stay", "here"))));
+        var cue = timeline.local(Intensity.DISCREET).values().iterator().next();
+        var tokens = timeline.tokens(cue);
+        var token = tokens.getFirst();
+        var glyphs = LyricsRenderText.timedGraphemes(token.text(), token.startMillis(), token.endMillis());
+        long first = letterStart(token, glyphs.getFirst().startMillis(), true, 0);
+        long last = letterStart(token, glyphs.getLast().startMillis(), true, 0);
+        var during = window(cue, tokens, last - 1);
+        assertThat(sampleLetter(cue, during, 0, last - 1, first, token.endMillis(), true).alpha()).isEqualTo(1);
+        assertThat(sampleLetter(cue, during, 0, last - 1, last, token.endMillis(), true).alpha()).isZero();
+        var fast = new WorldLyricsPlan.Token("stay", 100, 160, true);
+        long fastLast = letterStart(fast, 135, true, 0);
+        assertThat(fastLast).isBetween(101L, 159L);
+        var depth = new Cue(cue.id(), cue.source(), cue.composition(), cue.region(), Entrance.DEPTH,
+                false, cue.holdMillis(), List.of(), cue.groupEnds());
+        assertThat(sampleLetter(depth, during, 0, fastLast + 1, fastLast, fast.endMillis(), true).offsetDepth()).isNegative();
+        assertThat(sampleLetter(depth, during, 0, fastLast + 1, fastLast, fast.endMillis(), false).offsetDepth()).isZero();
+        assertThat(sampleLetter(depth, during, 0, fast.endMillis(), fastLast, fast.endMillis(), true).alpha()).isEqualTo(1);
+        assertThat(letterStart(new WorldLyricsPlan.Token("a line", 100, 4_000, true), 100, false, 1))
+                .isBetween(101L, 350L);
+    }
+
+    @Test void aBackingVocalKeepsItsOwnPanelAndIsStillVisibleOnItsOwn() {
+        var lead = words(0, "one", "two", "three", "four", "five", "six", "seven", "eight");
+        var backing = words(1_500, "sing", "with", "me");
+        var orphan = new LyricLine(5_000, 5_500, "oh", List.of(), "v2", true, null, null);
+        var document = new LyricsDocument(List.of(lead, backing, orphan),
+                List.of(new LyricVocalGroup(0, 4_000, lead, List.of(backing), LyricAlignment.NORMAL)), null);
+        var timeline = new Timeline(document);
+        var overlap = timeline.visible(2_700, Map.of(), Intensity.EXPRESSIVE);
+        assertThat(overlap).extracting(cue -> cue.source().line()).containsExactly(lead, backing);
+        assertThat(overlap).allSatisfy(cue -> assertThat(cue.groupEnds()).hasSize(1));
+        assertThat(timeline.leadFor(overlap.getLast().source())).isEqualTo(overlap.getFirst().source());
+        assertThat(timeline.visible(5_200, Map.of(), Intensity.DISCREET)).anySatisfy(cue -> {
+            assertThat(cue.source().line()).isSameAs(orphan);
+            assertThat(cue.source().backing()).isTrue();
+            assertThat(timeline.leadFor(cue.source())).isNull();
+        });
     }
 
     @Test void coexistRevealsAWholePhraseWhileFallingWordsKeepTheirOwnEntryTimes() {
@@ -170,7 +221,7 @@ class WorldLyricsPresentationTest {
         for (var cue : timeline.cues()) directed.put(cue.id(), new Cue(cue.id(), cue.source(),
                 Composition.COEXIST, cue.region(), Entrance.FADE, false, 6_000, List.of(), List.of()));
         assertThat(timeline.visible(3_100, directed, Intensity.DISCREET)).hasSize(4);
-        assertThat(timeline.visible(3_100, Map.of(), Intensity.DISCREET)).hasSize(2);
+        assertThat(timeline.visible(3_100, Map.of(), Intensity.DISCREET)).hasSize(1);
     }
 
     private static LyricLine words(long start, String... text) {

@@ -53,6 +53,7 @@ final class WorldTextFill {
         public VertexConsumer setUv2(int u, int v) { current.light = u | v << 16; return this; }
         public VertexConsumer setNormal(float x, float y, float z) { return this; }
         // Required by 1.21.11; harmless additional method on 1.21.1.
+        public VertexConsumer setUv3(float u, float v) { return this; }
         public VertexConsumer setLineWidth(float width) { return this; }
 
         void flush() {

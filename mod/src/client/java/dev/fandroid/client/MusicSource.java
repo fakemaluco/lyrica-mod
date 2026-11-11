@@ -5,7 +5,6 @@ public enum MusicSource {
     AUTOMATIC,
     WINDOWS_MEDIA,
     SPOTIFY_ACCOUNT,
-    SPICETIFY_BRIDGE,
     YOUTUBE_MUSIC;
 
     public MusicSource next() { return values()[(ordinal() + 1) % values().length]; }

@@ -14,7 +14,7 @@ Your next build. A long flight home. That one song on repeat.
 
 **Lyrica brings synchronized music lyrics into Minecraft**, with expressive word-by-word animation, artwork in motion, and a presentation you can make your own. Keep your song in a compact overlay, or let its words become part of the world around you.
 
-**Fabric · Client-side · Minecraft 1.21.1 / 1.21.11 / 26.2**
+**Fabric · Client-side · Minecraft 1.21.1 / 1.21.11 / 26.2 / 26.3**
 
 ![Lyrica in Minecraft](https://raw.githubusercontent.com/fakemaluco/lyrica-mod/main/docs/media/preview.gif)
 
@@ -48,9 +48,9 @@ It works between players using Lyrica, without a Minecraft server installation. 
 2. Download the matching Lyrica `.jar` from [Releases](https://github.com/fakemaluco/lyrica-mod/releases) and place it in your `mods` folder.
 3. Launch the game and open Lyrica's settings. Under **Connections**, choose your music source and follow the setup steps.
 
-On Windows, automatic detection can follow apps that expose a system media session, without a music-service login. Spotify account connection and local companions for Spotify through Spicetify and YouTube Music are also available; setup depends on your chosen method.
+On Windows, automatic detection can follow apps that expose a system media session, without a music-service login. Connect your Spotify account for Spotify Connect playback and queue controls. YouTube Music has its own local companion.
 
-Lyrica follows music playing in another app; it does not stream music itself. You only need to install the mod on your client, including when playing on a server. Minecraft 26.2 requires Java 25; the 1.21.x builds require Java 21.
+Lyrica follows music playing in another app; it does not stream music itself. You only need to install the mod on your client, including when playing on a server. Minecraft 26.2 and 26.3 require Java 25; the 1.21.x builds require Java 21.
 
 <details>
 <summary>Good to know</summary>
@@ -100,9 +100,9 @@ O **Music Presence** mostra uma nota musical na lista de jogadores e permite des
 2. Baixe o `.jar` correspondente em [Releases](https://github.com/fakemaluco/lyrica-mod/releases) e coloque na pasta `mods`.
 3. Abra o jogo e, nas configurações do Lyrica, escolha sua origem de música em **Conexões**. Siga as etapas exibidas.
 
-No Windows, a detecção automática acompanha aplicativos que disponibilizam uma sessão de mídia do sistema, sem login no serviço de música. Também há conexão por conta Spotify e extensões locais para Spotify via Spicetify e YouTube Music; a configuração depende do método escolhido.
+No Windows, a detecção automática acompanha aplicativos que disponibilizam uma sessão de mídia do sistema, sem login no serviço de música. Conecte sua conta Spotify para controlar a reprodução e a fila pelo Spotify Connect. O YouTube Music tem sua própria extensão local.
 
-O Lyrica acompanha a música de outro aplicativo; ele não transmite áudio por conta própria. A instalação é apenas no cliente, inclusive para jogar em servidores. Há builds para **1.21.1**, **1.21.11** e **26.2**. A versão 26.2 exige Java 25; as versões 1.21.x usam Java 21.
+O Lyrica acompanha a música de outro aplicativo; ele não transmite áudio por conta própria. A instalação é apenas no cliente, inclusive para jogar em servidores. Há builds para **1.21.1**, **1.21.11**, **26.2** e **26.3**. As versões 26.2 e 26.3 exigem Java 25; as versões 1.21.x usam Java 21.
 
 Letras, vídeos e precisão da sincronização variam conforme a faixa e os serviços. Traduções enviam o texto ao provedor escolhido; alguns exigem chave própria e podem cobrar pelo uso. A tradução automática começa desligada.
 

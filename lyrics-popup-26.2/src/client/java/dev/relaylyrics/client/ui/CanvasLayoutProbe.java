@@ -197,7 +197,7 @@ public final class CanvasLayoutProbe extends Screen {
                 resizeExpectedWidth = bounds.width() + 12;
                 resizeExpectedHeight = bounds.height() + 8;
                 if (!overlay.isPopupResizeHandleAt(bounds.x() + bounds.width() - 1, bounds.y() + bounds.height() - 1)
-                        || !overlay.mousePressed(bounds.x() + bounds.width() - 1, bounds.y() + bounds.height() - 1, 0))
+                        || !overlay.mousePressed(bounds.x() + bounds.width() - 1, bounds.y() + bounds.height() - 1, com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT))
                     throw new IllegalStateException("Video intercepted the resize handle");
                 overlay.mouseDragged(bounds.x() + bounds.width() + 11, bounds.y() + bounds.height() + 7);
                 return;
@@ -313,7 +313,7 @@ public final class CanvasLayoutProbe extends Screen {
         if(stage==7 || stage==11){
             if(stage==11){overlay.restoreMinimizedPopup();preferences.setPopupEdgeDocking(false);}
             var box=overlay.popupBoundsSnapshot(width,height);
-            if(!overlay.mousePressed(box.x()+box.width()/2.,box.y()+box.height()/2.,0))throw new IllegalStateException("Could not start popup drag");
+            if(!overlay.mousePressed(box.x()+box.width()/2.,box.y()+box.height()/2., com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT))throw new IllegalStateException("Could not start popup drag");
             overlay.mouseDragged(width/2.,8*ResponsiveLyricsLayout.scale(width,height));
             if(stage==11)overlay.mouseReleased();
         }
@@ -330,7 +330,7 @@ public final class CanvasLayoutProbe extends Screen {
         if(stage==18 || stage==21)overlay.mouseReleased();
         if(stage==22){
             preferences.setPopupEdgeDocking(false);var box=overlay.popupBoundsSnapshot(width,height);
-            if(!overlay.mousePressed(box.x()+box.width()/2.,box.y()+box.height()/2.,0))throw new IllegalStateException("Could not start disabled dock drag");
+            if(!overlay.mousePressed(box.x()+box.width()/2.,box.y()+box.height()/2., com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT))throw new IllegalStateException("Could not start disabled dock drag");
             overlay.mouseDragged(width/2.,8*ResponsiveLyricsLayout.scale(width,height));
         }
         if(stage==10)preferences.setLyricsAnimations(false);
@@ -379,7 +379,7 @@ public final class CanvasLayoutProbe extends Screen {
         if((stage==15 || stage==19) && !liveDragPrimed){
             var box=overlay.popupBoundsSnapshot(width,height);
             double gs=ResponsiveLyricsLayout.scale(width,height),px=box.x()+box.width()/2.,py=stage==19?box.y()+12*gs:box.y()+box.height()/2.;
-            if(!overlay.mousePressed(px,py,0))throw new IllegalStateException("Could not start held popup drag");
+            if(!overlay.mousePressed(px,py, com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT))throw new IllegalStateException("Could not start held popup drag");
             if(stage==19){overlay.mouseDragged(px+10*gs,py);overlay.mouseDragged(px,py);}
             else overlay.mouseDragged(width/2.,8*gs);
             liveDragPrimed=true;idleStageStarted=System.nanoTime();return;
@@ -575,7 +575,7 @@ public final class CanvasLayoutProbe extends Screen {
         }
         if(stage==4 && !dockStagePrimed) {
             var grip=frame.grip();
-            if(!overlay.mousePressed(grip.centerX(),grip.centerY(),0)) throw new IllegalStateException("External tab did not capture drag");
+            if(!overlay.mousePressed(grip.centerX(),grip.centerY(), com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT)) throw new IllegalStateException("External tab did not capture drag");
             overlay.mouseDragged(grip.centerX()+2,grip.centerY());
             if(!preferences.isPopupDocked()) throw new IllegalStateException("Click or tiny drag restored the popup"); dockStagePrimed=true;
         }
@@ -601,7 +601,7 @@ public final class CanvasLayoutProbe extends Screen {
             var old = overlay.popupBoundsSnapshot(width,height);
             double gs = ResponsiveLyricsLayout.scale(width,height);
             double downX = old.x()+old.width()-1, downY = old.y()+old.height()-1;
-            if (!overlay.mousePressed(downX,downY,0)) throw new IllegalStateException("Adaptive resize handle missing");
+            if (!overlay.mousePressed(downX,downY, com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT)) throw new IllegalStateException("Adaptive resize handle missing");
             overlay.mouseDragged(downX+(size[0]-ResponsiveLyricsLayout.design(old.width(),gs))*gs,
                     downY+(size[1]-ResponsiveLyricsLayout.design(old.height(),gs))*gs);
             overlay.mouseReleased();
@@ -640,7 +640,7 @@ public final class CanvasLayoutProbe extends Screen {
                     || overlay.currentPositionMillis() != actual) throw new IllegalStateException("Delay changed transport or missed a lyric renderer");
             preferences.setLyricsDelayMillis(0);
             double right = box.x() + box.width(), bottom = box.y() + box.height();
-            if (!overlay.mousePressed(box.x() + 1, box.y() + 1, 0)) throw new IllegalStateException("Top-left resize handle missing");
+            if (!overlay.mousePressed(box.x() + 1, box.y() + 1, com.mojang.blaze3d.platform.InputConstants.MOUSE_BUTTON_LEFT)) throw new IllegalStateException("Top-left resize handle missing");
             overlay.mouseDragged(box.x() - 10 * gs + 1, box.y() - 8 * gs + 1);
             overlay.mouseReleased();
             var resized = overlay.popupBoundsSnapshot(width,height);

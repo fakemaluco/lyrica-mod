@@ -15,7 +15,6 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -29,23 +28,12 @@ public final class MediaBridgeConnector implements MusicConnector {
     private final CopyOnWriteArrayList<Consumer<PlaybackSnapshot>> listeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<Consumer<MusicAudioLevels>> audioListeners = new CopyOnWriteArrayList<>();
     private volatile boolean audioLevelsEnabled;
-    private final CopyOnWriteArrayList<Consumer<SpicetifyLyricsPayload>> lyricsListeners = new CopyOnWriteArrayList<>();
     private volatile String activeMediaApp;
     private boolean duckingUsed;
     private volatile PlaybackSnapshot latest = PlaybackSnapshot.unavailable();
-    private volatile SpicetifyLyricsPayload latestLyrics;
     private volatile String pairingCode;
     private volatile int pairingPort;
-    private volatile boolean spicetifyConnected;
     private volatile boolean youtubeConnected;
-    private volatile int extensionProtocolVersion;
-    private volatile String extensionVersion = "";
-    private volatile boolean extensionArtwork;
-    private volatile boolean extensionSpicyCache;
-    private volatile boolean extensionRawTtml;
-    private volatile String spicyLyricsStatus = "";
-    private volatile String spicyLyricsDetail = "";
-    private volatile String spicyLyricsUri = "";
     private volatile boolean bridgeAlive = true;
     private volatile String startupError;
     private volatile String source = "AUTOMATIC";
@@ -120,65 +108,11 @@ public final class MediaBridgeConnector implements MusicConnector {
                 if (node.path("type").asText().equals("pairing_code")) {
                     pairingCode = node.path("code").asText();
                     pairingPort = node.path("port").asInt();
-                    FanDroidMod.LOGGER.info("FanDroid Spicetify bridge is listening on 127.0.0.1:{}", pairingPort);
-                    continue;
-                }
-                if (node.path("type").asText().equals("bridge_status")) {
-                    spicetifyConnected = node.path("spicetifyConnected").asBoolean(false);
-                    if (!spicetifyConnected) {
-                        extensionProtocolVersion = 0;
-                        extensionVersion = "";
-                    }
+                    FanDroidMod.LOGGER.info("YouTube Music companion is listening on 127.0.0.1:{}", pairingPort);
                     continue;
                 }
                 if (node.path("type").asText().equals("youtube_status")) {
                     youtubeConnected = node.path("youtubeConnected").asBoolean(false);
-                    continue;
-                }
-                if (node.path("type").asText().equals("spicetify_client")) {
-                    var client = node.path("client");
-                    extensionProtocolVersion = client.path("protocolVersion").asInt(0);
-                    extensionVersion = client.path("extensionVersion").asText("");
-                    var capabilities = client.path("capabilities");
-                    extensionArtwork = capabilities.path("artwork").asBoolean(false);
-                    extensionSpicyCache = capabilities.path("spicyCache").asBoolean(false);
-                    extensionRawTtml = capabilities.path("rawTtml").asBoolean(false);
-                    FanDroidMod.LOGGER.info("Connected to FanDroid Spicetify extension v{} (protocol {}, rawTtml={}, spicyCache={}, artwork={})",
-                            extensionVersion, extensionProtocolVersion, extensionRawTtml,
-                            extensionSpicyCache, extensionArtwork);
-                    continue;
-                }
-                if (node.path("type").asText().equals("lyrics_status")) {
-                    var status = node.path("lyricsStatus");
-                    spicyLyricsUri = status.path("uri").asText("");
-                    spicyLyricsStatus = status.path("status").asText("");
-                    spicyLyricsDetail = status.path("detail").asText("");
-                    FanDroidMod.LOGGER.info("Spicy Lyrics {} for {}{}", spicyLyricsStatus, spicyLyricsUri,
-                            spicyLyricsDetail.isBlank() ? "" : " (" + spicyLyricsDetail + ")");
-                    continue;
-                }
-                if (node.path("type").asText().equals("lyrics_payload")) {
-                    var lyrics = node.path("lyrics");
-                    java.util.List<String> songwriters = new java.util.ArrayList<>();
-                    if (lyrics.path("songwriters").isArray()) {
-                        lyrics.path("songwriters").forEach(value -> {
-                            if (value.isTextual() && !value.asText().isBlank()) {
-                                songwriters.add(value.asText());
-                            }
-                        });
-                    }
-                    SpicetifyLyricsPayload payload = new SpicetifyLyricsPayload(
-                            lyrics.path("uri").asText(""), lyrics.path("format").asText(""),
-                            lyrics.path("payload").asText(""), lyrics.path("source").asText("Spicy Lyrics"),
-                            songwriters, lyrics.path("providerCode").asText(""),
-                            lyrics.path("communityProvided").asBoolean(false),
-                            lyrics.path("makerUsername").asText(""), lyrics.path("makerAvatar").asText(""),
-                            lyrics.path("uploaderUsername").asText(""), lyrics.path("uploaderAvatar").asText(""));
-                    int maxLength = payload.format().equals("ttml") ? 4 * 1024 * 1024 : 2 * 1024 * 1024;
-                    if (payload.uri().startsWith("spotify:track:") && payload.payload().length() <= maxLength) {
-                        latestLyrics = payload;
-                        for (Consumer<SpicetifyLyricsPayload> listener : lyricsListeners) listener.accept(payload);
-                    }
                     continue;
                 }
                 if (!node.path("type").asText().equals("snapshot")) continue;
@@ -191,7 +125,6 @@ public final class MediaBridgeConnector implements MusicConnector {
             if (process.isAlive()) FanDroidMod.LOGGER.warn("Media bridge stopped producing snapshots", e);
         } finally {
             bridgeAlive = false;
-            spicetifyConnected = false;
             youtubeConnected = false;
         }
     }
@@ -212,18 +145,8 @@ public final class MediaBridgeConnector implements MusicConnector {
 
     public String pairingCode() { return pairingCode; }
     public int pairingPort() { return pairingPort; }
-    public boolean spicetifyConnected() { return spicetifyConnected; }
     public boolean youtubeConnected() { return youtubeConnected; }
     public String activeSource() { return activeSource; }
-    public int extensionProtocolVersion() { return extensionProtocolVersion; }
-    public String extensionVersion() { return extensionVersion; }
-    public boolean extensionOutdated() { return spicetifyConnected && extensionProtocolVersion < 2; }
-    public boolean extensionArtwork() { return extensionArtwork; }
-    public boolean extensionSpicyCache() { return extensionSpicyCache; }
-    public boolean extensionRawTtml() { return extensionRawTtml; }
-    public String spicyLyricsStatus() { return spicyLyricsStatus; }
-    public String spicyLyricsDetail() { return spicyLyricsDetail; }
-    public String spicyLyricsUri() { return spicyLyricsUri; }
     public boolean bridgeAlive() { return bridgeAlive && process.isAlive(); }
     public String startupError() { return startupError; }
 
@@ -291,12 +214,6 @@ public final class MediaBridgeConnector implements MusicConnector {
         listeners.add(listener);
         listener.accept(latest);
         return () -> listeners.remove(listener);
-    }
-
-    public AutoCloseable subscribeLyrics(Consumer<SpicetifyLyricsPayload> listener) {
-        lyricsListeners.add(listener);
-        if (latestLyrics != null) listener.accept(latestLyrics);
-        return () -> lyricsListeners.remove(listener);
     }
 
     @Override

@@ -156,8 +156,8 @@ public final class WorldLyricsLayout {
         double desired = .052 * size * Math.clamp(distance / 6, .35, 24);
         double margin = .5 * Math.clamp(distance / 6, .8, 43);
         double fitX = Math.max(.1, availableWidth - margin) / Math.max(1, (rowWidth + 6) * 1.16);
-        double fitY = Math.max(.1, availableHeight - margin) / Math.max(1, (backing ? Math.max(2, rows) : rows) * lineHeight * 1.16);
-        return Math.min(desired, Math.min(fitX, fitY)) * (backing ? .76 : 1);
+        double fitY = Math.max(.1, availableHeight - margin) / Math.max(1, rows * lineHeight * 1.16);
+        return Math.min(desired * (backing ? .88 : 1), Math.min(fitX, fitY));
     }
 
     public record WallRect(int left, int bottom, int right, int top) { }

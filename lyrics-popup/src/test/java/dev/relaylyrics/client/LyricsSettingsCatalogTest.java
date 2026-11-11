@@ -8,6 +8,14 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LyricsSettingsCatalogTest {
+    @Test void migratesTheRetiredMusicSourceWithoutResettingPreferences() throws Exception {
+        var preferences = ClientPreferences.decode("""
+                {"musicSource":"SPICETIFY_BRIDGE","spotifyClientId":"keep-me","lyricsX":133}
+                """.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(preferences.getMusicSource()).isEqualTo(MusicSource.AUTOMATIC);
+        assertThat(preferences.getSpotifyClientId()).isEqualTo("keep-me");
+        assertThat(preferences.getLyricsX()).isEqualTo(133);
+    }
     @Test void stableControlsCanRefreshCapturedPriorityAndCardsKeepSemanticIdentity() {
         var p = new ClientPreferences(); var c = catalog(p);
         c.expand("source_priority");
@@ -161,17 +169,17 @@ class LyricsSettingsCatalogTest {
         c.restore("world_volume");
         assertThat(p.getWorldLyricsQuality()).isEqualTo(WorldLyricsDirector.Quality.HIGH);
         assertThat(p.getWorldLyricsMaximumDistance()).isEqualTo(230); assertThat(p.getWorldLyricsAnimationSpeed()).isEqualTo(1.7);
-        p.setMusicSource(MusicSource.SPICETIFY_BRIDGE); p.setSpotifyClientId("keep-me"); p.setLyricsX(133);
+        p.setMusicSource(MusicSource.SPOTIFY_ACCOUNT); p.setSpotifyClientId("keep-me"); p.setLyricsX(133);
         c.restore("appearance"); assertThat(p.getLyricsX()).isEqualTo(133);
         c.restore("all");
-        assertThat(p.getSpotifyClientId()).isEqualTo("keep-me"); assertThat(p.getMusicSource()).isEqualTo(MusicSource.SPICETIFY_BRIDGE);
+        assertThat(p.getSpotifyClientId()).isEqualTo("keep-me"); assertThat(p.getMusicSource()).isEqualTo(MusicSource.SPOTIFY_ACCOUNT);
         assertThat(p.getLyricsX()).isEqualTo(24); assertThat(p.isWorldLyrics()).isFalse();
     }
     @Test void restoringDistanceWorksEvenWhenPreviousMaximumWasBelowDefaultMinimum() {
         var p = new ClientPreferences(); var c = catalog(p);
         p.setWorldLyricsMinimumDistance(3); p.setWorldLyricsMaximumDistance(3);
         c.restore("world_position");
-        assertThat(p.getWorldLyricsMinimumDistance()).isEqualTo(6);
+        assertThat(p.getWorldLyricsMinimumDistance()).isEqualTo(8);
         assertThat(p.getWorldLyricsMaximumDistance()).isEqualTo(192);
     }
     @Test void allCatalogLabelsAndChoicesExistInBothLanguages() throws Exception {

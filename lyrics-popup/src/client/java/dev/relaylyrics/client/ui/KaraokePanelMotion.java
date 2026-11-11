@@ -43,4 +43,32 @@ public final class KaraokePanelMotion {
                     action == hovered ? 1 : 0, SettingsMotion.FAST, SettingsMotion.Curve.EASE, now, enabled);
         }
     }
+
+    public static final class Tabs {
+        private final SettingsMotion.Tween left = new SettingsMotion.Tween(0);
+        private final SettingsMotion.Tween right = new SettingsMotion.Tween(0);
+
+        public double reveal(int edge, boolean aimed, long now, boolean enabled) {
+            return (edge < 0 ? left : right).to(aimed ? 1 : 0, SettingsMotion.FAST,
+                    SettingsMotion.Curve.OUT, now, enabled);
+        }
+    }
+
+    public static final class Drawer {
+        private final SettingsMotion.Tween visibility = new SettingsMotion.Tween(0);
+        private int side;
+
+        public record Pose(int side, double progress) { }
+
+        public Pose sample(int targetSide, long now, boolean enabled) {
+            if (targetSide != 0 && targetSide != side) {
+                side = targetSide;
+                visibility.snap(0);
+            }
+            double progress = visibility.to(targetSide == 0 ? 0 : 1,
+                    targetSide == 0 ? SettingsMotion.FAST : SettingsMotion.MODAL, SettingsMotion.Curve.OUT, now, enabled);
+            if (targetSide == 0 && progress <= .001) side = 0;
+            return new Pose(side, progress);
+        }
+    }
 }

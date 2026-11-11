@@ -41,10 +41,34 @@ public final class WorldLyricsSpace {
 
     public static double readingDistance(double speed, double remainingSeconds, int characters,
                                          boolean gliding, double viewLimit) {
+        return readingDistance(speed, remainingSeconds, characters, gliding, viewLimit, 8);
+    }
+
+    public static double readingDistance(double speed, double remainingSeconds, int characters,
+                                         boolean gliding, double viewLimit, double baseDistance) {
+        return Math.clamp(baseDistance + travelDistance(speed, remainingSeconds, characters, gliding),
+                5, Math.max(5, Math.min(256, viewLimit)));
+    }
+
+    private static double travelDistance(double speed, double remainingSeconds, int characters, boolean gliding) {
         double travel = Double.isFinite(speed) ? Math.clamp(speed, 0, 160) : 0;
         double reading = Math.clamp(Math.max(characters / 14.0, Math.min(remainingSeconds, 7)), 1.5, 8);
         double seconds = (gliding ? 2.4 : 1.2) + reading * (gliding ? .65 : .4);
-        return Math.clamp(8 + travel * seconds, 5, Math.max(5, Math.min(256, viewLimit)));
+        return travel * seconds;
+    }
+
+    public record DistanceRange(double minimum, double maximum) {
+        public double clamp(double distance) { return Math.clamp(distance, minimum, maximum); }
+    }
+
+    public static DistanceRange placementRange(double minimum, double maximum, double viewLimit) {
+        double far = Math.min(maximum, viewLimit);
+        return new DistanceRange(Math.min(minimum, far), far);
+    }
+
+    public static double readingDistance(double speed, double remainingSeconds, int characters,
+                                         boolean gliding, DistanceRange range) {
+        return range.clamp(range.minimum() + travelDistance(speed, remainingSeconds, characters, gliding));
     }
 
     public static Offset offset(Position position, boolean outdoors, boolean gliding,

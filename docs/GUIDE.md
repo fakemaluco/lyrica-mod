@@ -11,7 +11,7 @@
 5. Prontinho! O Lyrica já estará disponível.
 
 Os JARs standalone são identificados pela versão do jogo: `lyrica-1.21.1`,
-`lyrica-1.21.11` e `lyrica-26.2`. Para Minecraft 26.2, use Java 25 e uma
+`lyrica-1.21.11`, `lyrica-26.2` e `lyrica-26.3`. Para Minecraft 26.2 e 26.3, use Java 25 e uma
 versão atual do Fabric Loader e Fabric API. As letras no mundo são opcionais e
 podem ser ativadas diretamente na aba **Mundo 3D**, sempre visível nas configurações.
 A direção **Automática** funciona localmente e começa em intensidade **Discreta**:
@@ -45,6 +45,11 @@ Em servidores sem o Lyrica, continua disponível a presença via Supabase, com c
 verificada para compartilhar. Use **Conexão > Music Presence** ou
 `/music sharing off` para controlar o compartilhamento.
 
+Use `/music listen "NomeDoJogador"` para acompanhar a faixa, a pausa e o tempo
+de outro jogador no mesmo servidor, sem colocar um painel. O outro jogador
+precisa estar compartilhando a música, e quem ouve precisa conectar o Spotify
+ao Lyrica e ter um dispositivo ativo. Use `/music listen stop` para sair.
+
 Com o Lyrica no servidor e nos clientes, `/karaoke pop-up` coloca o pop-up
 do Lyrica no mundo. O anfitrião pode segurar a barra inferior para mover e
 girar o pop-up com a câmera. Durante o arraste, a rodinha ajusta a distância.
@@ -55,12 +60,24 @@ ou recusam com ✕ no próprio painel. Após o aceite, o pop-up acompanha a faix
 e os tempos das letras do anfitrião. Com uma conta
 Spotify conectada e um dispositivo disponível para controle, o Lyrica também
 sincroniza a reprodução local. Os participantes podem controlar a faixa no painel.
+Mire no centro da borda esquerda ou direita para revelar o ícone que abre a fila
+do Spotify do anfitrião. Clique no campo de busca e digite no próprio painel.
+**Enter** envia a busca e **Esc** sai do campo. Use **+** para enfileirar um
+resultado e o ícone de lista musical para voltar às próximas faixas. Selecione
+uma delas para avançar até ela. A rodinha percorre a lista. A fila precisa de uma conta Spotify Premium conectada no Lyrica do
+anfitrião e de uma faixa tocando no dispositivo ativo do Spotify.
+A fila do painel acompanha a fila real da conta do anfitrião. Use o botão de
+lista musical para consultar alterações feitas no Spotify. Remova e reordene
+itens diretamente no Spotify.
+A extensão Spicetify do Lyrica foi descontinuada. Em **Conexões → Spotify**,
+conecte sua conta para controlar o dispositivo ativo via Spotify Connect.
+Configurações antigas que usavam a extensão passam para **Automático**.
 O pop-up acompanha as próximas faixas do anfitrião e a sessão continua fora
 do alcance visual. Use `/karaoke stop` para encerrar ou sair da sessão.
 Veja as mudanças e os limites em [0.8.63](releases/0.8.63.md).
 
-Para compilar os três JARs, instale JDK 21 e JDK 25 e execute
-`.\gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build :lyrics-popup-26.2:build`.
+Para compilar os quatro JARs, instale JDK 21 e JDK 25 e execute
+`.\gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build :lyrics-popup-26.2:build :lyrics-popup-26.3:build`.
 
 ## Shaders musicais experimentais para o mundo
 
@@ -151,7 +168,7 @@ em tamanhos muito pequenos, o conteúdo também encolhe para caber.
 letras. Métodos manuais, pareamento e IDs ficam em **Detalhes da conexão**.
 Restaurar as preferências do mod preserva contas, Client ID, pareamentos e a
 origem da música. **Configurar conexão** abre etapas para Spotify ou YouTube
-Music e instruções para as bridges locais. Avisos de letras indisponíveis
+Music e instruções para a extensão local do YouTube Music. Avisos de letras indisponíveis
 permanecem por dez segundos, depois somem suavemente. O pop-up mantém seu tamanho
 e sua posição configurados, com a capa e os dados da música; letras carregadas
 e trechos instrumentais não são escondidos por esse prazo.

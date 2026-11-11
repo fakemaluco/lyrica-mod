@@ -33,12 +33,23 @@ jobs:
           if (Test-Path -LiteralPath $notesPath) {
             "notes=$notesPath" >> $env:GITHUB_OUTPUT
           }
-          .\gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build :lyrics-popup-26.2:build "-Pversion=$releaseVersion" --no-daemon
+          .\gradlew.bat :lyrics-popup:build :lyrics-popup-1.21.11:build :lyrics-popup-26.2:build :lyrics-popup-26.3:build "-Pversion=$releaseVersion" --no-daemon
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Path release-assets | Out-Null
-          Get-ChildItem lyrics-popup/build/libs,lyrics-popup-1.21.11/build/libs,lyrics-popup-26.2/build/libs -Filter "lyrica-*.jar" |
-            Where-Object { $_.Name -notmatch "sources|dev" } |
-            Copy-Item -Destination release-assets
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          foreach ($game in @("1.21.1", "1.21.11", "26.2", "26.3")) {
+            $module = if ($game -eq "1.21.1") { "lyrics-popup" } else { "lyrics-popup-$game" }
+            $jar = Get-Item -LiteralPath "$module/build/libs/lyrica-$game-$releaseVersion.jar"
+            $archive = [IO.Compression.ZipFile]::OpenRead($jar.FullName)
+            try {
+              if (!$archive.GetEntry("relaylyrics/native/windows-x86_64/relaylyrics-media-bridge.exe")) {
+                throw "The Windows bridge is missing from $($jar.Name)"
+              }
+            } finally {
+              $archive.Dispose()
+            }
+            Copy-Item -LiteralPath $jar.FullName -Destination release-assets
+          }
           Copy-Item media-bridge/target/release/fandroid-media-bridge.exe release-assets/relaylyrics-media-bridge.exe
           $bridgeHash = (Get-FileHash release-assets/relaylyrics-media-bridge.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           Set-Content -Encoding ascii release-assets/relaylyrics-media-bridge.exe.sha256 $bridgeHash

@@ -90,13 +90,19 @@ public final class WorldLyricsRecovery {
      * an eight-block-wide rectangle that could never fit among trunks or inside a tunnel.
      */
     public static List<Probe> compactProbes(double requestedDistance, double width, double height) {
+        return compactProbes(requestedDistance, width, height, .18);
+    }
+
+    public static List<Probe> compactProbes(double requestedDistance, double width, double height, double minimum) {
         double reference = Double.isFinite(requestedDistance) ? Math.clamp(requestedDistance, .8, 256) : 8;
         double suppliedWidth = Double.isFinite(width) ? Math.max(.1, width) : 4;
         double suppliedHeight = Double.isFinite(height) ? Math.max(.1, height) : 1.2;
         List<Probe> result = new ArrayList<>();
         double previous = Double.POSITIVE_INFINITY;
-        for (double target : new double[]{2, 1.25, .8, .5, .3, .18}) {
-            double distance = Math.min(reference, target);
+        double[] targets = minimum > 2 ? new double[]{minimum, reference * .68, reference}
+                : new double[]{2, 1.25, .8, .5, .3, .18};
+        for (double target : targets) {
+            double distance = Math.min(reference, Math.max(minimum, target));
             if (distance == previous) continue;
             previous = distance;
             boolean emergency = distance < .8;

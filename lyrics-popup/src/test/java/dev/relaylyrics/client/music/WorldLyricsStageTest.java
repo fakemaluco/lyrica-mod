@@ -52,8 +52,8 @@ class WorldLyricsStageTest {
         });
     }
 
-    @Test void localDefaultsAlternateWordsChunksAndPhrasesWithoutDependingOnFrameTime() {
-        var lines = IntStream.range(0, 4).mapToObj(index -> {
+    @Test void localEntrancesVaryWithoutRepeatingOrDependingOnFrameTime() {
+        var lines = IntStream.range(0, 24).mapToObj(index -> {
             var source = source("you", "tear", "do", "wanna");
             long offset = index * 4_000L;
             return new LyricLine(offset, offset + 2_000, source.line().text(), source.line().words().stream()
@@ -62,8 +62,11 @@ class WorldLyricsStageTest {
         }).toList();
         var timeline = new Timeline(new LyricsDocument(lines));
         var local = timeline.local(Intensity.DISCREET);
-        assertThat(local.values()).extracting(Cue::composition)
-                .containsExactly(Composition.PROGRESSIVE, Composition.FALLING_WORDS, Composition.SPOTLIGHT, Composition.COEXIST);
+        var entrances = local.values().stream().map(Cue::entrance).toList();
+        assertThat(entrances).contains(Entrance.FADE, Entrance.RISE, Entrance.DEPTH, Entrance.FALL);
+        assertThat(entrances.subList(0, 12)).isNotEqualTo(entrances.subList(12, 24));
+        for (int index = 1; index < entrances.size(); index++)
+            assertThat(entrances.get(index)).isNotEqualTo(entrances.get(index - 1));
         assertThat(local.values()).allSatisfy(cue -> assertThat(cue.volumetric()).isFalse());
         assertThat(new Timeline(new LyricsDocument(lines)).local(Intensity.DISCREET)).isEqualTo(local);
     }

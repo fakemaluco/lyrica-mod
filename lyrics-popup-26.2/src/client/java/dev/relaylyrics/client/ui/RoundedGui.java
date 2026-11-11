@@ -1,5 +1,6 @@
 package dev.relaylyrics.client.ui;
 
+import dev.relaylyrics.client.SungTextColor;
 import com.mojang.blaze3d.platform.NativeImage;
 import dev.relaylyrics.client.music.PlatformTextures;
 import java.util.LinkedHashMap;
@@ -25,7 +26,7 @@ public final class RoundedGui {
     private static final List<List<RoundedClipBand>> CLIP_PLANS = createClipPlans();
 
     private static final Map<GradientKey, GradientTexture> GRADIENTS = new LinkedHashMap<>(4, .75f, true);
-    private record GradientKey(int width, int height, int radius, int top, int bottom, int sidebarWidth, int sidebarColor, double density) { }
+    private record GradientKey(int width, int height, int radius, int top, int bottom, int sidebarWidth, int sidebarColor, double density, List<SungTextColor.Stop> stops) { }
     private record GradientTexture(Identifier id, int width, int height) { }
 
     private RoundedGui() { }
@@ -148,19 +149,37 @@ public final class RoundedGui {
     /** Pixel-accurate alpha corners; opacity is a tint, so an entrance never rebuilds the surface. */
     public static void smoothGradient(GuiGraphicsExtractor context, int x, int y, int width, int height,
                                       int radius, int topColor, int bottomColor, int sidebarWidth, int sidebarColor, double opacity) {
+        smoothGradient(context, x, y, width, height, radius, topColor, bottomColor, sidebarWidth, sidebarColor, opacity, null);
+    }
+
+    public static void smoothHorizontalGradient(GuiGraphicsExtractor context, int x, int y, int width, int height,
+                                                int radius, SungTextColor gradient, double opacity) {
+        smoothGradient(context, x, y, width, height, radius, 0, 0, 0, 0, opacity, gradient);
+    }
+
+    private static void smoothGradient(GuiGraphicsExtractor context, int x, int y, int width, int height,
+                                       int radius, int topColor, int bottomColor, int sidebarWidth, int sidebarColor,
+                                       double opacity, SungTextColor horizontal) {
         if (width <= 0 || height <= 0 || opacity <= 0) return;
         double density = Math.min(PlatformTextures.guiScale(), Math.sqrt(4_000_000.0 / ((double) width * height)));
-        GradientKey key = new GradientKey(width, height, radius, topColor, bottomColor, sidebarWidth, sidebarColor, density);
+        GradientKey key = new GradientKey(width, height, radius, topColor, bottomColor, sidebarWidth, sidebarColor, density, horizontal == null ? List.of() : horizontal.stops());
         GradientTexture gradient = GRADIENTS.get(key);
         if (gradient == null) {
             int rw = Math.max(1, (int) Math.ceil(width * density)), rh = Math.max(1, (int) Math.ceil(height * density));
             DynamicTexture texture = PlatformTextures.empty("Smooth panel gradient", rw, rh);
             NativeImage image = texture.getPixels();
             double r = Math.min(radius * density, Math.min(rw, rh) / 2.0);
+            int[] columns = null;
+            if (horizontal != null) {
+                columns = new int[rw];
+                for (int px = 0; px < rw; px++)
+                    columns[px] = 0xFF000000 | horizontal.gradient(px / (double) Math.max(1, rw - 1));
+            }
             for (int py = 0; py < rh; py++) {
                 int color = blendArgb(topColor, bottomColor, py / (double) Math.max(1, rh - 1));
                 for (int px = 0; px < rw; px++) {
-                    int painted = px < sidebarWidth * density ? sourceOver(sidebarColor, color) : color;
+                    int painted = columns != null ? columns[px]
+                            : px < sidebarWidth * density ? sourceOver(sidebarColor, color) : color;
                     double coverage = 1;
                     if ((px < r || px >= rw - r) && (py < r || py >= rh - r)) {
                         double distance = roundedRectDistance(px + .5, py + .5, rw / 2.0, rh / 2.0, rw / 2.0, rh / 2.0, r);

@@ -19,8 +19,17 @@ final class KaraokeSurfaces {
     private static final Map<KaraokeClient.Room, Surface> CLOSING = new LinkedHashMap<>();
     private static Surface idleInvitation;
 
-    record Surface(int slot, KaraokePopup popup, KaraokePopupTarget target) implements AutoCloseable {
-        Surface(int slot) { this(slot, new KaraokePopup(), new KaraokePopupTarget(slot)); }
+    static final class Surface implements AutoCloseable {
+        private final int slot;
+        private final KaraokePopup popup = new KaraokePopup();
+        private final KaraokePopupTarget target;
+        private long nextPaint;
+        private boolean wasAimed;
+        private int side;
+
+        Surface(int slot) { this.slot = slot; target = new KaraokePopupTarget(slot); }
+        KaraokePopup popup() { return popup; }
+        KaraokePopupTarget target() { return target; }
         @Override public void close() {
             popup.close();
             target.close();
@@ -82,12 +91,14 @@ final class KaraokeSurfaces {
         // Keep existing offscreen surfaces available for a quick turn back to the panel.
         var inView = new HashSet<KaraokeClient.Room>();
         var nearby = new ArrayList<Map.Entry<KaraokeClient.Room, Double>>();
+        var distances = new java.util.HashMap<KaraokeClient.Room, Double>();
         for (var room : KaraokeClient.rooms()) {
             double distance = KaraokePlatform.visibleDistance(room);
             if (distance > RANGE * RANGE) continue;
             var panel = room == dragged && dragPose != null ? dragPose : room.panel;
-            if (KaraokePlatform.inView(panel)) inView.add(room);
+            if (KaraokePlatform.inView(room, panel)) inView.add(room);
             if (inView.contains(room) || SURFACES.containsKey(room)) nearby.add(Map.entry(room, distance));
+            distances.put(room, distance);
         }
         // An aimed invitation gets its own surface without evicting a joined session.
         int capacity = MAX_SURFACES + (hit != null && !hit.room().accepted ? 1 : 0);
@@ -105,9 +116,12 @@ final class KaraokeSurfaces {
         var spare = ranked.stream().skip(visible.size()).filter(room -> !room.accepted && inView.contains(room)).findFirst();
         if (spare.isPresent()) {
             if (idleInvitation == null) idleInvitation = new Surface(0);
-            idleInvitation.popup.update(spare.get());
-            idleInvitation.popup.preview = null;
-            idleInvitation.target.paint(idleInvitation.popup, Double.NaN, Double.NaN);
+            if (now >= idleInvitation.nextPaint) {
+                idleInvitation.popup.update(spare.get());
+                idleInvitation.popup.preview = null;
+                idleInvitation.target.paint(idleInvitation.popup, Double.NaN, Double.NaN);
+                idleInvitation.nextPaint = now + 500_000_000L;
+            }
         } else if (idleInvitation != null) {
             idleInvitation.close();
             idleInvitation = null;
@@ -131,15 +145,28 @@ final class KaraokeSurfaces {
                 surface = new Surface(slot);
                 SURFACES.put(room, surface);
             }
-            surface.popup.update(room);
             boolean aimed = hit != null && hit.room() == room;
             var panel = room == dragged && dragPose != null ? dragPose : room.panel;
             var popup = surface.popup;
             // Quantize by four logical pixels so small mouse movements reuse the GPU target.
-            popup.width = (int) Math.round(WIDTH * panel.zoom() / 4) * 4;
-            popup.height = (int) Math.round(HEIGHT * panel.heightZoom() / 4) * 4;
+            int width = (int) Math.round(WIDTH * panel.zoom() / 4) * 4;
+            int height = (int) Math.round(HEIGHT * panel.heightZoom() / 4) * 4;
+            boolean changed = popup.width != width || popup.height != height || aimed != surface.wasAimed
+                    || surface.side != room.queue.side || popup.invitation == room.accepted;
+            if (!changed && now < surface.nextPaint) continue;
+            surface.popup.update(room);
+            popup.width = width;
+            popup.height = height;
+            if (room.queue.side != 0) room.queue.scroll(0, popup.wingPixels(KaraokeQueueView.DRAWER_WIDTH), height);
             surface.target.paint(popup, aimed ? popup.pointerX(hit.x()) : Double.NaN,
                     aimed ? popup.pointerY(hit.y()) : Double.NaN);
+            surface.wasAimed = aimed;
+            surface.side = room.queue.side;
+            double distance = distances.get(room);
+            boolean drawerMoving = popup.drawerProgress > 0 && popup.drawerProgress < 1;
+            surface.nextPaint = now + (aimed || room == dragged || room.queue.focused || drawerMoving ? 16_000_000L
+                    : room.accepted && distance < 64 ? 25_000_000L
+                    : room.accepted ? 50_000_000L : 100_000_000L);
         }
     }
 

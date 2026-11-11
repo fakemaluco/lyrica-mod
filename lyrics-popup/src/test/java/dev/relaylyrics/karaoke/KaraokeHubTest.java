@@ -133,16 +133,79 @@ class KaraokeHubTest {
         assertEquals(cameraPose, read(host.packet("panel"), "panel", Panel.class));
     }
 
+    @Test
+    void queueOperationsRequireMembershipAndOnlyTheHostCanCompleteThem() {
+        var hub = new KaraokeHub();
+        var host = new Player();
+        var guest = new Player();
+        var outsider = new Player();
+        hub.join(host);
+        hub.join(guest);
+        hub.join(outsider);
+        assertTrue(hub.open(host, host.position, 1_000));
+        String uri = "spotify:track:0123456789ABCDEFGHIJKL";
+        hub.receive(host, message("update", "room", host.id, "queue", true,
+                "song", new Song("Track", "Artist", "", uri, 0, 100_000, true)), 1_250);
+        UUID request = UUID.randomUUID();
+        var search = message("queue_request", "room", host.id, "request", request, "action", "search",
+                "value", "Search\u0007", "index", 0, "version", 0);
+        hub.receive(guest, search, 1_400);
+        assertNull(host.packet("queue_execute"));
+        hub.receive(guest, message("accept", "room", host.id), 1_500);
+        guest.position = new Panel("world", 40, 0, 0, 0);
+        hub.receive(guest, search, 1_600);
+        assertNull(host.packet("queue_execute"));
+        guest.position = host.position;
+        hub.receive(guest, search, 1_650);
+        assertEquals("Search", string(host.packet("queue_execute"), "value"));
+        assertEquals(uri, string(host.packet("queue_execute"), "current"));
+        var reply = message("queue_result", "room", host.id, "request", request, "result",
+                new QueueResult(List.of(new QueueTrack(uri, "Result", "Artist")), 0, "ok"));
+        hub.receive(guest, reply, 1_700);
+        assertNull(guest.packet("queue_result"));
+        hub.receive(host, reply, 1_750);
+        assertEquals(request, id(guest.packet("queue_result"), "request"));
+        assertNull(outsider.packet("queue_result"));
+        assertNull(outsider.packet("queue_snapshot"));
+    }
+
     private static Song song(String title) {
         return new Song(title, "Artist", "", "", 1000, 60000, true);
     }
 
+    @Test
+    void listenSendsTimingOnlyToSubscribersAndStopsWhenSharingIsDisabled() {
+        var hub = new KaraokeHub();
+        var host = new Player("Host");
+        var guest = new Player("Guest");
+        var bystander = new Player("Bystander");
+        hub.join(host);
+        hub.join(guest);
+        hub.join(bystander);
+        var song = song("First");
+        hub.receive(host, message("presence", "listen", true, "song", song), 1_000);
+        hub.receive(guest, message("listen", "name", "host"), 1_500);
+        assertNotNull(guest.packet("listen_started"));
+        assertEquals(1_500, read(guest.packet("listen_track"), "song", Song.class).position());
+        assertNull(bystander.packet("listen_track"));
+        assertEquals(0, read(bystander.packet("presence"), "song", Song.class).position());
+        var paused = new Song(song.title(), song.artist(), "", "", 1_800, 60_000, false);
+        hub.receive(host, message("presence", "listen", true, "song", paused), 4_000);
+        assertFalse(read(guest.packet("listen_track"), "song", Song.class).playing());
+        assertEquals(1_800, read(guest.packet("listen_track"), "song", Song.class).position());
+        hub.receive(host, message("presence", "listen", false), 7_000);
+        assertNotNull(guest.packet("listen_stopped"));
+    }
+
     private static final class Player implements KaraokeHub.Peer {
+        final String name;
+        Player() { this("Player"); }
+        Player(String name) { this.name = name; }
         final UUID id = UUID.randomUUID();
         Panel position = new Panel("world", 0, 0, 0, 0);
         final List<JsonObject> packets = new ArrayList<>();
         @Override public UUID id() { return id; }
-        @Override public String name() { return "Player"; }
+        @Override public String name() { return name; }
         @Override public Panel position() { return position; }
         @Override public void send(JsonObject packet) { packets.add(packet); }
         JsonObject packet(String op) {

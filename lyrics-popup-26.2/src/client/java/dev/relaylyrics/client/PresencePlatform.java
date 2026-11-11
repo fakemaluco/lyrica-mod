@@ -1,5 +1,7 @@
 package dev.relaylyrics.client;
 
+import dev.relaylyrics.client.karaoke.KaraokeClient;
+
 import dev.relaylyrics.client.presence.*;
 import dev.relaylyrics.client.ui.MusicPresenceRenderer;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -21,6 +23,13 @@ public final class PresencePlatform {
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registries) -> dispatcher.register(
                 ClientCommands.literal("music")
                 .executes(ctx -> MusicPresence.show(Minecraft.getInstance().getUser().getName()))
+                .then(ClientCommands.literal("listen")
+                        .then(ClientCommands.literal("stop").executes(ctx -> KaraokeClient.stopListening()))
+                        .then(ClientCommands.argument("host", StringArgumentType.string()).suggests((ctx, builder) -> {
+                            for (String name : names())
+                                if (name.toLowerCase(Locale.ROOT).startsWith(builder.getRemainingLowerCase())) builder.suggest(name);
+                            return builder.buildFuture();
+                        }).executes(ctx -> KaraokeClient.listen(StringArgumentType.getString(ctx, "host")))))
                 .then(ClientCommands.literal("sharing")
                         .then(ClientCommands.literal("on").executes(ctx -> MusicPresence.sharing(true)))
                         .then(ClientCommands.literal("off").executes(ctx -> MusicPresence.sharing(false))))

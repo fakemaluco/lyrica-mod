@@ -20,6 +20,9 @@ import static dev.relaylyrics.karaoke.KaraokeWire.WIDTH;
 final class KaraokePopup implements AutoCloseable {
     final LyricsOverlay overlay = new LyricsOverlay(RelayLyricsClient.preferences());
     int width = WIDTH, height = HEIGHT;
+    int leftWing, rightWing;
+    double drawerProgress;
+    KaraokeQueueView queue;
     boolean invitation, spotifySync, motionEnabled;
     Preview preview;
     final KaraokePanelMotion.Buttons buttons = new KaraokePanelMotion.Buttons();
@@ -27,6 +30,8 @@ final class KaraokePopup implements AutoCloseable {
     KaraokeInvitationLayout invitationLayout() { return new KaraokeInvitationLayout(width, height); }
     double pointerX(double centeredX) { return (centeredX / WIDTH + .5) * width; }
     double pointerY(double centeredY) { return (centeredY / HEIGHT + .5) * height; }
+    int wingPixels(int wing) { return (int) Math.round(wing * width / (double) WIDTH); }
+    int textureWidth() { return width + wingPixels(leftWing) + wingPixels(rightWing); }
 
     private CoverArtTexture artwork;
     private long generation = -1;
@@ -36,6 +41,13 @@ final class KaraokePopup implements AutoCloseable {
     void update(KaraokeClient.Room room) {
         motionEnabled = KaraokeSurfaces.spatialMotionEnabled();
         invitation = !room.accepted || invitation && motionEnabled && buttons.pressingAccept(System.nanoTime());
+        queue = room.queue;
+        boolean hasQueue = !invitation && KaraokeClient.hasQueue(room);
+        var pose = queue.drawer.sample(hasQueue ? queue.side : 0, System.nanoTime(), motionEnabled && hasQueue);
+        queue.displaySide = pose.side();
+        drawerProgress = pose.progress();
+        leftWing = KaraokeQueueView.wing(hasQueue, pose.side(), -1);
+        rightWing = KaraokeQueueView.wing(hasQueue, pose.side(), 1);
         if (invitation) {
             preview = room.preview;
             spotifySync = KaraokeClient.canSyncSpotify();

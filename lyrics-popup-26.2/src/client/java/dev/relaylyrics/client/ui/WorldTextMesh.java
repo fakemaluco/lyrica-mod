@@ -262,6 +262,7 @@ public final class WorldTextMesh {
         public VertexConsumer setUv1(int u, int v) { return this; }
         public VertexConsumer setUv2(int u, int v) { return this; }
         public VertexConsumer setNormal(float x, float y, float z) { return this; }
+        public VertexConsumer setUv3(float u, float v) { return this; }
         public VertexConsumer setLineWidth(float width) { return this; }
         void flush() { if (count == 4) quads.add(new Quad(x0, y0, x1, y1, u0, v0, u1, v1)); count = 0; }
     }

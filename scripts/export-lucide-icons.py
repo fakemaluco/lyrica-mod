@@ -17,4 +17,4 @@ for name, filename in [('settings', 'settings-lucide'), ('box', 'world-lyrics'),
 license_dir = root / 'lyrics-popup/src/main/resources/assets/relaylyrics/licenses'
 license_dir.mkdir(parents=True, exist_ok=True)
 shutil.copy2(source / 'LICENSE', license_dir / 'lucide.txt')
-print('Exported 13 Lucide icons at 192px; license included.')
+print(f"Exported {len(list(source.glob('*.svg')))} Lucide icons at 192px; license included.")

@@ -5,6 +5,9 @@ import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.relaylyrics.client.ui.KaraokeInvitationRenderer;
+import dev.relaylyrics.client.ui.GuiTransform;
+import dev.relaylyrics.client.ui.LiquidGlass;
+import dev.relaylyrics.client.ui.SettingsTypography;
 import com.mojang.blaze3d.textures.FilterMode;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -49,9 +52,9 @@ public final class KaraokePopupTarget implements AutoCloseable {
     public static WindowRenderState window() { return WINDOW; }
 
     void paint(KaraokePopup view, double x, double y) {
-        int scale = KaraokeSurfaces.textureDensity(view.width, view.height);
+        int scale = KaraokeSurfaces.textureDensity(view.textureWidth(), view.height);
         var client = Minecraft.getInstance();
-        int width = view.width * scale, height = view.height * scale;
+        int width = view.textureWidth() * scale, height = view.height * scale;
         if (target.width != width || target.height != height) {
             target.resize(width, height);
             registerTexture();
@@ -66,7 +69,15 @@ public final class KaraokePopupTarget implements AutoCloseable {
         try {
             if (view.invitation) KaraokeInvitationRenderer.draw(context, view.invitationLayout(), x, y,
                     view.spotifySync, view.preview, view.buttons, view.motionEnabled);
-            else view.overlay.renderWorldPopup(context, view.width, view.height, x, y);
+            else {
+                int left = view.wingPixels(view.leftWing);
+                GuiTransform.push(context);
+                try {
+                    GuiTransform.translate(context, left, 0);
+                    view.overlay.renderWorldPopup(context, view.width, view.height, x, y);
+                } finally { GuiTransform.pop(context); }
+                drawQueue(context, view, left, x + left, y);
+            }
             RenderSystem.getDevice().createCommandEncoder().clearColorAndDepthTextures(
                     target.getColorTexture(), CLEAR, target.getDepthTexture(), 0);
             WINDOW.width = width;
@@ -80,6 +91,39 @@ public final class KaraokePopupTarget implements AutoCloseable {
             state.reset();
             RenderSystem.setProjectionMatrix(projection, projectionType);
         }
+    }
+
+    private static void drawQueue(GuiGraphicsExtractor context, KaraokePopup view, int left, double px, double py) {
+        if (view.leftWing == 0) return;
+        var font = Minecraft.getInstance().font;
+        var canvas = new KaraokeQueueView.Canvas() {
+            @Override public void backdrop(int x, int y, int width, int height, int radius) {
+                view.overlay.renderKaraokeQueueBackdrop(context, x, y, width, height, radius);
+                GuiTransform.nextLayer(context);
+            }
+            @Override public void glass(int x, int y, int width, int height, int radius, double engagement) {
+                LiquidGlass.draw(context, x, y, width, height, radius, 1, engagement);
+                GuiTransform.nextLayer(context);
+            }
+            @Override public void fill(int x, int y, int endX, int endY, int color) {
+                context.fill(x, y, endX, endY, color);
+            }
+            @Override public void text(String value, int x, int y, int maxWidth, int color) {
+                String fitted = KaraokeInvitationLayout.fitLabel(value, maxWidth, font::width);
+                context.text(font, fitted, x, y, color, false);
+            }
+            @Override public void icon(String name, double x, double y, int size, int color) {
+                SettingsTypography.icon(context, name, x, y, size, color);
+            }
+            @Override public int width(String value) { return font.width(value); }
+            @Override public String label(String key) { return net.minecraft.network.chat.Component.translatable(key).getString(); }
+        };
+        int hoveredTab = KaraokeQueueView.tabAt(((px - left) / view.width - .5) * dev.relaylyrics.karaoke.KaraokeWire.WIDTH,
+                (py / view.height - .5) * dev.relaylyrics.karaoke.KaraokeWire.HEIGHT, view.queue.side);
+        long now = System.nanoTime();
+        view.queue.draw(canvas, 0, left, view.height, -1, hoveredTab, px, py, now, view.motionEnabled);
+        view.queue.draw(canvas, left + view.width, view.wingPixels(view.rightWing), view.height, 1,
+                hoveredTab, px, py, now, view.motionEnabled);
     }
 
     @Override public void close() {

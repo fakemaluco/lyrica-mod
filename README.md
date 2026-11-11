@@ -10,6 +10,10 @@ Lyrica is a Fabric Minecraft mod that displays real-time synchronized lyrics fro
 
 [Download](#download) · [Features](#features) · [Multiplayer](#multiplayer) · [Privacy](#privacy) · [Documentation](#documentation)
 
+## New in 0.9.4
+
+Lyrica now supports Minecraft 26.3. The karaoke panel can open the Spotify host’s playback queue, and world lyrics now have a minimum and maximum placement distance. The sung-text gradient spans the whole phrase by default. See the [0.9.4 release notes](docs/releases/0.9.4.md).
+
 ## Features
 
 ### Your music in Minecraft
@@ -59,6 +63,9 @@ With Lyrica installed on the server and clients, use **`/karaoke pop-up`** to pl
 | 1.21.1 | 21 | `lyrica-1.21.1-` |
 | 1.21.11 | 21 | `lyrica-1.21.11-` |
 | 26.2 | 25 | `lyrica-26.2-` |
+| 26.3 | 25 | `lyrica-26.3-` |
+
+The release JARs include the native Windows x64 media bridge.
 
 ## Privacy
 

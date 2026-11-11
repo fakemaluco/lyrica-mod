@@ -6,9 +6,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 public final class GuiTransform {
     private GuiTransform() { }
     public static boolean shiftDown() {
-        long window = net.minecraft.client.Minecraft.getInstance().getWindow().handle();
-        return org.lwjgl.glfw.GLFW.glfwGetKey(window, org.lwjgl.glfw.GLFW.GLFW_KEY_LEFT_SHIFT) == org.lwjgl.glfw.GLFW.GLFW_PRESS
-                || org.lwjgl.glfw.GLFW.glfwGetKey(window, org.lwjgl.glfw.GLFW.GLFW_KEY_RIGHT_SHIFT) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
+        return dev.relaylyrics.client.PlatformInput.shiftDown();
     }
 
     public static boolean scissorTransformsPose() { return true; }

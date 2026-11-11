@@ -14,6 +14,13 @@ final class KaraokeHub {
         void send(JsonObject packet);
     }
     private record Presence(Song song, long updated) { }
+    private static final class ListenSource {
+        final Set<UUID> listeners = new HashSet<>();
+        Song song;
+        long generation;
+        long updated;
+    }
+    private record QueueTask(UUID id, UUID requester, String action, long expires) { }
     private static final class Room {
         final UUID owner;
         final Set<UUID> joined = new HashSet<>();
@@ -25,6 +32,9 @@ final class KaraokeHub {
         long generation;
         long lastControl;
         long updated;
+        boolean queueReady;
+        long lastQueueRequest;
+        QueueTask queueTask;
         Room(UUID owner, Panel panel, long now) {
             this.owner = owner;
             this.panel = panel;
@@ -36,10 +46,12 @@ final class KaraokeHub {
     private final Map<UUID, Presence> presence = new HashMap<>();
     private final Map<UUID, Room> rooms = new HashMap<>();
     private final Map<UUID, Long> presenceInputs = new HashMap<>();
+    private final Map<UUID, ListenSource> listenSources = new HashMap<>();
+    private final Map<UUID, UUID> listening = new HashMap<>();
 
     void join(Peer peer) {
         peers.put(peer.id(), peer);
-        peer.send(message("hello"));
+        peer.send(message("hello", "queue", true, "listen", true));
         presence.forEach((id, value) -> {
             var player = peers.get(id);
             if (player != null) peer.send(presence(player, value.song));
@@ -49,6 +61,8 @@ final class KaraokeHub {
     void leave(UUID id) {
         peers.remove(id);
         presenceInputs.remove(id);
+        stopListening(id, false);
+        closeListeningSource(id);
         removePresence(id);
         close(id);
         for (var room : rooms.values()) {
@@ -88,6 +102,11 @@ final class KaraokeHub {
     }
 
     void tick(long now) {
+        listenSources.entrySet().removeIf(entry -> {
+            if (now - entry.getValue().updated <= 15_000) return false;
+            endListeners(entry.getValue());
+            return true;
+        });
         for (var entry : List.copyOf(presence.entrySet()))
             if (now - entry.getValue().updated > 15_000) removePresence(entry.getKey());
         for (var room : List.copyOf(rooms.values())) {
@@ -97,6 +116,11 @@ final class KaraokeHub {
             }
             for (var cursor : List.copyOf(room.pointers.entrySet()))
                 if (now - cursor.getValue() > 600) clearPointer(room, cursor.getKey());
+            if (room.queueTask != null && now >= room.queueTask.expires) {
+                var task = room.queueTask;
+                room.queueTask = null;
+                queueReply(room, task.requester, task.id, task.action, new QueueResult(List.of(), 0, "timeout"));
+            }
         }
     }
 
@@ -108,12 +132,22 @@ final class KaraokeHub {
             if (now - presenceInputs.getOrDefault(sender, 0L) < 300) return;
             presenceInputs.put(sender, now);
             Song song = read(packet, "song", Song.class);
+            if (packet.has("listen") && packet.get("listen").getAsBoolean()) updateListening(sender, song, now);
+            else closeListeningSource(sender);
             if (song == null || !song.playing() || song.clean().title().isBlank()) removePresence(sender);
             else {
                 Song clean = song.clean();
                 presence.put(sender, new Presence(clean, now));
                 broadcast(presence(peer, clean));
             }
+            return;
+        }
+        if (op.equals("listen")) {
+            startListening(peer, text(string(packet, "name"), 16), now);
+            return;
+        }
+        if (op.equals("listen_stop")) {
+            stopListening(sender, true);
             return;
         }
         Room room = rooms.get(id(packet, "room"));
@@ -147,9 +181,25 @@ final class KaraokeHub {
             }
             boolean previewChanged = !java.util.Objects.equals(preview(room.song), preview(clean));
             room.song = clean;
+            room.queueReady = packet.has("queue") && packet.get("queue").getAsBoolean();
             room.updated = now;
             if (previewChanged) broadcast(message("preview", "room", room.owner, "preview", preview(clean)));
             forMembers(room, track(room, now));
+            return;
+        }
+        if (op.equals("queue_result") && owner) {
+            var task = room.queueTask;
+            if (task == null || now >= task.expires || !task.id.equals(id(packet, "request"))) return;
+            var result = read(packet, "result", QueueResult.class);
+            if (result == null) return;
+            room.queueTask = null;
+            queueReply(room, task.requester, task.id, task.action, result);
+            if (Set.of("added", "jumped").contains(result.status()))
+                forMembers(room, message("queue_snapshot", "room", room.owner, "result", result));
+            return;
+        }
+        if (op.equals("queue_request") && nearby) {
+            requestQueue(peer, room, packet, now);
             return;
         }
         if (!nearby || now - room.inputs.getOrDefault(sender, 0L) < 45) return;
@@ -172,13 +222,113 @@ final class KaraokeHub {
             }
         } else if (op.equals("control")) {
             String action = string(packet, "action");
-            if (room.song == null || now - room.lastControl < 500
+            if (room.song == null || (room.queueTask != null && room.queueTask.action.equals("jump")) || now - room.lastControl < 500
                     || !Set.of("toggle", "seek", "previous", "next", "shuffle", "repeat").contains(action)) return;
             room.lastControl = now;
             long position = packet.has("position") ? Math.clamp(packet.get("position").getAsLong(), 0, 86_400_000) : 0;
             Peer host = peers.get(room.owner);
             if (host != null) host.send(message("control", "room", room.owner, "action", action, "position", position));
         }
+    }
+
+    private void startListening(Peer peer, String name, long now) {
+        var host = peers.values().stream().filter(player -> player.name().equalsIgnoreCase(name)).findFirst().orElse(null);
+        var source = host == null ? null : listenSources.get(host.id());
+        if (source == null || now - source.updated > 15_000) {
+            peer.send(message("listen_error", "reason", "unavailable"));
+            return;
+        }
+        for (UUID cursor = host.id(); cursor != null; cursor = listening.get(cursor)) {
+            if (cursor.equals(peer.id())) {
+                peer.send(message("listen_error", "reason", "cycle"));
+                return;
+            }
+        }
+        stopListening(peer.id(), false);
+        listening.put(peer.id(), host.id());
+        source.listeners.add(peer.id());
+        peer.send(message("listen_started", "player", host.id(), "name", host.name()));
+        peer.send(listenTrack(host.id(), source, now));
+    }
+
+    private void stopListening(UUID listener, boolean notify) {
+        var host = listening.remove(listener);
+        if (host != null) {
+            var source = listenSources.get(host);
+            if (source != null) source.listeners.remove(listener);
+        }
+        var peer = peers.get(listener);
+        if (notify && peer != null) peer.send(message("listen_stopped"));
+    }
+
+    private void closeListeningSource(UUID host) {
+        var source = listenSources.remove(host);
+        if (source != null) endListeners(source);
+    }
+
+    private void endListeners(ListenSource source) {
+        for (UUID listener : source.listeners) {
+            listening.remove(listener);
+            var peer = peers.get(listener);
+            if (peer != null) peer.send(message("listen_stopped"));
+        }
+    }
+
+    private void updateListening(UUID host, Song input, long now) {
+        var source = listenSources.computeIfAbsent(host, ignored -> new ListenSource());
+        var song = input == null ? null : input.clean();
+        if (song != null && song.title().isBlank()) song = null;
+        if (source.song == null ? song != null : song == null || !source.song.sameTrack(song)) source.generation++;
+        source.song = song == null ? null : new Song(song.title(), song.artist(), "", song.uri(),
+                song.position(), song.duration(), song.playing());
+        source.updated = now;
+        if (source.listeners.isEmpty()) return;
+        var packet = listenTrack(host, source, now);
+        for (UUID listener : source.listeners) {
+            var peer = peers.get(listener);
+            if (peer != null) peer.send(packet);
+        }
+    }
+
+    private static JsonObject listenTrack(UUID host, ListenSource source, long now) {
+        var song = source.song;
+        return message("listen_track", "player", host, "generation", source.generation,
+                "song", song == null ? null : new Song(song.title(), song.artist(), "", song.uri(),
+                        song.at(now - source.updated), song.duration(), song.playing()));
+    }
+
+    private void requestQueue(Peer peer, Room room, JsonObject packet, long now) {
+        UUID request = id(packet, "request");
+        String action = string(packet, "action");
+        String value = string(packet, "value");
+        int index = packet.get("index").getAsInt();
+        int version = packet.get("version").getAsInt();
+        boolean valid = switch (action) {
+            case "list" -> true;
+            case "search" -> !(value = text(value, 100)).isBlank();
+            case "add" -> queueUri(value);
+            case "jump" -> queueUri(value) && index >= 0 && index < QUEUE_LIMIT;
+            default -> false;
+        };
+        if (!valid) return;
+        String status = !room.queueReady || room.song == null || room.song.uri().isBlank() ? "inactive"
+                : room.queueTask != null || now - room.lastQueueRequest < 650 ? "busy" : null;
+        if (status != null) {
+            queueReply(room, peer.id(), request, action, new QueueResult(List.of(), 0, status));
+            return;
+        }
+        var host = peers.get(room.owner);
+        if (host == null) return;
+        room.lastQueueRequest = now;
+        room.queueTask = new QueueTask(request, peer.id(), action, now + QUEUE_TIMEOUT_MILLIS);
+        host.send(message("queue_execute", "room", room.owner, "request", request, "action", action,
+                "value", value, "index", index, "version", version, "current", room.song.uri()));
+    }
+
+    private void queueReply(Room room, UUID requester, UUID request, String action, QueueResult result) {
+        var peer = peers.get(requester);
+        if (peer != null && room.joined.contains(requester) && near(peer, room.panel))
+            peer.send(message("queue_result", "room", room.owner, "request", request, "action", action, "result", result));
     }
 
     private boolean near(Peer peer, Panel panel) {

@@ -90,7 +90,6 @@ public final class AudioDucking {
     private static String foreground(PlaybackSnapshot playback, String route, MediaBridgeConnector bridge) {
         if (!playback.playing() || playback.observedAt() == null
                 || Instant.now().minusSeconds(6).isAfter(playback.observedAt())) return null;
-        if ("spicetify".equals(route)) return "spotify";
         // Use the local transport identity for web playback only when the OS agrees on the track.
         String app = bridge.activeMediaApp();
         if (app != null && !app.isBlank() && !"account".equals(route)) return app;

@@ -44,6 +44,7 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
     dependsOn(":lyrics-popup-1.21.11:prepareStandaloneClientJava")
     from(rootProject.file("lyrics-popup/src/client/java")) {
         include("dev/relaylyrics/client/ClientPreferences.java")
+        include("dev/relaylyrics/client/SungTextColor.java")
         include("dev/relaylyrics/mixin/XaeroMinimapAlignmentMixin.java")
         include("dev/relaylyrics/mixin/JiAfkSessionMixin.java")
         include("dev/relaylyrics/mixin/JiAfkMusicMixin.java")
@@ -53,6 +54,8 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
         include("dev/relaylyrics/client/presence/**")
         include("dev/relaylyrics/client/karaoke/KaraokeClient.java")
         include("dev/relaylyrics/client/karaoke/KaraokePopup.java")
+        include("dev/relaylyrics/client/karaoke/KaraokeQueueView.java")
+        include("dev/relaylyrics/client/karaoke/KaraokeQueueSearch.java")
         include("dev/relaylyrics/client/karaoke/KaraokeInvitationLayout.java")
         include("dev/relaylyrics/client/karaoke/KaraokeSurfaces.java")
         include("dev/relaylyrics/client/compat/**")

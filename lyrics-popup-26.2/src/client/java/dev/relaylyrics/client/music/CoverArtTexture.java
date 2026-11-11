@@ -49,6 +49,7 @@ public final class CoverArtTexture implements AutoCloseable {
     private final AtomicLong generation = new AtomicLong();
     private final long textureInstanceId = TEXTURE_INSTANCE_GENERATION.incrementAndGet();
     private final FluidBackdrop fluidBackdrop = new FluidBackdrop(), islandBackdrop = new FluidBackdrop(true);
+    private FluidBackdrop queueBackdrop;
     private final StaticIslandPanel islandStillPanel=new StaticIslandPanel();
     private volatile boolean islandBackdropVideoSource;
     public boolean islandBackdropUsesVideo() { return islandBackdropVideoSource; }
@@ -437,6 +438,20 @@ public final class CoverArtTexture implements AutoCloseable {
     public boolean drawBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
                                 int blurStrength, double speedMultiplier, double opacity,
                                 int cornerRadius, BackdropFx fx, boolean allowMotion) {
+        return drawBackdrop(context, x, y, width, height, blurStrength, speedMultiplier, opacity,
+                cornerRadius, fx, allowMotion, fluidBackdrop);
+    }
+
+    public boolean drawQueueBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
+                                     int blurStrength, double speed, int radius) {
+        if (queueBackdrop == null) queueBackdrop = new FluidBackdrop(true);
+        return drawBackdrop(context, x, y, width, height, blurStrength, speed, .90,
+                radius, BackdropFx.plain(0, false, 0), false, queueBackdrop);
+    }
+
+    private boolean drawBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
+                                 int blurStrength, double speedMultiplier, double opacity, int cornerRadius,
+                                 BackdropFx fx, boolean allowMotion, FluidBackdrop surface) {
         TextureState canvas = allowMotion && canvasBackdrop ? canvasSurface.sample(true) : null;
         if (canvas != null) {
             if (CompatibilityManager.needsExplicitGuiFlush()) PlatformTextures.flush(context);
@@ -459,7 +474,7 @@ public final class CoverArtTexture implements AutoCloseable {
                 if (System.nanoTime() < enhancedBackdropRetryNanos) {
                     throw new IllegalStateException("fluid backdrop cooling down");
                 }
-                fluidBackdrop.draw(context, x, y, width, height, value, strength, speedMultiplier,
+                surface.draw(context, x, y, width, height, value, strength, speedMultiplier,
                         backgroundOpacity, cornerRadius, fx);
                 enhancedBackdropRetryNanos = 0;
             } catch (RuntimeException enhancedFailure) {
@@ -1052,6 +1067,7 @@ public final class CoverArtTexture implements AutoCloseable {
             fallbackTextures.clear();
             fluidBackdrop.close();
             islandBackdrop.close();
+            if (queueBackdrop != null) queueBackdrop.close();
             islandStillPanel.close();
             for (GlassLens lens : glassLenses) lens.close();
             if (artistArtwork != null) { artistArtwork.close(); artistArtwork = null; }

@@ -54,6 +54,7 @@ public final class WorldBuffers implements MultiBufferSource {
             current.nx = x; current.ny = y; current.nz = z;
             return this;
         }
+        public VertexConsumer setUv3(float u, float v) { return this; }
         @Override public VertexConsumer setLineWidth(float width) { return this; }
     }
 

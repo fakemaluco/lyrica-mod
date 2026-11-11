@@ -24,7 +24,7 @@ final class StandaloneMetadataTest {
             assertThat(metadata.path("id").asText()).isEqualTo("lyrica");
             assertThat(metadata.path("environment").asText()).isEqualTo("*");
             assertThat(metadata.path("depends").path("minecraft").asText())
-                    .isIn("1.21.1", "1.21.11", "26.2");
+                    .isIn("1.21.1", "1.21.11", "26.2", "26.3");
             assertThat(metadata.path("entrypoints").has("client")).isTrue();
             assertThat(metadata.path("entrypoints").has("modmenu")).isTrue();
             assertThat(metadata.path("entrypoints").path("main").get(0).asText())

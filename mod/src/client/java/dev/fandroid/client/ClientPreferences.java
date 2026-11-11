@@ -312,7 +312,11 @@ public final class ClientPreferences {
         Path file = file();
         try {
             if (Files.exists(file)) {
-                return ProtocolCodec.mapper().readValue(Files.readAllBytes(file), ClientPreferences.class);
+                var json = ProtocolCodec.mapper().readTree(Files.readAllBytes(file));
+                if ("SPICETIFY_BRIDGE".equals(json.path("musicSource").asText())) {
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) json).put("musicSource", MusicSource.AUTOMATIC.name());
+                }
+                return ProtocolCodec.mapper().treeToValue(json, ClientPreferences.class);
             }
         } catch (Exception ignored) {
         }

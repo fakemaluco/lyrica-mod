@@ -10,7 +10,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.network.chat.Component;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
 
 import java.awt.Desktop;
 import java.net.URI;
@@ -152,8 +152,8 @@ public final class SpotifyAccountScreen extends FanDroidScreenBase {
         scroll -= (int) Math.round(v * 28); positionControls(); return true;
     }
     @Override protected boolean handleKeyPressed(int key, int scanCode, int modifiers) {
-        if (key != GLFW.GLFW_KEY_PAGE_DOWN && key != GLFW.GLFW_KEY_PAGE_UP) return false;
-        scroll += (key == GLFW.GLFW_KEY_PAGE_DOWN ? 1 : -1) * Math.max(28, bodyBottom - bodyTop - 24);
+        if (key != InputConstants.KEY_PAGEDOWN && key != InputConstants.KEY_PAGEUP) return false;
+        scroll += (key == InputConstants.KEY_PAGEDOWN ? 1 : -1) * Math.max(28, bodyBottom - bodyTop - 24);
         positionControls(); return true;
     }
     @Override public void extractRenderState(GuiGraphicsExtractor context, int mouseX, int mouseY, float delta) {

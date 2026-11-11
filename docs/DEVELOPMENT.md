@@ -6,12 +6,12 @@
 | --- | --- |
 | `lyrics-popup/` | Mod standalone para Minecraft 1.21.1, configurações, testes e código compartilhado entre versões. |
 | `lyrics-popup-1.21.11/` | Configuração da compilação para Minecraft 1.21.11. |
-| `lyrics-popup-26.2/` | Adaptações do cliente para Minecraft 26.2. |
+| `lyrics-popup-26.2/` | Código do cliente compartilhado pelas versões Mojang 26.x. |
+| `lyrics-popup-26.3/` | Compilação e adaptações específicas para Minecraft 26.3. |
 | `mod/`, `mod-1.21.11/` | Fontes e recursos reutilizados pelas tarefas Gradle dos mods standalone. Continuam necessários mesmo sem aparecer em `settings.gradle.kts`. |
 | `lyrics-engine/` | Núcleo JVM de letras, tradução e vídeo, com licenças e atribuições upstream. |
 | `shared-protocol/` | Protocolo compartilhado com a bridge de mídia. |
 | `media-bridge/` | Bridge nativa em Rust para sessões de mídia e áudio. |
-| `integrations/spicetify-extension/` | Extensão para Spotify/Spicetify. |
 | `integrations/youtube-music-extension/` | Extensão de navegador para YouTube Music. |
 | `supabase/` | Serviço Music Presence, migrações e testes. Veja seu README. |
 | `assets-src/` | Fontes e ícones originais, incluindo licenças. |
@@ -30,7 +30,8 @@ selecionam o Java adequado para cada versão do Minecraft.
 ```
 
 Os JARs ficam em `lyrics-popup/build/libs/`,
-`lyrics-popup-1.21.11/build/libs/` e `lyrics-popup-26.2/build/libs/`.
+`lyrics-popup-1.21.11/build/libs/`, `lyrics-popup-26.2/build/libs/` e
+`lyrics-popup-26.3/build/libs/`.
 
 Para incluir a bridge nativa atualizada, compile-a antes dos mods:
 
@@ -42,14 +43,10 @@ cd ..
 .\gradlew.bat build
 ```
 
-Para verificar as extensões:
+Para verificar a extensão do YouTube Music:
 
 ```powershell
-cd integrations/spicetify-extension
-npm ci
-npm run typecheck
-npm run build
-cd ../youtube-music-extension
+cd integrations/youtube-music-extension
 node --test background.test.cjs content.test.cjs
 cd ../..
 ```

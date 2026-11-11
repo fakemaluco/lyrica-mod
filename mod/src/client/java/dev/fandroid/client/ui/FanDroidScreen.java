@@ -914,12 +914,12 @@ public final class FanDroidScreen extends FanDroidScreenBase {
                 : titleCase(runtime.globalChat().state().name());
         settingsInfoCard(context, tr("settings.fandroid.global_service"), globalState, 92, 404,
                 runtime.globalChat() != null && runtime.globalChat().state() == GlobalChatClient.State.ONLINE);
-        boolean musicConnected = youtube ? music.youtubeMusicConnected() : music.spicetifyConnected();
+        boolean musicConnected = youtube ? music.youtubeMusicConnected() : music.spotifyAccountConnected();
         String musicState = musicConnected ? tr("state.fandroid.connected")
                 : music.bridgeAlive() ? tr("state.fandroid.starting") : tr("state.fandroid.offline");
-        settingsInfoCard(context, youtube ? "YouTube Music" : "Spotify / Spicetify",
+        settingsInfoCard(context, youtube ? "YouTube Music" : "Spotify",
                 musicState, 92, 512, musicConnected);
-        if (music.pairingCode() != null) {
+        if (youtube && music.pairingCode() != null) {
             RetroDraw.text(context, textRenderer, tr("settings.fandroid.pair_code"), 116, 626,
                     RelayTheme.TEXT_MUTED, 1.1F);
             RetroDraw.text(context, textRenderer, music.pairingCode(), 116, 658,

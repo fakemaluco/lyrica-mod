@@ -303,7 +303,7 @@ mod tests {
         let bridge =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/fandroid-media-bridge.exe");
         let mut process = ProcessCommand::new(bridge)
-            .env("FANDROID_SPICETIFY_PORT", "0")
+            .env("LYRICA_YOUTUBE_MUSIC_PORT", "0")
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())

@@ -79,7 +79,7 @@ abstract class FanDroidScreenBase extends Screen {
 
     @Override
     public final boolean keyPressed(KeyEvent input) {
-        return handleKeyPressed(input.key(), input.scancode(), input.modifiers())
+        return handleKeyPressed(input.key(), 0, input.modifiers())
                 || super.keyPressed(input);
     }
 }

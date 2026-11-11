@@ -37,6 +37,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -52,6 +53,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
     private final Consumer<PlaybackSnapshot> snapshots;
     private final BooleanSupplier automaticAccountAllowed;
     private final HttpClient http;
+    private final URI queueApi;
     private final Path tokenFile;
     private final Object pollLock = new Object();
     private final Object pollWake = new Object();
@@ -61,6 +63,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
     private final AtomicInteger pendingCommands = new AtomicInteger();
     private volatile boolean refreshRequested;
     private volatile long nextPollAllowedMillis;
+    private volatile long nextQueueAllowedMillis;
     private volatile long lastPlaybackResponseNanos;
     private volatile boolean closed;
     private volatile String accessToken = "";
@@ -96,10 +99,17 @@ public final class SpotifyAccountClient implements AutoCloseable {
     SpotifyAccountClient(ClientPreferences preferences, Consumer<PlaybackSnapshot> snapshots,
                          BooleanSupplier automaticAccountAllowed, HttpClient http, Path tokenFile,
                          boolean startPolling) {
+        this(preferences, snapshots, automaticAccountAllowed, http, tokenFile, startPolling, URI.create("https://api.spotify.com/v1"));
+    }
+
+    SpotifyAccountClient(ClientPreferences preferences, Consumer<PlaybackSnapshot> snapshots,
+                         BooleanSupplier automaticAccountAllowed, HttpClient http, Path tokenFile,
+                         boolean startPolling, URI queueApi) {
         this.preferences = preferences;
         this.snapshots = snapshots;
         this.automaticAccountAllowed = automaticAccountAllowed;
         this.http = http;
+        this.queueApi = queueApi;
         this.tokenFile = tokenFile;
         loadTokens();
         if (startPolling) Thread.ofVirtual().name("relay-spotify-account").start(this::pollLoop);
@@ -472,6 +482,123 @@ public final class SpotifyAccountClient implements AutoCloseable {
                 : HttpRequest.BodyPublishers.ofString(json)).build(), HttpResponse.BodyHandlers.discarding());
         if (response.statusCode() < 200 || response.statusCode() >= 300)
             throw new IllegalStateException("Spotify returned HTTP " + response.statusCode());
+    }
+
+    public record QueueEntry(String uri, String title, String artist) { }
+    public record QueueReply(List<QueueEntry> entries, int version, String status) { }
+    private record PlayerQueue(String current, List<QueueEntry> entries) {
+        List<String> uris() { return entries.stream().map(QueueEntry::uri).toList(); }
+        int version() { return Objects.hash(current, uris()); }
+        QueueReply reply(String status) { return new QueueReply(entries, version(), status); }
+    }
+    private static final class QueueUnavailable extends Exception {
+        QueueUnavailable(String status) { super(status); }
+    }
+
+    public CompletableFuture<QueueReply> karaokeQueue(String action, String value, int index, int version,
+                                                       String current, int limit, BooleanSupplier active) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                if (!active.getAsBoolean() || !connected()) throw new QueueUnavailable("inactive");
+                if (action.equals("search")) {
+                    var data = queueRequest("/search?type=track&limit=10&q=" + encode(value), false, active);
+                    return new QueueReply(queueEntries(data.path("tracks").path("items"), limit), 0, "ok");
+                }
+                PlayerQueue queue = playerQueue(limit, active);
+                if (current.isBlank() || !current.equals(queue.current())) throw new QueueUnavailable("inactive");
+                if (action.equals("add")) {
+                    if (!validQueueUri(value)) throw new QueueUnavailable("error");
+                    queueRequest("/me/player/queue?uri=" + encode(value), true, active);
+                    try {
+                        long previousCount = queue.uris().stream().filter(value::equals).count();
+                        for (int attempt = 0; attempt < 3; attempt++) {
+                            if (attempt > 0) Thread.sleep(225);
+                            var updated = playerQueue(limit, active);
+                            if (!current.equals(updated.current())) break;
+                            if (updated.uris().stream().filter(value::equals).count() > previousCount)
+                                return updated.reply("added");
+                        }
+                    } catch (QueueUnavailable | java.io.IOException ignored) { }
+                    catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+                    return new QueueReply(List.of(), 0, "added_refresh");
+                }
+                if (action.equals("jump")) {
+                    if (version != queue.version() || index < 0 || index >= queue.entries().size()
+                            || !validQueueUri(value) || !value.equals(queue.entries().get(index).uri()))
+                        return queue.reply("changed");
+                    var expected = queue.uris().subList(0, index + 1);
+                    for (int step = 0; step < expected.size(); step++) {
+                        if (queue.entries().isEmpty() || !expected.get(step).equals(queue.entries().getFirst().uri()))
+                            return queue.reply("changed");
+                        queueRequest("/me/player/next", true, active);
+                        PlayerQueue previous = queue;
+                        for (int attempt = 0; attempt < 4; attempt++) {
+                            Thread.sleep(225);
+                            queue = playerQueue(limit, active);
+                            if (!queue.equals(previous)) break;
+                        }
+                        if (queue.equals(previous) || !expected.get(step).equals(queue.current())) return queue.reply("changed");
+                    }
+                    requestPlaybackRefresh();
+                    return queue.reply("jumped");
+                }
+                if (action.equals("list")) return queue.reply("ok");
+                throw new QueueUnavailable("error");
+            } catch (QueueUnavailable error) {
+                return new QueueReply(List.of(), 0, error.getMessage());
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                return new QueueReply(List.of(), 0, "timeout");
+            } catch (Exception error) {
+                return new QueueReply(List.of(), 0, "error");
+            }
+        });
+    }
+
+    private PlayerQueue playerQueue(int limit, BooleanSupplier active) throws Exception {
+        var data = queueRequest("/me/player/queue", false, active);
+        return new PlayerQueue(data.path("currently_playing").path("uri").asText(""), queueEntries(data.path("queue"), limit));
+    }
+
+    private JsonNode queueRequest(String path, boolean post, BooleanSupplier active) throws Exception {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            if (System.currentTimeMillis() < nextQueueAllowedMillis) throw new QueueUnavailable("rate");
+            String token = validToken();
+            if (token == null || closed || !active.getAsBoolean()) throw new QueueUnavailable("inactive");
+            var request = HttpRequest.newBuilder(URI.create(queueApi + path))
+                    .timeout(Duration.ofSeconds(5)).header("Authorization", "Bearer " + token);
+            var response = http.send((post ? request.POST(HttpRequest.BodyPublishers.noBody()) : request.GET()).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            int code = response.statusCode();
+            if (code == 200) return ProtocolCodec.mapper().readTree(response.body());
+            if (code == 204) return ProtocolCodec.mapper().createObjectNode();
+            if (code == 403) throw new QueueUnavailable("denied");
+            if (code == 404 && path.startsWith("/me/player")) throw new QueueUnavailable("inactive");
+            if (code == 429) {
+                nextQueueAllowedMillis = System.currentTimeMillis()
+                        + retryAfterMillis(response.headers().firstValue("Retry-After").orElse(""));
+                throw new QueueUnavailable("rate");
+            }
+            if (code != 401 || attempt != 0 || !refresh()) break;
+        }
+        throw new QueueUnavailable("error");
+    }
+
+    private static List<QueueEntry> queueEntries(JsonNode items, int limit) {
+        List<QueueEntry> entries = new ArrayList<>();
+        for (var item : items) {
+            if (entries.size() >= limit) break;
+            String uri = item.path("uri").asText("");
+            var artists = new ArrayList<String>();
+            item.path("artists").forEach(artist -> artists.add(artist.path("name").asText("")));
+            entries.add(new QueueEntry(validQueueUri(uri) ? uri : "", item.path("name").asText(""),
+                    artists.isEmpty() ? item.path("show").path("name").asText("") : String.join(", ", artists)));
+        }
+        return List.copyOf(entries);
+    }
+
+    private static boolean validQueueUri(String uri) {
+        return uri != null && uri.matches("spotify:(track|episode):[A-Za-z0-9]{22}");
     }
 
     public void requestPlaybackRefresh() {

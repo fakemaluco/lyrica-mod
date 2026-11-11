@@ -29,7 +29,7 @@ public final class LyricsSettingsCatalog {
         public final String key;
         Category(String name) { key = PREFIX + "category." + name; }
     }
-    public enum Kind { TOGGLE, CHOICE, SLIDER, ACTION, INFO, GROUP, TEXT, COLOR }
+    public enum Kind { TOGGLE, CHOICE, SLIDER, ACTION, INFO, GROUP, TEXT, COLOR, SUNG_COLOR, RANGE }
     public interface Actions {
         void run(String action);
         String status(String name);
@@ -52,6 +52,8 @@ public final class LyricsSettingsCatalog {
         public Runnable activate = () -> { };
         public DoubleSupplier number = () -> 0;
         public DoubleConsumer setNumber = ignored -> { };
+        public DoubleSupplier upperNumber = () -> 0;
+        public DoubleConsumer setUpperNumber = ignored -> { };
         public double min, max, step;
         public boolean changesStructure, masked;
         public List<Integer> colorPresets = List.of();
@@ -62,6 +64,7 @@ public final class LyricsSettingsCatalog {
             if (!key.equals(next.key) || kind != next.kind) throw new IllegalArgumentException("Setting identity changed");
             section = next.section; value = next.value; options = next.options; selected = next.selected;
             select = next.select; activate = next.activate; number = next.number; setNumber = next.setNumber;
+            upperNumber = next.upperNumber; setUpperNumber = next.setUpperNumber;
             min = next.min; max = next.max; step = next.step; changesStructure = next.changesStructure;
             masked = next.masked; setText = next.setText; colorPresets = next.colorPresets;
         }
@@ -202,7 +205,6 @@ public final class LyricsSettingsCatalog {
                     info("connection.client_id", p::getSpotifyClientId);
                     info("connection.code", () -> actions.status("code"));
                     info("connection.port", () -> actions.status("port"));
-                    info("connection.extension", () -> actions.status("extension"));
                     info("connection.track", () -> actions.status("track"));
                     info("connection.device", () -> actions.status("device"));
                 }
@@ -254,6 +256,10 @@ public final class LyricsSettingsCatalog {
                     toggle("world_cinematic", p::isWorldLyricsCinematic, p::setWorldLyricsCinematic);
                     choice("world_style", WorldLyricsExperience.Style.values(), p::getWorldLyricsStyle, p::setWorldLyricsStyle);
                     percent("world_size", .75, 2, .05, p::getWorldLyricsSize, p::setWorldLyricsSize);
+                    Entry distance = entry("world_distance_range", Kind.RANGE);
+                    distance.min = 3; distance.max = 256; distance.step = 1;
+                    distance.number = p::getWorldLyricsMinimumDistance; distance.setNumber = p::setWorldLyricsMinimumDistance;
+                    distance.upperNumber = p::getWorldLyricsMaximumDistance; distance.setUpperNumber = p::setWorldLyricsMaximumDistance;
                     action("world_customize", "customize.button", () -> { expanded.add("world"); actions.run("custom_world"); });
                 }
             }
@@ -385,6 +391,8 @@ public final class LyricsSettingsCatalog {
         if (group("typography")) {
             action("font", "font", () -> actions.run("font")).value = () -> p.getGoogleFontFamily().isEmpty() ? "@" + PREFIX + "google_font.minecraft" : p.getGoogleFontFamily();
             colors("font_color", p::getLyricsFontColor, p::setLyricsFontColor, 0xFFFFFF);
+            Entry sung = entry("sung_text_color", Kind.SUNG_COLOR);
+            sung.value = () -> "@" + PREFIX + "sung_text_color." + lower(p.getSungTextColor().mode());
             choice("weight", LyricsFontWeight.values(), p::getLyricsFontWeight, v -> { p.setLyricsFontWeight(v); actions.run("weight"); });
             percent("scale", .6, 1.8, .05, p::getLyricsTextScale, p::setLyricsTextScale);
             choice("alignment", LyricsTextAlignment.values(), p::getLyricsAlignment, p::setLyricsAlignment);
@@ -470,6 +478,7 @@ public final class LyricsSettingsCatalog {
                 p.setModernMode(d.isModernMode()); p.setGoogleFontFamily(""); p.setLyricsFontWeight(d.getLyricsFontWeight());
                 p.setLyricsTextScale(d.getLyricsTextScale()); p.setLyricsAlignment(d.getLyricsAlignment());
                 p.setLyricsFontColor(d.getLyricsFontColor());
+                p.setSungTextColor(d.getSungTextColor());
                 p.setIslandKawarpBackground(d.isIslandKawarpBackground()); p.setIslandVideoCover(d.isIslandVideoCover()); p.setJadeIsland(d.isJadeIsland());
                 p.setIslandLyrics(d.isIslandLyrics());
                 restore("effects"); restore("background"); restore("motion_artwork"); actions.run("font_changed");
@@ -495,9 +504,9 @@ public final class LyricsSettingsCatalog {
             }
             case "performance" -> { p.setLyricsAnimationFrameRate(d.getLyricsAnimationFrameRate()); p.setLyricsLoadingSkeleton(d.isLyricsLoadingSkeleton()); }
             case "world_position" -> {
+                p.setWorldLyricsDistanceRange(d.getWorldLyricsMinimumDistance(), d.getWorldLyricsMaximumDistance());
                 p.setWorldLyricsSurfacePreference(d.getWorldLyricsSurfacePreference()); p.setWorldLyricsAutoWalls(d.isWorldLyricsAutoWalls());
                 p.setWorldLyricsCinematic(d.isWorldLyricsCinematic()); p.setWorldLyricsPlayerReactions(d.isWorldLyricsPlayerReactions());
-                p.setWorldLyricsMaximumDistance(d.getWorldLyricsMaximumDistance()); p.setWorldLyricsMinimumDistance(d.getWorldLyricsMinimumDistance());
                 p.setWorldLyricsDistanceSensitivity(d.getWorldLyricsDistanceSensitivity()); p.setWorldLyricsArcRadius(d.getWorldLyricsArcRadius());
                 p.setWorldLyricsCenterGap(d.getWorldLyricsCenterGap()); p.setWorldLyricsVariation(d.getWorldLyricsVariation());
                 for (var preset : WorldLyricsDirector.Preset.values()) p.setWorldLyricsPresetEnabled(preset, true);
@@ -515,6 +524,7 @@ public final class LyricsSettingsCatalog {
             }
             case "world_experience" -> {
                 restore("world_volume"); restore("world_animation");
+                p.setWorldLyricsDistanceRange(d.getWorldLyricsMinimumDistance(), d.getWorldLyricsMaximumDistance());
                 p.setWorldLyricsDirection(d.getWorldLyricsDirection()); p.setWorldLyricsPresentationIntensity(d.getWorldLyricsPresentationIntensity());
                 p.setWorldLyricsStyle(d.getWorldLyricsStyle()); p.setWorldLyricsAccent(d.getWorldLyricsAccent());
                 p.setWorldLyricsTerrainLight(d.isWorldLyricsTerrainLight()); p.setWorldLyricsLuminance(d.getWorldLyricsLuminance()); p.setWorldLyricsPosition(d.getWorldLyricsPosition());

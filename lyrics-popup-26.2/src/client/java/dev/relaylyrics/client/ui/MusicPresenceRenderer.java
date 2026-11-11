@@ -67,7 +67,7 @@ public final class MusicPresenceRenderer {
             double cx = pose[0] - Math.cos(pose[3]) * distance, cz = pose[2] + Math.sin(pose[3]) * distance;
             matrices.translate(cx, pose[1], cz);
             backFacing = -cx * Math.sin(pose[3]) - cz * Math.cos(pose[3]) < 0;
-            matrices.mulPose(new org.joml.Quaternionf().rotationY((float)(pose[3] + (backFacing ? Math.PI : 0))));
+            matrices.mulPose(new org.joml.Matrix4f().rotation(new org.joml.Quaternionf().rotationY((float)(pose[3] + (backFacing ? Math.PI : 0)))));
             float bubble = (float)(1 + .05 * Math.sin(Math.PI * Math.clamp(elapsed / .45, 0, 1)) * Math.exp(-4 * elapsed));
             matrices.scale(size * bubble, -size / bubble, size);
             var matrix = matrices.last().pose();

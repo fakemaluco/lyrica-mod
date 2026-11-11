@@ -4,6 +4,14 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class WorldLyricsSpaceTest {
+    @Test void movementAndCompactRecoveryRespectThePlacementRange() {
+        var range = WorldLyricsSpace.placementRange(8, 25, 96);
+        assertThat(WorldLyricsSpace.readingDistance(0, 2, 20, false, range)).isEqualTo(8);
+        assertThat(WorldLyricsSpace.readingDistance(40, 2, 20, true, range)).isEqualTo(25);
+        assertThat(WorldLyricsSpace.placementRange(40, 60, 28)).isEqualTo(new WorldLyricsSpace.DistanceRange(28, 28));
+        assertThat(WorldLyricsRecovery.compactProbes(25, 4, 1.2, range.minimum())).isNotEmpty()
+                .allSatisfy(probe -> assertThat(probe.distance()).isBetween(8.0, 25.0));
+    }
     @Test void elytraReadingRunwayGrowsWithSpeedAndPhraseLengthWithinVisibleChunks() {
         double shortLine=WorldLyricsSpace.readingDistance(20,2,20,true,256);
         double longLine=WorldLyricsSpace.readingDistance(20,2,130,true,256);

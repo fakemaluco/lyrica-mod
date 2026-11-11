@@ -73,16 +73,22 @@ public final class KaraokePlatform {
             frustum = null;
         }
     }
+    static void listenNotice(String key, Object... args) {
+        var player = MinecraftClient.getInstance().player;
+        if (player != null) player.sendMessage(net.minecraft.text.Text.translatable("music.lyrica.listen." + key, args), false);
+    }
     static void clearPopups() {
         frustum = null;
         KaraokeSurfaces.clear();
     }
 
-    static boolean inView(Panel panel) {
+    static boolean inView(KaraokeClient.Room room, Panel panel) {
         if (frustum == null) return true;
         double yaw = Math.toRadians(panel.yaw());
         // Include the drag handle and cursors beyond the textured quad.
-        double halfWidth = (WIDTH / 2.0 + 8) * panel.pixelSize();
+        int side = room.queue.side != 0 ? room.queue.side : room.queue.displaySide;
+        int wing = KaraokeQueueView.wing(KaraokeClient.hasQueue(room), side, side == -1 ? -1 : 1);
+        double halfWidth = (WIDTH / 2.0 + Math.max(8, wing)) * panel.pixelSize();
         double halfHeight = KaraokeClient.HANDLE_BOTTOM * panel.pixelHeight();
         double dx = Math.abs(Math.cos(yaw)) * halfWidth + .02;
         double dz = Math.abs(Math.sin(yaw)) * halfWidth + .02;
@@ -93,6 +99,10 @@ public final class KaraokePlatform {
         var surface = KaraokeSurfaces.get(room);
         return surface == null ? null : surface.popup();
     }
+    static void queueTextInput(boolean focused) { }
+    static void releaseKeys() { net.minecraft.client.option.KeyBinding.unpressAll(); }
+    static String clipboard() { return MinecraftClient.getInstance().keyboard.getClipboard(); }
+    static void clipboard(String value) { MinecraftClient.getInstance().keyboard.setClipboard(value); }
     static void openSettings() {
         var client = MinecraftClient.getInstance();
         client.setScreen(new dev.relaylyrics.client.ui.LyricsConfigScreen(client.currentScreen));
@@ -141,7 +151,7 @@ public final class KaraokePlatform {
             double opacity = room.motion.opacity(now, animate);
             if (opacity <= 0) continue;
             var panel = room == draggedRoom && draggedPanel != null ? draggedPanel : room.panel;
-            if (!inView(panel)) continue;
+            if (!inView(room, panel)) continue;
             double yaw = Math.toRadians(panel.yaw());
             boolean back = Math.sin(yaw) * (camera.x - panel.x()) + Math.cos(yaw) * (camera.z - panel.z()) < 0;
             if (back) yaw += Math.PI;
@@ -159,15 +169,25 @@ public final class KaraokePlatform {
 
     private static void drawPanel(KaraokeClient.Room room, MatrixStack matrices, VertexConsumerProvider buffers, boolean back,
                                   KaraokeSurfaces.Surface surface, double opacity, boolean closing) {
-        quad(matrices, buffers, surface.target().texture(), -WIDTH / 2f, -HEIGHT / 2f,
-                WIDTH / 2f, HEIGHT / 2f, 0, (int) Math.round(opacity * 255) << 24 | (back ? 0x575757 : 0xFFFFFF), true);
+        var popup = surface.popup();
+        float textureWidth = popup.textureWidth();
+        float leftPixels = popup.wingPixels(popup.leftWing);
+        float leftU = leftPixels / textureWidth, rightU = (leftPixels + popup.width) / textureWidth;
+        var texture = surface.target().texture();
+        int alpha = (int) Math.round(opacity * 255) << 24;
+        quad(matrices, buffers, texture, -WIDTH / 2f, -HEIGHT / 2f, WIDTH / 2f, HEIGHT / 2f, 0,
+                alpha | (back ? 0x575757 : 0xFFFFFF), true, leftU, rightU);
+        if (!back) {
+            drawWing(matrices, buffers, texture, -1, popup.leftWing, leftU, opacity, popup.drawerProgress);
+            drawWing(matrices, buffers, texture, 1, popup.rightWing, 1 - rightU, opacity, popup.drawerProgress);
+        }
         if (closing) return;
         if (room.accepted) {
             if (room.owned()) {
                 drawHandle(room, matrices, buffers, back);
                 if (!back) drawResizeGrip(room, matrices, buffers);
             }
-            if (!back) {
+            if (!back && !MinecraftClient.getInstance().options.hudHidden) {
                 long now = System.nanoTime();
                 room.cursors.forEach((id, cursor) -> {
                     int color = 0xFF000000 | ((id.hashCode() & 0x007F7F7F) | 0x00808080);
@@ -177,8 +197,22 @@ public final class KaraokePlatform {
             }
         }
         var hit = KaraokeClient.hit();
-        if (hit != null && hit.room() == room)
+        if (!MinecraftClient.getInstance().options.hudHidden && hit != null && hit.room() == room
+                && (!KaraokeClient.hasQueue(room) || KaraokeQueueView.tabAt(hit.x(), hit.y(), room.queue.side) == 0))
             cross(matrices, buffers, (float) (back ? -hit.x() : hit.x()), (float) hit.y(), 0xFFFFFFFF);
+    }
+
+    private static void drawWing(MatrixStack matrices, VertexConsumerProvider buffers, Identifier texture, int side,
+                                 int width, float textureFraction, double opacity, double drawerProgress) {
+        float reveal = width == KaraokeQueueView.DRAWER_WIDTH ? (float) drawerProgress : 1;
+        if (width == 0 || reveal <= .001f) return;
+        float edge = side * WIDTH / 2f;
+        float outer = edge + side * width * reveal;
+        int color = (int) Math.round(opacity * reveal * 255) << 24 | 0xFFFFFF;
+        float u1 = side < 0 ? 0 : 1 - textureFraction * reveal;
+        float u2 = side < 0 ? textureFraction * reveal : 1;
+        quad(matrices, buffers, texture, Math.min(edge, outer), -HEIGHT / 2f, Math.max(edge, outer), HEIGHT / 2f,
+                0, color, true, u1, u2);
     }
 
     private static void drawHandle(KaraokeClient.Room room, MatrixStack matrices, VertexConsumerProvider buffers, boolean back) {
@@ -212,12 +246,17 @@ public final class KaraokePlatform {
     }
     private static void quad(MatrixStack m, VertexConsumerProvider b, Identifier texture,
                              float x1, float y1, float x2, float y2, float z, int color, boolean flipped) {
+        quad(m, b, texture, x1, y1, x2, y2, z, color, flipped, 0, 1);
+    }
+    private static void quad(MatrixStack m, VertexConsumerProvider b, Identifier texture,
+                             float x1, float y1, float x2, float y2, float z, int color, boolean flipped,
+                             float u1, float u2) {
         float top = flipped ? 1 : 0, bottom = 1 - top;
         var matrix = m.peek().getPositionMatrix();
         var vertices = b.getBuffer(PresenceWorldLayer.cover(texture, true));
-        vertices.vertex(matrix, x1,y2,z).color(color).texture(0,bottom).overlay(0xA0000).light(0xF000F0).normal(0,0,1);
-        vertices.vertex(matrix, x2,y2,z).color(color).texture(1,bottom).overlay(0xA0000).light(0xF000F0).normal(0,0,1);
-        vertices.vertex(matrix, x2,y1,z).color(color).texture(1,top).overlay(0xA0000).light(0xF000F0).normal(0,0,1);
-        vertices.vertex(matrix, x1,y1,z).color(color).texture(0,top).overlay(0xA0000).light(0xF000F0).normal(0,0,1);
+        vertices.vertex(matrix, x1,y2,z).color(color).texture(u1,bottom).overlay(0xA0000).light(0xF000F0).normal(0,0,1);
+        vertices.vertex(matrix, x2,y2,z).color(color).texture(u2,bottom).overlay(0xA0000).light(0xF000F0).normal(0,0,1);
+        vertices.vertex(matrix, x2,y1,z).color(color).texture(u2,top).overlay(0xA0000).light(0xF000F0).normal(0,0,1);
+        vertices.vertex(matrix, x1,y1,z).color(color).texture(u1,top).overlay(0xA0000).light(0xF000F0).normal(0,0,1);
     }
 }

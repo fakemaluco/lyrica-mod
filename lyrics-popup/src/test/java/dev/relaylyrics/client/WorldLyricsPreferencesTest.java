@@ -6,6 +6,63 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class WorldLyricsPreferencesTest {
+    @Test void phraseGradientDoesNotRestartOnTheNextWord() throws Exception {
+        var preferences = ClientPreferences.decode("""
+                {"sungTextColor":{"mode":"GRADIENT","solid":16711680,"stops":[{"position":0,"rgb":16711680},{"position":1000,"rgb":255}]}}
+                """.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(preferences.getSungTextColor().scope()).isEqualTo(SungTextColor.Scope.PHRASE);
+        int firstWord = preferences.sungGlyphColor(0xFFFFFFFF, 1, 0, 5, 20, false, 0, 44);
+        int secondWord = preferences.sungGlyphColor(0xFFFFFFFF, 1, 0, 5, 20, false, 24, 44);
+        assertThat(secondWord & 255).isGreaterThan(firstWord & 255);
+        assertThat(preferences.sungGlyphColor(0xFFFFFFFF, .25, 0, 5, 20, false, 24, 44)).isEqualTo(secondWord);
+        var color = preferences.getSungTextColor();
+        preferences.setSungTextColor(new SungTextColor(color.mode(), color.solid(), color.stops(), SungTextColor.Scope.WORD));
+        var restored = ClientPreferences.decode(ProtocolCodec.mapper().writeValueAsBytes(preferences));
+        assertThat(restored.getSungTextColor().scope()).isEqualTo(SungTextColor.Scope.WORD);
+    }
+
+    @Test void sungGlyphKeepsItsTintAfterTheSweepMovesOn() {
+        var preferences = new ClientPreferences();
+        preferences.setSungTextColor(testGradient());
+        int early = preferences.sungGlyphColor(0xB0FFFFFF, .25, 0, 5, 20, false);
+        assertThat(preferences.sungGlyphColor(0xB0FFFFFF, .15, 0, 5, 20, false)).isNotEqualTo(early);
+        assertThat(preferences.sungGlyphColor(0xB0FFFFFF, 1, 0, 5, 20, false)).isEqualTo(early);
+        assertThat(preferences.sungGlyphColor(0xB0FFFFFF, 1, 15, 5, 20, true)).isEqualTo(early);
+        assertThat(preferences.sungGlyphColor(0xB0FFFFFF, 1, 15, 5, 20, false)).isNotEqualTo(early);
+        assertThat(early >>> 24).isEqualTo(0xB0);
+    }
+
+    @Test void sungGradientFollowsTimeAndPositionAndRoundTripsWithDistance() throws Exception {
+        var preferences = new ClientPreferences();
+        assertThat(preferences.sungLyricsColor(0x80FFFFFF, .5, .5)).isEqualTo(0x80FFFFFF);
+        preferences.setSungTextColor(testGradient());
+        preferences.setWorldLyricsDistanceRange(24, 48);
+        var restored = ClientPreferences.decode(ProtocolCodec.mapper().writeValueAsBytes(preferences));
+        assertThat(restored.getWorldLyricsMinimumDistance()).isEqualTo(24);
+        assertThat(restored.getWorldLyricsMaximumDistance()).isEqualTo(48);
+        assertThat(restored.sungLyricsColor(0x80FFFFFF, 0, 0)).isEqualTo(0x80FF0000);
+        assertThat(restored.sungLyricsColor(0x80FFFFFF, 1, 1)).isEqualTo(0x800000FF);
+        assertThat(restored.sungLyricsColor(0x80FFFFFF, .5, 0))
+                .isNotEqualTo(restored.sungLyricsColor(0x80FFFFFF, .5, 1));
+        assertThat(dev.relaylyrics.client.music.WorldLyricsSpace.readingDistance(0, 2, 12, false, 64, 24)).isEqualTo(24);
+    }
+    @Test void legacyColorsAndExtraStopsSurviveSaving() throws Exception {
+        var preferences = ClientPreferences.decode("""
+                {"lyricsCustomSungColor":true,"lyricsSungGradient":true,"lyricsSungStartColor":16711680,"lyricsSungEndColor":255}
+                """.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(preferences.getSungTextColor()).isEqualTo(testGradient());
+        var custom = new SungTextColor(SungTextColor.Mode.GRADIENT, 0xFF0000, java.util.List.of(
+                new SungTextColor.Stop(1000, 0x0000FF), new SungTextColor.Stop(500, 0x00FF00),
+                new SungTextColor.Stop(0, 0xFF0000)));
+        preferences.setSungTextColor(custom);
+        var restored = ClientPreferences.decode(ProtocolCodec.mapper().writeValueAsBytes(preferences));
+        assertThat(restored.getSungTextColor()).isEqualTo(custom);
+        assertThat(restored.sungLyricsColor(0x80FFFFFF, .5, .5)).isEqualTo(0x8000FF00);
+    }
+    private static SungTextColor testGradient() {
+        return new SungTextColor(SungTextColor.Mode.GRADIENT, 0xFF0000, java.util.List.of(
+                new SungTextColor.Stop(0, 0xFF0000), new SungTextColor.Stop(1000, 0x0000FF)));
+    }
     @Test void rebuiltWorldStyleHasSafeDefaultsAndPreservesCustomFontAndColors() throws Exception {
         var old = ClientPreferences.decode("{\"worldLyricsPositionVersion\":5,\"worldLyrics\":true,\"googleFontFamily\":\"Inter\",\"worldLyricsFaceColor\":1193046}"
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -39,6 +96,21 @@ class WorldLyricsPreferencesTest {
         assertThat(restored.getWorldLyricsMaximumDistance()).isEqualTo(192);
         assertThat(restored.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.SIGN);
     }
+    @Test void baseDistanceMigratesToMinimumAndHandlesCannotCross() throws Exception {
+        var restored = ClientPreferences.decode("""
+                {"worldLyricsPositionVersion":5,"worldLyricsBaseDistance":24,"worldLyricsMinimumDistance":6,"worldLyricsMaximumDistance":48}
+                """.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(restored.getWorldLyricsMinimumDistance()).isEqualTo(24);
+        assertThat(restored.getWorldLyricsMaximumDistance()).isEqualTo(48);
+        restored.setWorldLyricsMinimumDistance(60);
+        assertThat(restored.getWorldLyricsMinimumDistance()).isEqualTo(48);
+        restored.setWorldLyricsMaximumDistance(20);
+        assertThat(restored.getWorldLyricsMaximumDistance()).isEqualTo(48);
+        restored.setWorldLyricsDistanceRange(210, 230);
+        var saved = ClientPreferences.decode(ProtocolCodec.mapper().writeValueAsBytes(restored));
+        assertThat(saved.getWorldLyricsMinimumDistance()).isEqualTo(210);
+        assertThat(saved.getWorldLyricsMaximumDistance()).isEqualTo(230);
+    }
     @Test void oldPreferencesReceiveNormalIntensityAndPlayerReactions() throws Exception {
         var preferences = ProtocolCodec.mapper().readValue("{\"worldLyrics\":true}", ClientPreferences.class);
         assertThat(preferences.isWorldLyrics()).isTrue();
@@ -48,7 +120,7 @@ class WorldLyricsPreferencesTest {
         assertThat(preferences.isWorldLyricsAutoWalls()).isTrue();
         assertThat(preferences.isWorldLyricsCinematic()).isFalse();
         assertThat(preferences.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.SIGN);
-        assertThat(preferences.getWorldLyricsMinimumDistance()).isEqualTo(6);
+        assertThat(preferences.getWorldLyricsMinimumDistance()).isEqualTo(8);
         assertThat(preferences.getWorldLyricsMaximumDistance()).isEqualTo(192);
     }
     @Test void firstActivationUsesTheContextualSignpostPreset() {

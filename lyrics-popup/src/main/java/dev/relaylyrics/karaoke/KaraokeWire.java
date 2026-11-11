@@ -3,12 +3,15 @@ package dev.relaylyrics.karaoke;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.UUID;
 
 public final class KaraokeWire {
     public static final int MAX_BYTES = 30_000;
     public static final double RANGE = 24;
     public static final int WIDTH = 320, HEIGHT = 200;
+    public static final int QUEUE_LIMIT = 12;
+    public static final long QUEUE_TIMEOUT_MILLIS = 35_000;
     public static final double SCALE = 2.4 / WIDTH;
     public static final double MIN_ZOOM = .5, MAX_ZOOM = 2.5;
     public static final Gson GSON = new Gson();
@@ -20,6 +23,28 @@ public final class KaraokeWire {
             title = text(title, 256);
             artist = text(artist, 256);
         }
+    }
+
+    public record QueueTrack(String uri, String title, String artist) {
+        public QueueTrack {
+            uri = queueUri(uri) ? uri : "";
+            title = text(title, 128);
+            artist = text(artist, 96);
+        }
+    }
+
+    public record QueueResult(List<QueueTrack> tracks, int version, String status) {
+        public QueueResult {
+            tracks = tracks == null ? List.of() : tracks.stream().filter(java.util.Objects::nonNull).limit(QUEUE_LIMIT).toList();
+            status = switch (status == null ? "" : status) {
+                case "ok", "added", "added_refresh", "jumped", "changed", "inactive", "denied", "busy", "rate", "timeout", "error" -> status;
+                default -> "error";
+            };
+        }
+    }
+
+    public static boolean queueUri(String uri) {
+        return uri != null && uri.matches("spotify:(track|episode):[A-Za-z0-9]{22}");
     }
 
     public record Song(String title, String artist, String album, String cover, String uri, long position, long duration,

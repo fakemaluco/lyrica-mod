@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** Bounded, color-independent text cache shared across settings tabs and instances. */
-final class SettingsTypography {
+public final class SettingsTypography {
     private static final int MAX_ENTRIES = 384, MAX_BYTES = 24 * 1024 * 1024;
     private static final LinkedHashMap<Key, Cached> CACHE = new LinkedHashMap<>(128, .75f, true);
     private static final AtomicLong GENERATION = new AtomicLong();
@@ -17,7 +17,7 @@ final class SettingsTypography {
         final Identifier id; final SettingsTextRaster.Raster raster; long lastUsed;
         Cached(Identifier id, SettingsTextRaster.Raster raster) { this.id = id; this.raster = raster; }
     }
-    static void icon(GuiGraphicsExtractor context, String name, double x, double y, double size, int color) {
+    public static void icon(GuiGraphicsExtractor context, String name, double x, double y, double size, int color) {
         draw(context, "@icon:" + name, x, y, size, false, false, 1, color);
     }
     static void draw(GuiGraphicsExtractor context, String value, double x, double y, double advance,

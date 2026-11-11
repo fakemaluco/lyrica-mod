@@ -11,7 +11,7 @@ import dev.relaylyrics.client.ui.RoundedGui;
 import dev.relaylyrics.client.InventoryOverlayCompat.Rect;
 import dev.relaylyrics.mixin.HandledScreenAccessor;
 import dev.relaylyrics.protocol.music.MusicAction;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
 
 import java.util.Collections;
 import java.util.List;
@@ -162,7 +162,7 @@ public final class InventoryLyricsController {
         if (screen != activeScreen) return false;
         LyricsOverlay overlay = RelayLyricsClient.overlay();
         boolean popupVisible = inventoryPopupAvailable();
-        if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+        if (button != InputConstants.MOUSE_BUTTON_LEFT) {
             return popupVisible && overlay != null
                     && overlay.isPopupCoverInteractionActiveAt(mouseX, mouseY);
         }
@@ -233,7 +233,7 @@ public final class InventoryLyricsController {
         if (screen != activeScreen) return false;
         LyricsOverlay overlay = RelayLyricsClient.overlay();
         boolean popupVisible = inventoryPopupAvailable();
-        if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+        if (button != InputConstants.MOUSE_BUTTON_LEFT) {
             return popupVisible && overlay != null
                     && overlay.isPopupCoverInteractionActiveAt(mouseX, mouseY);
         }
@@ -304,9 +304,7 @@ public final class InventoryLyricsController {
         }
         LyricsOverlay overlay = RelayLyricsClient.overlay();
         if (overlay == null) return false;
-        long window = Minecraft.getInstance().getWindow().handle();
-        if (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS
-                || GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS) {
+        if (PlatformInput.controlDown()) {
             var preferences = RelayLyricsClient.preferences();
             preferences.setLyricsTextScale(preferences.getLyricsTextScale() * Math.pow(1.08, Math.clamp(vertical, -4, 4)));
             preferences.save();
@@ -319,7 +317,7 @@ public final class InventoryLyricsController {
 
     /** Cancels handled-screen and Mouse Tweaks dragging while Relay owns the pointer. */
     public static boolean mouseDraggedEvent(Screen screen, double mouseX, double mouseY, int button) {
-        if (screen != activeScreen || button != GLFW.GLFW_MOUSE_BUTTON_LEFT) return false;
+        if (screen != activeScreen || button != InputConstants.MOUSE_BUTTON_LEFT) return false;
         LyricsOverlay overlay = RelayLyricsClient.overlay();
         boolean popupVisible = inventoryPopupAvailable();
         if (scrubbing || volumeScrubbing || popupVisible && (dragging
@@ -377,8 +375,7 @@ public final class InventoryLyricsController {
         if ((!dragging && !scrubbing && !volumeScrubbing && !popupScrubbing)
                 || client.gui.screen() != activeScreen
                 || overlay == null) return;
-        long window = client.getWindow().handle();
-        if (GLFW.glfwGetMouseButton(window, GLFW.GLFW_MOUSE_BUTTON_LEFT) != GLFW.GLFW_PRESS) {
+        if (!PlatformInput.leftHeld()) {
             if (popupScrubbing) {
                 OptionalLong target = overlay.finishPopupProgressScrub();
                 if (target.isPresent() && RelayLyricsClient.music() != null) {

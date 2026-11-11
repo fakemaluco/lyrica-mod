@@ -243,6 +243,7 @@ public final class ClientPreferences {
     private LyricsTextAlignment lyricsAlignment = LyricsTextAlignment.LEFT;
     private LyricsFontWeight lyricsFontWeight;
     private int lyricsFontColor = 0xFFFFFF;
+    private SungTextColor sungTextColor = SungTextColor.DEFAULT;
     private LyricsGlowIntensity lyricsGlowIntensity = LyricsGlowIntensity.NORMAL;
     private LyricsTransitionSpeed lyricsTransitionSpeed = LyricsTransitionSpeed.SMOOTH;
     private int lyricsShadowOpacity = 72;
@@ -309,7 +310,7 @@ public final class ClientPreferences {
     private WorldLyricsDirector.Variation worldLyricsVariation = WorldLyricsDirector.Variation.MEDIUM;
     private WorldLyricsDirector.Quality worldLyricsQuality = WorldLyricsDirector.Quality.MEDIUM;
     private int worldLyricsPresetMask = (1 << WorldLyricsDirector.Preset.values().length) - 1;
-    private double worldLyricsMinimumDistance = 6;
+    private double worldLyricsMinimumDistance = 8;
     private double worldLyricsMaximumDistance = 192;
     private int worldLyricsPositionVersion = 5;
     private WorldLyricsDirector.SurfacePreference worldLyricsSurfacePreference = WorldLyricsDirector.SurfacePreference.CONTEXT;
@@ -443,6 +444,35 @@ public final class ClientPreferences {
     }
     public int getLyricsFontColor() { return lyricsFontColor & 0xFFFFFF; }
     public void setLyricsFontColor(int rgb) { lyricsFontColor = rgb & 0xFFFFFF; }
+    public SungTextColor getSungTextColor() { return sungTextColor; }
+    public void setSungTextColor(SungTextColor color) {
+        sungTextColor = color == null ? SungTextColor.DEFAULT : color;
+    }
+
+    public int sungLyricsColor(int original, double progress, double position) {
+        int rgb = switch (sungTextColor.mode()) {
+            case DEFAULT -> original & 0xFFFFFF;
+            case SOLID -> sungTextColor.solid();
+            case GRADIENT -> sungTextColor.gradient(.7 * Math.clamp(progress, 0, 1) + .3 * Math.clamp(position, 0, 1));
+        };
+        return original & 0xFF000000 | rgb;
+    }
+
+    /** The sweep stops changing a glyph's color as soon as its trailing edge is filled. */
+    public int sungGlyphColor(int original, double progress, double offset, double width,
+                             double totalWidth, boolean rtl) {
+        return sungGlyphColor(original, progress, offset, width, totalWidth, rtl, 0, totalWidth);
+    }
+
+    public int sungGlyphColor(int original, double progress, double offset, double width,
+                             double totalWidth, boolean rtl, double rangeOffset, double rangeWidth) {
+        double total = Math.max(1, totalWidth);
+        double position = (offset + width * .5) / total;
+        double trailingEdge = rtl ? 1 - offset / total : (offset + width) / total;
+        double extent = Math.max(1, rangeWidth);
+        return sungLyricsColor(original, (rangeOffset + Math.min(progress, trailingEdge) * total) / extent,
+                (rangeOffset + (rtl ? 1 - position : position) * total) / extent);
+    }
 
     public LyricsFontWeight getLyricsFontWeight() {
         return lyricsFontWeight == null
@@ -566,6 +596,9 @@ public final class ClientPreferences {
     static ClientPreferences decode(byte[] bytes) throws java.io.IOException {
         var json = ProtocolCodec.mapper().readTree(bytes);
         if (!json.has("romanizationUnderLine")) ((com.fasterxml.jackson.databind.node.ObjectNode) json).put("romanizationUnderLine", false);
+        if ("SPICETIFY_BRIDGE".equals(json.path("musicSource").asText())) {
+            ((com.fasterxml.jackson.databind.node.ObjectNode) json).put("musicSource", MusicSource.AUTOMATIC.name());
+        }
         boolean oldWorldStyle = json.path("worldLyricsPositionVersion").asInt(0) < 5;
         if (oldWorldStyle) {
             // Old enum names must be removed before Jackson reads the new six-style enum.
@@ -574,6 +607,14 @@ public final class ClientPreferences {
             ((com.fasterxml.jackson.databind.node.ObjectNode) json).remove("enabledWorldLyricsPresets");
         }
         ClientPreferences result = ProtocolCodec.mapper().treeToValue(json, ClientPreferences.class);
+        if (!json.has("sungTextColor") && (json.has("lyricsCustomSungColor") || json.has("lyricsSungStartColor"))) {
+            var mode = !json.path("lyricsCustomSungColor").asBoolean() ? SungTextColor.Mode.DEFAULT
+                    : json.path("lyricsSungGradient").asBoolean() ? SungTextColor.Mode.GRADIENT : SungTextColor.Mode.SOLID;
+            int start = json.path("lyricsSungStartColor").asInt(SungTextColor.START_COLOR);
+            int end = json.path("lyricsSungEndColor").asInt(SungTextColor.END_COLOR);
+            result.setSungTextColor(new SungTextColor(mode, start, java.util.List.of(
+                    new SungTextColor.Stop(0, start), new SungTextColor.Stop(SungTextColor.RANGE, end))));
+        }
         // Legacy X/Y setters must not discard precise coordinates because of JSON property order.
         if (json.path("popupPreciseX").isNumber()) result.popupPreciseX = json.path("popupPreciseX").doubleValue();
         if (json.path("popupPreciseY").isNumber()) result.popupPreciseY = json.path("popupPreciseY").doubleValue();
@@ -582,11 +623,12 @@ public final class ClientPreferences {
             result.worldLyricsAutomatic = true;
             result.worldLyricsPresetMask = (1 << WorldLyricsDirector.Preset.values().length) - 1;
             result.worldLyricsSurfacePreference = WorldLyricsDirector.SurfacePreference.CONTEXT;
-            if (result.worldLyricsMaximumDistance <= 16) {
-                result.worldLyricsMinimumDistance = 6;
-                result.worldLyricsMaximumDistance = 192;
-            }
         }
+        double minimumDistance = json.path("worldLyricsBaseDistance").asDouble(
+                json.path("worldLyricsMinimumDistance").asDouble(8));
+        double maximumDistance = json.path("worldLyricsMaximumDistance").asDouble(192);
+        if (oldWorldStyle && maximumDistance <= 16) maximumDistance = 192;
+        result.setWorldLyricsDistanceRange(minimumDistance, maximumDistance);
         result.worldLyricsPositionVersion = 5;
         return result;
     }
@@ -713,13 +755,17 @@ public final class ClientPreferences {
         for (var preset : WorldLyricsDirector.Preset.values()) if (isWorldLyricsPresetEnabled(preset)) result.add(preset);
         return result;
     }
-    public double getWorldLyricsMinimumDistance() { return finite(worldLyricsMinimumDistance, 6, 3, 64); }
+    public double getWorldLyricsMinimumDistance() { return worldLyricsMinimumDistance; }
     public void setWorldLyricsMinimumDistance(double value) {
-        worldLyricsMinimumDistance = finite(value, 6, 3, Math.min(64, getWorldLyricsMaximumDistance()));
+        worldLyricsMinimumDistance = Math.clamp(Double.isFinite(value) ? value : 8, 3, worldLyricsMaximumDistance);
     }
-    public double getWorldLyricsMaximumDistance() { return finite(worldLyricsMaximumDistance, 192, getWorldLyricsMinimumDistance(), 256); }
+    public double getWorldLyricsMaximumDistance() { return worldLyricsMaximumDistance; }
     public void setWorldLyricsMaximumDistance(double value) {
-        worldLyricsMaximumDistance = finite(value, 192, getWorldLyricsMinimumDistance(), 256);
+        worldLyricsMaximumDistance = Math.clamp(Double.isFinite(value) ? value : 192, worldLyricsMinimumDistance, 256);
+    }
+    public void setWorldLyricsDistanceRange(double minimum, double maximum) {
+        worldLyricsMinimumDistance = finite(minimum, 8, 3, 256);
+        setWorldLyricsMaximumDistance(maximum);
     }
     public double getWorldLyricsDistanceSensitivity() { return finite(worldLyricsDistanceSensitivity, 1, 0, 2); }
     public void setWorldLyricsDistanceSensitivity(double value) { worldLyricsDistanceSensitivity = finite(value, 1, 0, 2); }

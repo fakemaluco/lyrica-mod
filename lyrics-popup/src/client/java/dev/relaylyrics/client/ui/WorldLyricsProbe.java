@@ -69,6 +69,8 @@ public final class WorldLyricsProbe {
         if (stage==11 && ticks==25) WorldLyricsRenderer.probeFlight(new Vec3d(-.95,-.06,.35),true);
         if (++ticks<100) return;
         if (!WorldLyricsRenderer.verifyProbe(stage==5 ? 3 : 1,false) || !WorldLyricsRenderer.probeHasVolume()) return;
+        if (stage==5 && !WorldLyricsRenderer.probeBackingBelowLead())
+            throw new IllegalStateException("Backing vocal did not fit beneath its lead on open ground: " + WorldLyricsRenderer.probeAnchors());
         if (!WorldLyricsRenderer.probeFontMatchesPopup()) throw new IllegalStateException("World font differs from popup font");
         if (Boolean.getBoolean("lyrica.worldTerrainLightSelfTest") && !WorldLyricsLights.available()) throw new IllegalStateException("Lighting API did not initialize");
         if (stage==7 && Boolean.getBoolean("lyrica.worldTerrainLightSelfTest")) {
