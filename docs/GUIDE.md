@@ -45,10 +45,12 @@ Em servidores sem o Lyrica, continua disponível a presença via Supabase, com c
 verificada para compartilhar. Use **Conexão > Music Presence** ou
 `/music sharing off` para controlar o compartilhamento.
 
-Use `/music listen "NomeDoJogador"` para acompanhar a faixa, a pausa e o tempo
-de outro jogador no mesmo servidor, sem colocar um painel. O outro jogador
-precisa estar compartilhando a música, e quem ouve precisa conectar o Spotify
-ao Lyrica e ter um dispositivo ativo. Use `/music listen stop` para sair.
+Use `/music listen share` para compartilhar a faixa, a pausa e a posição com outros
+jogadores. No mesmo servidor, use `/music listen NomeDoJogador`. Em outro servidor,
+use `/music listen <código>` com o convite mostrado ao anfitrião. O comando funciona
+em servidores vanilla. Quem ouve precisa conectar o Spotify ao Lyrica e ter um
+dispositivo ativo. Use `/music listen queue` para consultar a fila compartilhada,
+`/music listen stop` para sair ou `/music listen unshare` para encerrar o convite.
 
 Com o Lyrica no servidor e nos clientes, `/karaoke pop-up` coloca o pop-up
 do Lyrica no mundo. O anfitrião pode segurar a barra inferior para mover e
@@ -141,7 +143,7 @@ para baixo** preenche a frase verticalmente do início ao fim do tempo da linha.
 **Por tempo** permite voltar ao
 preenchimento horizontal. Letras por palavra mantêm sua sincronização original.
 Na ilha dinâmica, o botão com linhas e nota musical ativa **Letras na ilha**
-(desligado por padrão e salvo entre sessões). A cápsula pequena passa a mostrar
+(ligado em configurações novas e salvo entre sessões). A cápsula pequena passa a mostrar
 uma única linha: letras por linha rolam do início ao fim do seu tempo, e letras
 por palavra trocam de trecho quando o canto chega à próxima palavra que não cabe.
 Nos intervalos, pontinhos maiores surgem primeiro no centro. Depois, deslizam para

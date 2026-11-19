@@ -24,7 +24,7 @@ public final class WorldLyricsPlan {
         List<WorldLine> result = new ArrayList<>();
         if (document.groups().isEmpty()) {
             for (LyricLine line : document.lines()) {
-                addIfVisible(result, line, LyricAlignment.NORMAL, false, now);
+                addIfVisible(result, line, LyricAlignment.NORMAL, line.background(), now);
             }
             result.sort(Comparator.comparing(WorldLine::backing)
                     .thenComparing(Comparator.comparingLong((WorldLine line) -> line.line().startMillis()).reversed()));
@@ -32,7 +32,7 @@ public final class WorldLyricsPlan {
             return chronological(result.subList(0, MAX_VISIBLE_LINES));
         }
         for (LyricVocalGroup group : document.groups()) {
-            addIfVisible(result, group.lead(), group.alignment(), false, now);
+            addIfVisible(result, group.lead(), group.alignment(), group.lead().background(), now);
             for (LyricLine backing : group.backingVocals()) {
                 addIfVisible(result, backing, group.alignment(), true, now);
             }
@@ -48,8 +48,20 @@ public final class WorldLyricsPlan {
     }
 
     public static boolean hasWordTiming(LyricLine line) {
-        return !line.words().isEmpty() && !(line.words().size() == 1
-                && line.words().getFirst().text().strip().codePoints().anyMatch(Character::isWhitespace));
+        if (line.words().isEmpty() || line.words().size() == 1
+                && line.words().getFirst().text().strip().codePoints().anyMatch(Character::isWhitespace)) return false;
+        var written = new StringBuilder();
+        var timed = new StringBuilder();
+        appendLetters(written, line.text());
+        for (var word : line.words()) appendLetters(timed, word.text());
+        // Providers can supply timestamps for only part of a line. Keep all the visible text.
+        return written.compareTo(timed) == 0;
+    }
+
+    private static void appendLetters(StringBuilder target, String text) {
+        var normalized = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFC);
+        normalized.codePoints().filter(cp -> Character.isLetterOrDigit(cp) || Character.getType(cp) == Character.NON_SPACING_MARK)
+                .map(Character::toLowerCase).forEach(target::appendCodePoint);
     }
 
     /** Romanization that cannot retain supplied timing falls back to phrase animation. */
@@ -87,10 +99,32 @@ public final class WorldLyricsPlan {
         for (LyricsRenderText.VisualWord word : LyricsRenderText.visualWords(line, romanized)) {
             boolean first = true;
             for (LyricsRenderText.Fragment fragment : word.fragments()) {
-                result.add(new Token(fragment.text(), fragment.timing().startMillis(),
-                        fragment.timing().endMillis(), first));
+                var token = new Token(fragment.text(), fragment.timing().startMillis(),
+                        fragment.timing().endMillis(), first);
+                String[] parts = token.text().split("(?U)\\s+");
+                if (parts.length <= 1) result.add(token);
+                else for (int index = 0; index < parts.length; index++) {
+                    long start = token.startMillis() + Math.round(token.durationMillis() * (index / (double) parts.length));
+                    long end = token.startMillis() + Math.round(token.durationMillis() * ((index + 1) / (double) parts.length));
+                    result.add(new Token(parts[index], start, end, index > 0 || first));
+                }
                 first = false;
             }
+        }
+        return List.copyOf(result);
+    }
+
+    /** Preserve supplied word timing; use evenly spaced words for line-synced lyrics. */
+    public static List<Token> wordTokens(LyricLine line, boolean romanized) {
+        List<Token> tokens = tokens(line, romanized);
+        if (tokens.isEmpty() || hasWordTiming(line, romanized)) return tokens;
+        Token phrase = tokens.getFirst();
+        String[] words = phrase.text().strip().split("(?U)\\s+");
+        List<Token> result = new ArrayList<>(words.length);
+        for (int index = 0; index < words.length; index++) {
+            long start = phrase.startMillis() + Math.round(phrase.durationMillis() * (index / (double) words.length));
+            long end = phrase.startMillis() + Math.round(phrase.durationMillis() * ((index + 1) / (double) words.length));
+            result.add(new Token(words[index], start, end, true));
         }
         return List.copyOf(result);
     }

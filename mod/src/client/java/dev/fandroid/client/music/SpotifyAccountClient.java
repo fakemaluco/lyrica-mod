@@ -125,7 +125,8 @@ public final class SpotifyAccountClient implements AutoCloseable {
     }
     public boolean shouldOverrideBridge() {
         return !closed && shouldUseAccountSource() && hasActivePlayback()
-                && (preferences.getMusicSource() == MusicSource.SPOTIFY_ACCOUNT || automaticPlaybackOwned);
+                && (preferences.getMusicSource() == MusicSource.SPOTIFY_ACCOUNT
+                || automaticPlaybackOwned && (latest.playing() || automaticAccountAllowed.getAsBoolean()));
     }
 
     static boolean playbackEligible(MusicSource source, PlaybackSnapshot snapshot) {
@@ -139,9 +140,8 @@ public final class SpotifyAccountClient implements AutoCloseable {
 
     private boolean shouldUseAccountSource() {
         MusicSource source = preferences.getMusicSource();
-        boolean automaticAllowed = automaticAccountAllowed.getAsBoolean();
-        if (source != MusicSource.AUTOMATIC || !automaticAllowed) automaticPlaybackOwned = false;
-        return preferredSource(source, automaticAllowed);
+        if (source != MusicSource.AUTOMATIC) automaticPlaybackOwned = false;
+        return preferredSource(source, true);
     }
 
     /** Resolves metadata supplied by another music source to a Spotify track. */
@@ -616,6 +616,7 @@ public final class SpotifyAccountClient implements AutoCloseable {
                 if ((shouldUseAccountSource() || karaokeWatching) && connected()) poll();
             } catch (Exception error) {
                 status = "Spotify temporarily unavailable";
+                dev.lyrica.engine.StatusMetrics.error("spotify_api");
                 waitMillis = 3_000;
             }
             try {
@@ -740,14 +741,15 @@ public final class SpotifyAccountClient implements AutoCloseable {
         boolean wasOwned = automaticPlaybackOwned;
         latest = value;
         lastPlaybackResponseNanos = System.nanoTime();
-        // An empty Web API poll must not erase a valid Windows Media fallback.
-        if (shouldUseAccountSource() && (playbackEligible(preferences.getMusicSource(), value)
-                || automaticPlaybackOwned && meaningful(value))) {
-            if (preferences.getMusicSource() == MusicSource.AUTOMATIC) automaticPlaybackOwned = true;
+        MusicSource source = preferences.getMusicSource();
+        if (!shouldUseAccountSource()) return;
+        if (playbackEligible(source, value)
+                || automaticPlaybackOwned && meaningful(value) && automaticAccountAllowed.getAsBoolean()) {
+            if (source == MusicSource.AUTOMATIC) automaticPlaybackOwned = true;
             snapshots.accept(value);
-        } else if (!meaningful(value)) {
+        } else {
             automaticPlaybackOwned = false;
-            if (wasOwned && shouldUseAccountSource()) snapshots.accept(value);
+            if (wasOwned || source == MusicSource.SPOTIFY_ACCOUNT) snapshots.accept(PlaybackSnapshot.unavailable());
         }
     }
 

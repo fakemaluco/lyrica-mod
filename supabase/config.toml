@@ -2,3 +2,6 @@ project_id = "lyrica-music-presence"
 
 [functions.music-presence]
 verify_jwt = false
+
+[functions.lyrica-status]
+verify_jwt = false

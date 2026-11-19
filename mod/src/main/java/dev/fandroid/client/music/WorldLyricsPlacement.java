@@ -22,6 +22,13 @@ public final class WorldLyricsPlacement {
         return result;
     }
 
+    /** Do not drop the outgoing page before its last word has started. */
+    public static int sungPageIndex(List<WorldLyricsLayout.Page> pages, long now) {
+        int index = 0;
+        while (index + 1 < pages.size() && now >= pages.get(index + 1).startMillis()) index++;
+        return index;
+    }
+
     /** Invalid candidates cannot be rescued by an attractive distance or orientation. */
     public static double score(Candidate candidate) {
         if (!candidate.loaded || !candidate.supported || !candidate.dry || !candidate.clear

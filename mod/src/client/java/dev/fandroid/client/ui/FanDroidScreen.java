@@ -964,7 +964,6 @@ public final class FanDroidScreen extends FanDroidScreenBase {
         }
         switch (experimentalSection) {
             case REACTIVE -> renderExperimentalReactive(context, mouseX, mouseY);
-            case COLOR -> renderExperimentalColor(context, mouseX, mouseY);
             case BLOOM -> renderExperimentalBloom(context, mouseX, mouseY);
             case VISUAL -> renderExperimentalVisual(context, mouseX, mouseY);
             case DEBUG -> renderExperimentalDebug(context, mouseX, mouseY);
@@ -984,16 +983,6 @@ public final class FanDroidScreen extends FanDroidScreenBase {
                 92, 420, mouseX, mouseY);
         settingToggle(context, tr("settings.fandroid.reactive"),
                 runtime.preferences().isLyricsReactiveBackground(), 92, 484);
-    }
-
-    private void renderExperimentalColor(DrawContext context, int mouseX, int mouseY) {
-        settingToggle(context, tr("settings.fandroid.reactive_hue"),
-                runtime.preferences().isLyricsReactiveHue(), 92, 292);
-        settingStepper(context, tr("settings.fandroid.reactive_hue_amount"),
-                Math.round(runtime.preferences().getLyricsReactiveHueAmount()) + "\u00B0",
-                92, 356, mouseX, mouseY);
-        settingToggle(context, tr("settings.fandroid.reactive_hue_auto"),
-                runtime.preferences().isLyricsReactiveHueAuto(), 92, 420);
     }
 
     private void renderExperimentalBloom(DrawContext context, int mouseX, int mouseY) {
@@ -1757,28 +1746,6 @@ public final class FanDroidScreen extends FanDroidScreenBase {
                         runtime.preferences().save();
                     }
                 }
-                case COLOR -> {
-                    if (inside(x, y, 556, 292, 96, 48)) {
-                        runtime.preferences().setLyricsReactiveHue(
-                                !runtime.preferences().isLyricsReactiveHue());
-                        runtime.preferences().save();
-                    } else if (inside(x, y, 478, 356, 46, 48)) {
-                        runtime.preferences().setLyricsReactiveHueAmount(
-                                runtime.preferences().getLyricsReactiveHueAmount() - 10);
-                        runtime.preferences().save();
-                    } else if (inside(x, y, 530, 356, 70, 48)) {
-                        runtime.preferences().setLyricsReactiveHueAmount(80);
-                        runtime.preferences().save();
-                    } else if (inside(x, y, 606, 356, 46, 48)) {
-                        runtime.preferences().setLyricsReactiveHueAmount(
-                                runtime.preferences().getLyricsReactiveHueAmount() + 10);
-                        runtime.preferences().save();
-                    } else if (inside(x, y, 556, 420, 96, 48)) {
-                        runtime.preferences().setLyricsReactiveHueAuto(
-                                !runtime.preferences().isLyricsReactiveHueAuto());
-                        runtime.preferences().save();
-                    }
-                }
                 case BLOOM -> {
                     if (inside(x, y, 556, 292, 96, 48)) {
                         runtime.preferences().setLyricsReactiveBloom(
@@ -2280,7 +2247,7 @@ public final class FanDroidScreen extends FanDroidScreenBase {
     private enum MusicIcon { PREVIOUS, PLAY, PAUSE, NEXT, RETRY }
     private enum SettingsSection { GENERAL, LYRICS, CONNECTIONS, PRIVACY, EXPERIMENTAL }
 
-    private enum ExperimentalSection { REACTIVE, COLOR, BLOOM, VISUAL, DEBUG }
+    private enum ExperimentalSection { REACTIVE, BLOOM, VISUAL, DEBUG }
     private record Layout(int x, int y, double scale) { }
     private record BubbleDraft(LocalChatStore.MessageRow message, int width, int height,
                                List<OrderedText> lines) { }

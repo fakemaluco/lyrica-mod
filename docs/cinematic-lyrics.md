@@ -2,15 +2,16 @@
 
 O Lyrica compõe palavras e frases no cenário usando os tempos originais da letra.
 Texto plano é a apresentação padrão; espessura e animação são escolhas independentes.
-O recurso é local ao cliente e está disponível nos três JARs standalone.
+O recurso é local ao cliente e está disponível nos quatro JARs standalone.
 
 ## Controles
 
-Ative as letras na aba **Mundo 3D**, sempre presente nas configurações. A composição
+As letras vêm ligadas em configurações novas e podem ser desativadas na aba **Mundo 3D**. A composição
 automática local funciona sem conta ou consulta a uma IA. Os controles do Gemini
 ficam somente em **Avançado > Experimentos**.
 
 - **Intensidade:** Discreta, Equilibrada ou Expressiva. O padrão é **Discreta**.
+- **Entrada das letras:** **Frase e palavra** usa a composição automática. **Palavra por palavra** espera o início de cada palavra sem antecipar o trecho seguinte.
 - **Cinematográfico:** desligado por padrão. Quando ligado, permite palavras no centro da visão.
 - **Estilo** e **Tamanho:** preservam os ajustes de aparência existentes.
 
@@ -47,8 +48,9 @@ silábicos quando fornecidos. A composição progressiva revela o grupo no iníc
 de seu primeiro fragmento; a coexistência revela a frase inteira no início da linha.
 Palavras caindo e escadas mantêm entrada por palavra. Letras sincronizadas apenas por linha aparecem como frases inteiras;
 o mod não inventa tempos por palavra. Letras sem sincronização continuam no
-pop-up, sem cenas temporizadas no mundo. Pausar congela a evolução musical da
-cena; avançar, voltar ou repetir reconstrói o estado correspondente ao novo tempo.
+pop-up, sem cenas temporizadas no mundo. Ao pausar, as letras presentes fazem a
+animação de saída e desaparecem. Com animações desligadas, somem imediatamente.
+Retomar volta ao trecho atual; avançar, voltar ou repetir reconstrói a cena.
 Trocar de música ou sair do mundo limpa a cena.
 
 ## Direção Gemini
@@ -86,8 +88,13 @@ de rede, cota ou resposta inválida mantêm a apresentação local disponível.
 
 Esquerda, direita, alto, baixo e centro são intenções de enquadramento no momento
 da entrada. Os textos ficam fixos por padrão. Ative **Reposicionamento automático** na aba
-**Mundo 3D** para procurar outra posição quando forem encobertos ou saírem do
-enquadramento, inclusive com a música pausada. Quando não há espaço para espalhar os grupos,
+**Mundo 3D** para procurar outra posição quando forem encobertos ou quando o jogador
+estiver prestes a atravessá-los. Olhar para outro lado
+preserva a âncora no mundo. Paredes, piso e espaços livres participam da mesma busca;
+a perspectiva da câmera evita que grupos separados no mundo se sobreponham na tela.
+Vidro tem baixo peso visual e folhas acumulam obstrução parcial, sem permitir que
+as letras atravessem a geometria dos blocos. Veja [posicionamento contextual](contextual-placement.md).
+Quando não há espaço para espalhar os grupos,
 a frase atual aparece reunida em texto plano perto da câmera, com a ordem e os
 tempos preservados. A próxima frase volta a avaliar o espaço disponível.
 Sem **Cinematográfico**, as posições deixam espaço para a mira.
@@ -128,7 +135,8 @@ movimento da câmera, recuperação com a música pausada e uma parede próxima:
 
 Esse modo percorre seis cenários no mesmo mundo descartável. As quatro palavras
 já cantadas precisam continuar legíveis e completas. O túnel e a parede a meio
-bloco exigem a apresentação compacta. Depois de uma mudança de câmera ou de um bloqueio novo, o teste exige
-recuperação e estabilidade, mesmo sem avanço do relógio da música. As capturas
+bloco exigem a apresentação compacta. Depois de mudar apenas a câmera, a frase
+continua ancorada; diante de um bloqueio novo, o teste exige recuperação e
+estabilidade, mesmo sem avanço do relógio da música. As capturas
 ficam em `build/world-obstacle-qa`. Use `-PworldStage=2`, por exemplo, para começar
 no cenário de obstáculo adicionado.

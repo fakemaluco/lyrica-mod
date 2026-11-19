@@ -2,6 +2,8 @@ package dev.relaylyrics.client.presence;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.relaylyrics.karaoke.KaraokeWire.QueueTrack;
+import dev.relaylyrics.karaoke.KaraokeWire.Song;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.*;
@@ -14,6 +16,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** One connection per multiplayer session. All HTTP, Mojang proof and WebSocket work is off the render thread. */
 public final class MusicPresenceClient implements AutoCloseable {
     public record Identity(UUID accountId, UUID playerId, String name, String serverHash) { }
+    public record ListenTarget(String key, String label) { }
+    public record ListenUpdate(String invite, Song song, long sampledAt, List<QueueTrack> queue, ListenTarget target) { }
+    public record ListenHost(UUID id, String name, Song song, long sampledAt, List<QueueTrack> queue) { }
+    public record ListenReply(String invite, ListenTarget target, boolean canShare, ListenHost host, long received) { }
     public record Playing(String title, String artist, String cover, boolean sharing) {
         public Playing {
             title = PresenceTrack.clean(title, 256); artist = PresenceTrack.clean(artist, 256);
@@ -37,14 +43,25 @@ public final class MusicPresenceClient implements AutoCloseable {
     private volatile Playing playing = new Playing("", "", "", false);
     private volatile Set<UUID> visible = Set.of();
     private volatile Map<UUID, PresenceTrack> peers = Map.of();
+    private volatile ListenUpdate listen;
+    private volatile ListenReply listenReply;
+    private String sentInvite;
+    private long lastListenWrite, nextListenPoll;
+    private Song sentSong;
+    private long sentSongSample;
+    private List<QueueTrack> sentQueue = List.of();
+    private ListenTarget sentTarget;
     private volatile boolean closed;
     private volatile Status status = Status.CONNECTING;
     private volatile WebSocket socket;
+    private volatile boolean metadataEnabled = true;
     private final AtomicBoolean refresh = new AtomicBoolean(true);
     private Playing published;
-    private String token, topic;
+    private String token;
+    private volatile String topic;
     private boolean canPublish = true;
-    private long nextAttempt, lastWrite, lastRead, lastHeartbeat, socketAttempt, socketRef;
+    private long nextAttempt, lastWrite, lastRead, socketAttempt, socketRef;
+    private volatile long lastHeartbeat;
     private int failures;
     private String sourceCover = "", preparedCover = "";
     private volatile long lastSocketMessage;
@@ -55,9 +72,16 @@ public final class MusicPresenceClient implements AutoCloseable {
     public void start() { worker.scheduleWithFixedDelay(this::step, 0, 500, TimeUnit.MILLISECONDS); }
     public Identity identity() { return identity; }
     public Status status() { return status; }
+    public void setMetadataEnabled(boolean enabled) {
+        if (metadataEnabled == enabled) return;
+        metadataEnabled = enabled;
+        refresh.set(true);
+    }
+    public void updateListen(ListenUpdate value) { listen = value; }
+    public ListenReply listenReply() { return listenReply; }
     public void update(Playing value, Set<UUID> online) {
         playing = value;
-        Set<UUID> next = Set.copyOf(online.stream().limit(512).toList());
+        Set<UUID> next = Set.copyOf(online.size() <= 512 ? online : online.stream().limit(512).toList());
         if (!visible.equals(next)) { visible = next; refresh.set(true); }
     }
     public PresenceTrack track(UUID id) {
@@ -70,15 +94,31 @@ public final class MusicPresenceClient implements AutoCloseable {
             if (token == null) authenticate();
             if (closed) return;
             long now = System.nanoTime();
-            if (socket == null && now >= socketAttempt) connectSocket();
-            if (socket != null && now - lastHeartbeat > 25_000_000_000L) {
-                send(socket, "phoenix", "heartbeat", Map.of()); lastHeartbeat = now;
-                if (now - lastSocketMessage > 65_000_000_000L) { socket.abort(); socket = null; }
+            syncListen(now);
+            now = System.nanoTime();
+            boolean metadata = metadataEnabled;
+            if (metadata && socket == null && now >= socketAttempt) connectSocket();
+            WebSocket active = socket;
+            if (!metadata) {
+                if (active != null) { active.abort(); if (socket == active) socket = null; }
+                peers = Map.of();
+                if (published == null || !published.sharing()) {
+                    failures = 0;
+                    status = canPublish ? Status.CONNECTED : Status.VIEW_ONLY;
+                    return;
+                }
             }
-            Playing value = canPublish ? playing : new Playing("", "", "", false);
+            if (active != null && now - lastHeartbeat > 25_000_000_000L) {
+                lastHeartbeat = now;
+                if (now - lastSocketMessage > 65_000_000_000L) {
+                    active.abort();
+                    if (socket == active) socket = null;
+                } else send(active, "phoenix", "heartbeat", Map.of());
+            }
+            Playing value = metadata && canPublish ? playing : new Playing("", "", "", false);
             boolean write = canPublish && (!value.equals(published) || now - lastWrite > 30_000_000_000L);
-            if (now - lastRead < 1_000_000_000L || !write && !refresh.get() && now - lastRead < 30_000_000_000L) return;
-            refresh.set(false);
+            if (now - lastRead < 1_000_000_000L) return;
+            if (!refresh.getAndSet(false) && !write && now - lastRead < 30_000_000_000L) return;
             Map<String, Object> body = new HashMap<>();
             body.put("visible", visible.stream().map(UUID::toString).toList()); body.put("write", write);
             if (write && !Objects.equals(sourceCover, value.cover())) {
@@ -103,11 +143,72 @@ public final class MusicPresenceClient implements AutoCloseable {
         } catch (Exception error) {
             if (closed) return;
             if (error instanceof InterruptedException) Thread.currentThread().interrupt();
-            if (error instanceof ResponseFailure e && e.code == 401) { token = null; published = null; peers = Map.of(); if (socket != null) { socket.abort(); socket = null; } }
+            if (error instanceof ResponseFailure e && e.code == 401) {
+                token = topic = null; published = null; peers = Map.of(); sentInvite = null; sentTarget = null;
+                if (socket != null) { socket.abort(); socket = null; }
+            }
+            refresh.set(true);
             if (status != Status.ACCOUNT_REQUIRED) status = Status.RETRYING;
             failures = Math.min(6, failures + 1);
-            nextAttempt = System.nanoTime() + Math.min(60, 1L << failures) * 1_000_000_000L;
+            nextAttempt = System.nanoTime() + (Math.min(60, 1L << failures) * 1_000L
+                    + ThreadLocalRandom.current().nextLong(400)) * 1_000_000L;
         }
+    }
+    private void syncListen(long now) throws Exception {
+        ListenUpdate update = listen;
+        if (update == null) return;
+        boolean revoke = sentInvite != null && update.invite() == null;
+        boolean write = update.invite() != null && (!update.invite().equals(sentInvite)
+                || now - lastListenWrite >= 7_000_000_000L
+                || now - lastListenWrite >= 1_200_000_000L && (playbackChanged(update) || !update.queue().equals(sentQueue)));
+        boolean read = update.target() != null && (!update.target().equals(sentTarget) || now >= nextListenPoll);
+        if (!revoke && !write && !read) return;
+        if (now < nextListenPoll - 2_500_000_000L) return;
+        var body = new HashMap<String, Object>();
+        if (write) {
+            body.put("invite", update.invite());
+            body.put("song", update.song());
+            body.put("queue", update.queue());
+            sentInvite = update.invite(); // Revoke even when the server applied a request whose response was lost.
+        }
+        if (revoke) body.put("revoke", true);
+        if (update.target() != null) body.put("target", update.target().key());
+        sentTarget = update.target();
+        nextListenPoll = now + 2_500_000_000L;
+        try {
+            var result = request("listen", body, token);
+            long received = System.nanoTime();
+            var row = result.path("host");
+            ListenHost host = null;
+            if (row.isObject()) {
+                long age = Math.clamp(row.path("age_ms").asLong(), 0, 25_000) * 1_000_000L;
+                long transit = Math.clamp((received - now) / 2, 0, 2_000_000_000L);
+                Song song = row.path("song").isObject() ? JSON.treeToValue(row.path("song"), Song.class).clean() : null;
+                var queue = new ArrayList<QueueTrack>();
+                for (var item : row.path("queue")) {
+                    if (queue.size() == 12) break;
+                    queue.add(JSON.treeToValue(item, QueueTrack.class));
+                }
+                host = new ListenHost(UUID.fromString(row.path("id").asText()), row.path("name").asText(),
+                        song, received - age - transit, List.copyOf(queue));
+            }
+            if (!closed) listenReply = new ListenReply(update.invite(), update.target(), result.path("can_share").asBoolean(), host, received);
+            if (revoke) sentInvite = null;
+            if (write) {
+                sentSong = update.song(); sentSongSample = update.sampledAt(); sentQueue = update.queue(); lastListenWrite = now;
+            }
+        } catch (Exception error) {
+            if (error instanceof InterruptedException || error instanceof ResponseFailure failure && failure.code == 401) throw error;
+            // A relay outage or an older Edge function must not interrupt normal presence updates.
+            nextListenPoll = System.nanoTime() + (error instanceof ResponseFailure failure && failure.code == 429
+                    ? 60_000_000_000L : 5_000_000_000L) + 2_500_000_000L;
+        }
+    }
+    private boolean playbackChanged(ListenUpdate update) {
+        Song song = update.song();
+        if (song == null || sentSong == null) return song != sentSong;
+        return !song.sameTrack(sentSong) || song.playing() != sentSong.playing()
+                || Math.abs(song.position() - sentSong.at((update.sampledAt() - sentSongSample) / 1_000_000L)) >= 1_250;
     }
     private void authenticate() throws Exception {
         status = Status.CONNECTING;
@@ -147,15 +248,17 @@ public final class MusicPresenceClient implements AutoCloseable {
     }
     private void connectSocket() {
         socketAttempt = System.nanoTime() + 10_000_000_000L;
+        String joinedTopic = "realtime:" + topic;
         URI base = endpoint.resolve("/");
         URI url = URI.create(("https".equals(base.getScheme()) ? "wss" : "ws") + "://" + base.getRawAuthority()
                 + "/realtime/v1/websocket?vsn=1.0.0&apikey=" + URLEncoder.encode(key, StandardCharsets.UTF_8));
         http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(8)).buildAsync(url, new WebSocket.Listener() {
             final StringBuilder pending = new StringBuilder();
             public void onOpen(WebSocket ws) {
-                if (closed) { ws.abort(); return; }
-                socket = ws; lastSocketMessage = System.nanoTime();
-                send(ws, "realtime:" + topic, "phx_join", Map.of("config", Map.of("broadcast", Map.of("ack", false, "self", false),
+                if (closed || !metadataEnabled || !joinedTopic.equals("realtime:" + topic)) { ws.abort(); return; }
+                lastHeartbeat = lastSocketMessage = System.nanoTime();
+                socket = ws;
+                send(ws, joinedTopic, "phx_join", Map.of("config", Map.of("broadcast", Map.of("ack", false, "self", false),
                         "presence", Map.of("enabled", false), "private", false)));
                 ws.request(1);
             }
@@ -168,7 +271,7 @@ public final class MusicPresenceClient implements AutoCloseable {
                     try {
                         JsonNode event = JSON.readTree(pending.toString());
                         if (("broadcast".equals(event.path("event").asText()) || "phx_reply".equals(event.path("event").asText()))
-                                && ("realtime:" + topic).equals(event.path("topic").asText())) refresh.set(true);
+                                && joinedTopic.equals(event.path("topic").asText())) refresh.set(true);
                         if ("phx_error".equals(event.path("event").asText()) || "error".equals(event.path("payload").path("status").asText())) { ws.abort(); socket = null; }
                     } catch (Exception ignored) { }
                     pending.setLength(0);

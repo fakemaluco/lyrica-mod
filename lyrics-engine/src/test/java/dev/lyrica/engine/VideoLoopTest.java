@@ -91,6 +91,21 @@ public class VideoLoopTest {
         assertTrue(VideoLoop.validSource("file:///tmp/fixture.mp4", true));
     }
 
+    @Test public void aSixtyFpsVideoStillLoopsWithCorrectChannelsWhenSomeFramesAreNotPublished() throws Exception {
+        Path fixture = Path.of("..", "build", "motion-fast-fixture.mp4").toAbsolutePath().normalize();
+        Files.createDirectories(fixture.getParent());
+        makeFixture(fixture, 160, 96, 60);
+        try (var loop = new VideoLoop(true)) {
+            loop.setSource(fixture.toUri().toString());
+            awaitFrames(loop, 14);
+            var frame = loop.latest();
+            int left = frame.argb()[48 * frame.width() + 16];
+            int right = frame.argb()[48 * frame.width() + 144];
+            assertEquals(255, right >>> 24);
+            assertTrue("Blue still follows the original BGR gradient", (right & 255) - (left & 255) > 120);
+        }
+    }
+
     private static void awaitFrames(VideoLoop loop, long target) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
         while (System.nanoTime() < deadline) {
@@ -114,10 +129,14 @@ public class VideoLoopTest {
         }
     }
     static void makeFixture(Path path, int width, int height) throws Exception {
+        makeFixture(path, width, height, 12);
+    }
+
+    private static void makeFixture(Path path, int width, int height, int frameRate) throws Exception {
         try (FFmpegFrameRecorder recorder = new FFmpegFrameRecorder(path.toFile(), width, height)) {
             recorder.setFormat("mp4");
             recorder.setVideoCodec(AV_CODEC_ID_MPEG4);
-            recorder.setFrameRate(12);
+            recorder.setFrameRate(frameRate);
             recorder.start();
             try (Frame image = new Frame(width, height, Frame.DEPTH_UBYTE, 3)) {
                 ByteBuffer pixels = (ByteBuffer) image.image[0];

@@ -5,6 +5,12 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RoundedVideoRasterTest {
+    @Test void largeCanvasKeepsTheVideoResolutionBound() {
+        var plan = new RoundedVideoRaster(288, 512, 360, 460, 18, 4, true);
+        assertThat(Math.max(plan.width(), plan.height())).isEqualTo(512);
+        assertThat(plan.width() / (double) plan.height()).isCloseTo(360.0 / 460, org.assertj.core.data.Offset.offset(.003));
+    }
+
     @Test void integratedCanvasSoftensDetailAndFeathersIntoTheLyricsWhileKeepingOnlyOuterCorners() {
         int[] source = new int[128 * 128];
         for (int y = 0; y < 128; y++) for (int x = 0; x < 128; x++) source[y * 128 + x] = ((x + y) & 1) == 0 ? 0xFF000000 : 0xFFFFFFFF;

@@ -51,7 +51,7 @@ class SpotifyAccountClientTest {
     }
 
     @Test
-    void automaticAccountKeepsOwnershipThroughPauseAndReleasesItToSystemPlayback() throws Exception {
+    void automaticAccountWinsWhilePlayingAndReleasesPausedPlaybackToTheBridge() throws Exception {
         ClientPreferences preferences = new ClientPreferences();
         preferences.setMusicSource(MusicSource.AUTOMATIC);
         AtomicBoolean allowed = new AtomicBoolean(true);
@@ -69,12 +69,16 @@ class SpotifyAccountClientTest {
             assertThat(received).containsExactly(playing, paused);
             allowed.set(false);
             assertThat(client.shouldOverrideBridge()).isFalse();
-            client.accept(playing); // An HTTP response arriving after OS takeover must not own the UI.
+            client.accept(playing);
+            assertThat(client.shouldOverrideBridge()).isTrue();
+            client.accept(paused);
+            assertThat(client.shouldOverrideBridge()).isFalse();
+            assertThat(received.getLast().title()).isEqualTo("Nothing playing");
             allowed.set(true);
             assertThat(client.shouldOverrideBridge()).isFalse();
             client.accept(paused);
             assertThat(client.shouldOverrideBridge()).isFalse();
-            assertThat(received).containsExactly(playing, paused);
+            assertThat(received).hasSize(4);
         }
     }
 

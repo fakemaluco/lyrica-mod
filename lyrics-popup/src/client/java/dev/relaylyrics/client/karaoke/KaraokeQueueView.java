@@ -18,7 +18,7 @@ final class KaraokeQueueView {
     String status = "", submittedQuery = "";
     boolean searching, focused;
     UUID request;
-    long deadline, searchAt, lastRequestAt;
+    long deadline, searchAt, lastRequestAt, refreshAt, requestGeneration;
     final KaraokeQueueSearch field = new KaraokeQueueSearch();
     private final KaraokePanelMotion.Tabs tabs = new KaraokePanelMotion.Tabs();
     final KaraokePanelMotion.Drawer drawer = new KaraokePanelMotion.Drawer();
@@ -132,8 +132,15 @@ final class KaraokeQueueView {
     }
 
     void submit(KaraokeClient.Room room, long now) {
-        if (side == 0 || !searching || searchAt == 0 || now < searchAt || request != null
-                || now - lastRequestAt < 650_000_000L) return;
+        if (side == 0 || request != null || now - lastRequestAt < 650_000_000L) return;
+        if (!searching) {
+            if (now >= refreshAt) {
+                refreshAt = now + 12_000_000_000L;
+                KaraokeClient.requestQueue(room, "list", "", 0);
+            }
+            return;
+        }
+        if (searchAt == 0 || now < searchAt) return;
         searchAt = 0;
         submittedQuery = text(field.value(), 100);
         if (!submittedQuery.isBlank()) KaraokeClient.requestQueue(room, "search", submittedQuery, 0);

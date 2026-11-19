@@ -3,6 +3,7 @@ package com.tx24.spicyplayer.network.data
 import com.tx24.spicyplayer.network.data.blend.LyricsFurniture
 import com.tx24.spicyplayer.network.model.NetworkErrorException
 import com.tx24.spicyplayer.network.model.NotFoundException
+import dev.lyrica.engine.StatusMetrics
 import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -137,7 +138,7 @@ class RemoteLyricsSource @Inject constructor(
             jobs[id] = launch {
                 // Carried as a Result so a provider's own CancellationException reaches the caller.
                 val result = try {
-                    Result.success(fetch(provider, request))
+                    Result.success(fetch(provider, request).also { recordStatus(id, it) })
                 } catch (cancelled: CancellationException) {
                     Result.failure(cancelled)
                 }
@@ -366,6 +367,32 @@ class RemoteLyricsSource @Inject constructor(
             RemoteLyricsResolution.Unavailable(attempts, earliestRetryAt)
         } else {
             RemoteLyricsResolution.NotFound(attempts)
+        }
+    }
+
+    private fun recordStatus(id: String, result: ProviderResult) {
+        when (result) {
+            is ProviderResult.Hit, ProviderResult.Miss -> StatusMetrics.provider(id, "ok")
+            is ProviderResult.CoolingDown -> {
+                StatusMetrics.provider(id, "limited")
+                StatusMetrics.error("provider_limit")
+            }
+            is ProviderResult.Unavailable -> {
+                val category = when (result.category) {
+                    ProviderFailureCategory.NETWORK -> "provider_network"
+                    ProviderFailureCategory.TIMEOUT -> "provider_timeout"
+                    ProviderFailureCategory.AUTHENTICATION -> "provider_auth"
+                    ProviderFailureCategory.CLIENT_REQUEST -> "provider_request"
+                    ProviderFailureCategory.SERVER -> "provider_server"
+                    ProviderFailureCategory.MALFORMED_RESPONSE -> "provider_response"
+                    ProviderFailureCategory.UNKNOWN -> "provider_other"
+                }
+                StatusMetrics.error(category)
+                if (result.category != ProviderFailureCategory.AUTHENTICATION && result.category != ProviderFailureCategory.CLIENT_REQUEST) {
+                    StatusMetrics.provider(id, "error")
+                }
+            }
+            else -> Unit
         }
     }
 

@@ -14,7 +14,8 @@ class CinematicLyricsPreferencesTest {
         assertThat(p.getWorldLyricsDirection()).isEqualTo(WorldLyricsPresentation.Direction.AUTOMATIC);
         assertThat(p.getWorldLyricsPresentationIntensity()).isEqualTo(WorldLyricsPresentation.Intensity.DISCREET);
         assertThat(p.isWorldLyricsCinematic()).isFalse();
-        assertThat(p.isWorldLyricsVolumetric()).isFalse();
+        assertThat(p.isWorldLyricsVolumetric()).isTrue();
+        assertThat(p.isParentheticalBackingVocals()).isTrue();
         assertThat(p.getWorldLyricsFaceColor()).isEqualTo(0x123456);
         assertThat(p.getWorldLyricsIntensity()).isEqualTo(ClientPreferences.WorldIntensity.INTENSE);
     }
@@ -41,11 +42,13 @@ class CinematicLyricsPreferencesTest {
 
     @Test void volumeIsIndependentFromDirectionAndAnimationAndRestoresAsAppearance() throws Exception {
         var p = new ClientPreferences();
-        p.setWorldLyricsVolumetric(true);
+        p.setWorldLyricsVolumetric(false);
+        p.setParentheticalBackingVocals(false);
         p.setWorldLyricsPresentationIntensity(WorldLyricsPresentation.Intensity.BALANCED);
         p.setLyricsAnimations(false);
         var restored = ClientPreferences.decode(ProtocolCodec.mapper().writeValueAsBytes(p));
-        assertThat(restored.isWorldLyricsVolumetric()).isTrue();
+        assertThat(restored.isWorldLyricsVolumetric()).isFalse();
+        assertThat(restored.isParentheticalBackingVocals()).isFalse();
         assertThat(restored.getWorldLyricsDirection()).isEqualTo(WorldLyricsPresentation.Direction.AUTOMATIC);
         assertThat(restored.getWorldLyricsPresentationIntensity()).isEqualTo(WorldLyricsPresentation.Intensity.BALANCED);
         assertThat(restored.isLyricsAnimations()).isFalse();
@@ -54,7 +57,7 @@ class CinematicLyricsPreferencesTest {
             public String status(String name) { return ""; }
         });
         catalog.restore("world_volume");
-        assertThat(restored.isWorldLyricsVolumetric()).isFalse();
+        assertThat(restored.isWorldLyricsVolumetric()).isTrue();
         assertThat(restored.getWorldLyricsPresentationIntensity()).isEqualTo(WorldLyricsPresentation.Intensity.BALANCED);
         assertThat(restored.isLyricsAnimations()).isFalse();
     }
@@ -69,25 +72,25 @@ class CinematicLyricsPreferencesTest {
         assertThat(p.getWorldLyricsGeminiDirection()).hasSize(500);
     }
 
-    @Test void geminiDirectionExistsOnlyInsideExperimentsAndPreservesExistingSettings() {
+    @Test void geminiDirectionIsGroupedInWorldAndPreservesExistingSettings() {
         var p = new ClientPreferences(); p.setWorldLyrics(true);
         List<String> actions = new ArrayList<>();
         var catalog = new LyricsSettingsCatalog(p, new LyricsSettingsCatalog.Actions() {
             public void run(String action) { actions.add(action); }
             public String status(String name) { return name; }
         });
-        assertThat(catalog.entries(LyricsSettingsCatalog.Category.WORLD)).hasSizeLessThanOrEqualTo(8)
+        assertThat(catalog.entries(LyricsSettingsCatalog.Category.WORLD)).hasSizeLessThanOrEqualTo(9)
                 .noneMatch(e -> e.key.endsWith("world_gemini.key"));
         assertThat(catalog.searchEntries(LyricsSettingsCatalog.Category.WORLD))
-                .noneMatch(e -> e.key.contains("world_gemini") || e.key.endsWith("world_direction"));
-        assertThat(catalog.entries(LyricsSettingsCatalog.Category.ADVANCED))
+                .anyMatch(e -> e.key.endsWith("world_gemini.key") && e.masked);
+        assertThat(catalog.searchEntries(LyricsSettingsCatalog.Category.ADVANCED))
                 .noneMatch(e -> e.key.contains("world_gemini"));
-        catalog.expand("experimental");
-        assertThat(catalog.entries(LyricsSettingsCatalog.Category.ADVANCED))
+        catalog.expand("world");
+        assertThat(catalog.entries(LyricsSettingsCatalog.Category.WORLD))
                 .anyMatch(e -> e.key.endsWith("group.world_gemini"))
                 .noneMatch(e -> e.key.endsWith("world_gemini.key"));
         catalog.expand("world_gemini");
-        var entries = catalog.entries(LyricsSettingsCatalog.Category.ADVANCED);
+        var entries = catalog.entries(LyricsSettingsCatalog.Category.WORLD);
         assertThat(entries).anyMatch(e -> e.key.endsWith("world_gemini.key") && e.masked);
         var enable = entries.stream().filter(e -> e.key.endsWith("world_gemini.enabled")).findFirst().orElseThrow();
         enable.activate.run();

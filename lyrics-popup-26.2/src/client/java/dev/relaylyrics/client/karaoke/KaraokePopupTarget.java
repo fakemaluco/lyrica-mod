@@ -23,7 +23,7 @@ import java.util.List;
 import static dev.relaylyrics.karaoke.KaraokeWire.*;
 
 public final class KaraokePopupTarget implements AutoCloseable {
-    private static final Vector4f CLEAR = new Vector4f();
+    private static final Vector4f CLEAR = new Vector4f(0, 0, 0, 0);
     private static final WindowRenderState WINDOW = new WindowRenderState();
     private static RenderTarget active;
     private static GuiRenderer renderer;

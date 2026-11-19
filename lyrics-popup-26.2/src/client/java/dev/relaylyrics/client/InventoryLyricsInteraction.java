@@ -1,6 +1,7 @@
 package dev.relaylyrics.client;
 
 import dev.relaylyrics.client.ui.LyricsConfigScreen;
+import dev.relaylyrics.client.ui.UpdateIslandScreen;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.minecraft.client.gui.screens.Screen;
@@ -32,6 +33,6 @@ public final class InventoryLyricsInteraction {
     }
 
     public static boolean handles(Screen screen) {
-        return screen != null && !(screen instanceof LyricsConfigScreen);
+        return screen != null && !(screen instanceof LyricsConfigScreen) && !(screen instanceof UpdateIslandScreen);
     }
 }

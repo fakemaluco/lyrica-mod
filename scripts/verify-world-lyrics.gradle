@@ -13,18 +13,22 @@ allprojects {
             if (cinematic) systemProperty 'lyrica.worldProbeOutput', rootProject.layout.buildDirectory.dir('world-cinematic-qa').get().asFile.absolutePath
             def extraMods = []
             if (cinematic) {
-                def gameVersion = project.name == 'lyrics-popup' ? '1.21.1' : project.name == 'lyrics-popup-1.21.11' ? '1.21.11' : '26.2'
+                def gameVersion = project.name == 'lyrics-popup' ? '1.21.1' : project.name == 'lyrics-popup-1.21.11' ? '1.21.11' : project.name == 'lyrics-popup-26.3' ? '26.3' : '26.2'
                 def records = new groovy.json.JsonSlurper().parse(rootProject.file('build/ji-afk-061/versions.json'))
-                extraMods.add(records.find { it.minecraft == gameVersion }.file)
+                def record = records.find { it.minecraft == gameVersion }
+                if (record == null) throw new GradleException("No Ji AFK fixture installed for Minecraft ${gameVersion}")
+                extraMods.add(record.file)
             }
             if (compatibility) {
                 def records = new groovy.json.JsonSlurper().parse(rootProject.file('build/world-compat/mods.json'))
                 extraMods.addAll(records.collect { it.file })
             }
             if (terrain) {
-                def gameVersion = project.name == 'lyrics-popup' ? '1.21.1' : project.name == 'lyrics-popup-1.21.11' ? '1.21.11' : '26.2'
+                def gameVersion = project.name == 'lyrics-popup' ? '1.21.1' : project.name == 'lyrics-popup-1.21.11' ? '1.21.11' : project.name == 'lyrics-popup-26.3' ? '26.3' : '26.2'
                 def records = new groovy.json.JsonSlurper().parse(rootProject.file('build/world-light-060/versions.json'))
-                extraMods.add(records.find { it.minecraft == gameVersion }.file)
+                def record = records.find { it.minecraft == gameVersion }
+                if (record == null) throw new GradleException("No dynamic-light fixture installed for Minecraft ${gameVersion}")
+                extraMods.add(record.file)
             }
             if (!extraMods.isEmpty()) systemProperty 'fabric.addMods', extraMods.join(File.pathSeparator)
             args '--width', '1280', '--height', '720', '--quickPlaySingleplayer', 'LyricaWorldQA'

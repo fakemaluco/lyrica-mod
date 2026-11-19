@@ -55,6 +55,7 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
         include("dev/relaylyrics/mixin/SimpleVoiceDuckingMixin.java")
         include("dev/relaylyrics/mixin/PlasmoVoiceDuckingMixin.java")
         include("dev/relaylyrics/client/MusicPresence.java")
+        include("dev/relaylyrics/client/StatusReporter.java")
         include("dev/relaylyrics/client/presence/**")
         include("dev/relaylyrics/client/karaoke/KaraokeClient.java")
         include("dev/relaylyrics/client/karaoke/KaraokePopup.java")
@@ -116,7 +117,7 @@ sourceSets.main {
     }
     java.srcDir(rootProject.file("lyrics-popup/src/main/java"))
     java.exclude { it.file == rootProject.file("lyrics-popup/src/main/java/dev/relaylyrics/karaoke/KaraokeNetwork.java") }
-    resources.setSrcDirs(listOf(rootProject.file("lyrics-popup/src/main/resources")))
+    resources.srcDir(rootProject.file("lyrics-popup/src/main/resources"))
 }
 sourceSets.test {
     java.setSrcDirs(listOf(rootProject.file("lyrics-popup/src/test/java"), rootProject.file("lyrics-popup-26.2/src/test/java"), file("src/test/java")))
@@ -181,7 +182,10 @@ tasks.processResources {
         }
     }
     filesMatching("relaylyrics.client.mixins.json") {
-        filter { line: String -> line.replace("JAVA_21", "JAVA_25") }
+        filter { line: String ->
+            if (line.contains("\"WorldGlyphAtlasMixin\"")) line + "\n    \"WorldFontRenderTypeMixin\","
+            else line.replace("JAVA_21", "JAVA_25")
+        }
     }
 }
 tasks.withType<Jar>().configureEach {

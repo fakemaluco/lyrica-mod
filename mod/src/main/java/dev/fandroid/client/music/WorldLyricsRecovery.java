@@ -44,6 +44,8 @@ public final class WorldLyricsRecovery {
     /** Preserve the readable phrase when spatial blocks collapse into one ordered text block. */
     public static WorldLyricsPresentation.Window compactWindow(WorldLyricsPresentation.Cue cue,
                                                                 List<WorldLyricsPlan.Token> tokens, long now) {
+        if (cue.composition() == WorldLyricsPresentation.Composition.WORD_BY_WORD)
+            return WorldLyricsPresentation.window(cue, tokens, now);
         if (tokens.isEmpty()) return new WorldLyricsPresentation.Window(0, -1, 0);
         var broad = new WorldLyricsPresentation.Window(0, tokens.size() - 1, 0);
         int lastRevealed = -1, singing = -1;
@@ -82,6 +84,83 @@ public final class WorldLyricsRecovery {
                     || distance <= 0 || width <= 0 || height <= 0)
                 throw new IllegalArgumentException("Invalid reading envelope");
         }
+    }
+
+    /** Keep the normal groups in a side lane and leave a small gap below the final group for the aim. */
+    public static List<Probe> skyProbes(WorldLyricsSpace.DistanceRange range, double width, double height, int side) {
+        double far = range.maximum(), near = range.minimum();
+        List<Probe> probes = new ArrayList<>();
+        for (double depth : new double[]{1, .88, .73, .55, .36, .18, 0}) {
+            double distance = near + (far - near) * depth;
+            double w = Math.min(width * distance / far, distance * .48);
+            double h = Math.min(height * distance / far, distance * .18);
+            if (side == 0) {
+                probes.add(new Probe(distance, 0, distance * .16, w, h));
+                probes.add(new Probe(distance, 0, distance * .30, w, h));
+                probes.add(new Probe(distance, 0, -distance * .18, w, h));
+            } else {
+                double offset = Math.min(distance * .44, distance * .18 + w * .46);
+                probes.add(new Probe(distance, side * offset, distance * .065, w, h));
+                probes.add(new Probe(distance, side * offset, distance * .27, w * .85, h));
+                probes.add(new Probe(distance, side * offset, -distance * .20, w * .85, h));
+            }
+            if (near == far) break;
+        }
+        return List.copyOf(probes);
+    }
+
+    /** Read from ahead first, including down the length of a narrow passage. */
+    public static List<Probe> wordProbes(double preferred, double width, double height) {
+        double distance = Math.clamp(preferred, 2.2, 256);
+        double[] distances = {distance, Math.max(2.6, distance * .78), Math.max(2.6, distance * .57),
+                Math.max(2.6, distance * .42), 2.6, 2.2, 1.65, 1.15};
+        List<Probe> probes = new ArrayList<>();
+        double previous = Double.POSITIVE_INFINITY;
+        for (double target : distances) {
+            if (target < 1.15 || target >= previous - .1) continue;
+            previous = target;
+            double fit = Math.min(target / distance, Math.min(target * .62 / width, target * .30 / height));
+            double w = width * fit, h = height * fit;
+            double y = target * .105 + h * .5;
+            probes.add(new Probe(target, 0, target * .05, w, h));
+            probes.add(new Probe(target, 0, y, w, h));
+            // Look beside nearby trunks without pushing the word toward the edge of view.
+            double side = Math.min(target * .22, w * .5 + target * .06);
+            probes.add(new Probe(target, side, 0, w, h));
+            probes.add(new Probe(target, -side, 0, w, h));
+            if (target >= 2.6) {
+                double offset = target * .36;
+                probes.add(new Probe(target, offset, y * .65, w, h));
+                probes.add(new Probe(target, -offset, y * .65, w, h));
+                probes.add(new Probe(target, offset, -y * .35, w, h));
+                probes.add(new Probe(target, -offset, -y * .35, w, h));
+                // Preserve the viewing distance when the remaining gaps between words are narrow.
+                double outer = target * .42;
+                double raised = target * .24;
+                double compactWidth = w * .74, compactHeight = h * .84;
+                probes.add(new Probe(target, 0, raised, compactWidth, compactHeight));
+                probes.add(new Probe(target, 0, -raised, compactWidth, compactHeight));
+                probes.add(new Probe(target, outer, raised, compactWidth, compactHeight));
+                probes.add(new Probe(target, -outer, raised, compactWidth, compactHeight));
+                probes.add(new Probe(target, outer, -raised * .75, compactWidth, compactHeight));
+                probes.add(new Probe(target, -outer, -raised * .75, compactWidth, compactHeight));
+            }
+            probes.add(new Probe(target, 0, -y, w, h));
+        }
+        return List.copyOf(probes);
+    }
+
+    /** Prefer a clear side slot, keeping closer and centered probes available for tight spaces. */
+    public static List<Probe> readingProbes(double preferred, double width, double height, int side) {
+        return wordProbes(preferred, width, height).stream()
+                .sorted(java.util.Comparator.comparingDouble(Probe::distance).reversed()
+                        .thenComparingInt(probe -> {
+                            boolean sideGap = Math.abs(probe.side()) - probe.width() / 2 > probe.distance() * .045;
+                            boolean upGap = Math.abs(probe.up()) - probe.height() / 2 > probe.distance() * .05;
+                            if (sideGap && probe.side() * side > 0) return 0;
+                            if (sideGap || upGap) return 1;
+                            return probe.side() * side > 0 ? 2 : 3;
+                        })).toList();
     }
 
     /**

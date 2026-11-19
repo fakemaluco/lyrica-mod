@@ -17,6 +17,9 @@ import javax.xml.parsers.DocumentBuilderFactory
 import org.xml.sax.helpers.DefaultHandler
 import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
+import okhttp3.Call
+import okhttp3.EventListener
+import okhttp3.Request
 import okhttp3.ResponseBody
 import okio.Buffer
 import okio.ForwardingSource
@@ -330,6 +333,14 @@ class DesktopLyricsEngine private constructor(
             val gson = Gson()
             val client = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS)
                 .callTimeout(15, TimeUnit.SECONDS)
+                .eventListener(object : EventListener() {
+                    override fun requestHeadersEnd(call: Call, request: Request) {
+                        val url = request.url
+                        if (url.host == "lrc.red" && (url.encodedPath == "/search.json" || url.encodedPath.startsWith("/s/"))) {
+                            StatusMetrics.lrcRedRequest()
+                        }
+                    }
+                })
                 .addInterceptor { chain ->
                     val response = chain.proceed(chain.request().newBuilder().header("User-Agent", "Lyrica/0.8 (desktop lyrics)").build())
                     val body = response.body ?: return@addInterceptor response

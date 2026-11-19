@@ -9,6 +9,53 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 class WorldLyricsLayoutTest {
+    @Test void readingBreaksFollowPunctuationAndPausesWhileFastSkyLyricsUseLongerGroups() {
+        var spaced = List.of(token("wait", 0, 290, true), token("here,", 290, 580, true),
+                token("keep", 580, 770, true), token("singing", 770, 930, true),
+                token("with", 1_200, 1_500, true), token("me", 1_500, 1_800, true));
+        assertThat(WorldLyricsLayout.ReadingFit.MEDIUM.groupEnds(spaced, 160, WIDTH)).containsExactly(2, 4, 6);
+        assertThat(WorldLyricsLayout.ReadingFit.openSky(spaced)).isEqualTo(WorldLyricsLayout.ReadingFit.SHORT);
+
+        var rapid = java.util.stream.IntStream.range(0, 6)
+                .mapToObj(i -> token("word", i * 160, (i + 1) * 160, true)).toList();
+        var fit = WorldLyricsLayout.ReadingFit.openSky(rapid);
+        assertThat(fit).isEqualTo(WorldLyricsLayout.ReadingFit.MEDIUM);
+        assertThat(fit.groupEnds(rapid, 160, String::length)).containsExactly(6);
+    }
+
+    @Test void readingFitLimitsNearbyGroupsWithoutDroppingWordsOrSplittingSyllables() {
+        var tokens = List.of(
+                new WorldLyricsPlan.Token("hel", 0, 100, true),
+                new WorldLyricsPlan.Token("lo", 100, 200, false),
+                new WorldLyricsPlan.Token("there", 200, 400, true),
+                new WorldLyricsPlan.Token("little", 400, 600, true),
+                new WorldLyricsPlan.Token("world", 600, 800, true));
+        var near = WorldLyricsLayout.ReadingFit.atDistance(3);
+        var shortFit = WorldLyricsLayout.ReadingFit.atDistance(4.5);
+        var medium = WorldLyricsLayout.ReadingFit.atDistance(6);
+        assertThat(near.groupEnds(tokens, 100, String::length)).containsExactly(2, 3, 4, 5);
+        assertThat(shortFit.groupEnds(tokens, 100, String::length)).containsExactly(4, 5);
+        assertThat(medium.groupEnds(tokens, 100, String::length)).containsExactly(5);
+        assertThat(medium.groupEnds(tokens, 12, String::length)).containsExactly(3, 5);
+        assertThat(WorldLyricsLayout.ReadingFit.atDistance(12)).isEqualTo(WorldLyricsLayout.ReadingFit.FULL);
+        assertThat(medium.limitTo(near)).isEqualTo(near);
+
+        var first = WorldLyricsPresentation.readingWindow(tokens, List.of(3, 5), 150, false, Long.MAX_VALUE);
+        var second = WorldLyricsPresentation.readingWindow(tokens, List.of(3, 5), 425, false, Long.MAX_VALUE);
+        assertThat(first.lastStartedToken()).isEqualTo(2);
+        assertThat(second.firstToken()).isEqualTo(3);
+        assertThat(second.lastStartedToken()).isEqualTo(4);
+    }
+
+    @Test void readingDistanceKeepsItsSizeWhileMovingAroundABoundary() {
+        var shortFit = WorldLyricsLayout.ReadingFit.SHORT;
+        var word = WorldLyricsLayout.ReadingFit.WORD;
+        assertThat(WorldLyricsLayout.ReadingFit.atDistance(3.4, shortFit)).isEqualTo(shortFit);
+        assertThat(WorldLyricsLayout.ReadingFit.atDistance(3.9, word)).isEqualTo(word);
+        assertThat(WorldLyricsLayout.ReadingFit.atDistance(2.9, shortFit)).isEqualTo(word);
+        assertThat(WorldLyricsLayout.ReadingFit.atDistance(4.2, word)).isEqualTo(shortFit);
+    }
+
     private static final ToDoubleFunction<String> WIDTH = value -> value.codePointCount(0, value.length()) * 6;
     private static WorldLyricsPlan.Token token(String text, long start, long end, boolean startsWord) {
         return new WorldLyricsPlan.Token(text, start, end, startsWord);
@@ -155,5 +202,15 @@ class WorldLyricsLayoutTest {
         cells[3][5] = false;
         assertThat(WorldLyricsLayout.wallRectangle(cells)).isNull();
         assertThat(WorldLyricsLayout.wallRectangle(new boolean[0][0])).isNull();
+    }
+    @Test void compactLongLinesKeepEveryWordAndWaitForTheNextPageBoundary() {
+        var pages = WorldLyricsLayout.readingPages(List.of(token("one two three four five six", 1000, 5000, true)),
+                false, false, 36, WIDTH);
+        assertThat(pages).hasSizeGreaterThan(1);
+        assertThat(rows(pages).stream().flatMap(row -> row.spans().stream()).map(WorldLyricsLayout.Span::text))
+                .containsExactly("one", "two", "three", "four", "five", "six");
+        long next = pages.get(1).startMillis();
+        assertThat(WorldLyricsPlacement.sungPageIndex(pages, next - 1)).isZero();
+        assertThat(WorldLyricsPlacement.sungPageIndex(pages, next)).isEqualTo(1);
     }
 }

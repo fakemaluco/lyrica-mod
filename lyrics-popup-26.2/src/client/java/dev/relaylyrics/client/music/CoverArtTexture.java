@@ -315,7 +315,7 @@ public final class CoverArtTexture implements AutoCloseable {
         if(source==null) source=displayedTexture();
         if(source==null || width<=0 || height<=0 || opacity<=.001) return false;
         if(CompatibilityManager.needsExplicitGuiFlush()) PlatformTextures.flush(context);
-        islandBackdrop.draw(context,x,y,width,height,source,2,speed,Math.clamp(opacity,0,1),radius,BackdropFx.plain(0,false,0));
+        islandBackdrop.draw(context,x,y,width,height,source,2,speed,Math.clamp(opacity,0,1),radius,BackdropFx.plain(0));
         return true;
     }
 
@@ -405,29 +405,7 @@ public final class CoverArtTexture implements AutoCloseable {
                                 int blurStrength, double speedMultiplier, double opacity,
                                 int cornerRadius) {
         return drawBackdrop(context, x, y, width, height, blurStrength, speedMultiplier, opacity,
-                cornerRadius, 0, false, 0);
-    }
-
-    public boolean drawBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
-                                int blurStrength, double speedMultiplier, double opacity,
-                                int cornerRadius, double huePulse) {
-        return drawBackdrop(context, x, y, width, height, blurStrength, speedMultiplier, opacity,
-                cornerRadius, huePulse, false, 0);
-    }
-
-    public boolean drawBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
-                                int blurStrength, double speedMultiplier, double opacity,
-                                int cornerRadius, double huePulse, boolean hueAuto) {
-        return drawBackdrop(context, x, y, width, height, blurStrength, speedMultiplier, opacity,
-                cornerRadius, huePulse, hueAuto, 0);
-    }
-
-    public boolean drawBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
-                                int blurStrength, double speedMultiplier, double opacity,
-                                int cornerRadius, double huePulse, boolean hueAuto,
-                                double bloomPulse) {
-        return drawBackdrop(context, x, y, width, height, blurStrength, speedMultiplier, opacity,
-                cornerRadius, BackdropFx.plain(huePulse, hueAuto, bloomPulse));
+                cornerRadius, BackdropFx.plain(0));
     }
 
     public boolean drawBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
@@ -446,7 +424,7 @@ public final class CoverArtTexture implements AutoCloseable {
                                      int blurStrength, double speed, int radius) {
         if (queueBackdrop == null) queueBackdrop = new FluidBackdrop(true);
         return drawBackdrop(context, x, y, width, height, blurStrength, speed, .90,
-                radius, BackdropFx.plain(0, false, 0), false, queueBackdrop);
+                radius, BackdropFx.plain(0), false, queueBackdrop);
     }
 
     private boolean drawBackdrop(GuiGraphicsExtractor context, int x, int y, int width, int height,
@@ -933,14 +911,6 @@ public final class CoverArtTexture implements AutoCloseable {
         return 0xFF000000 | Color.HSBtoRGB(hsb[0], saturation, brightness) & 0xFFFFFF;
     }
 
-    static int rotateHue(int color, double degrees) {
-        if (degrees == 0 || color == 0) return color;
-        float[] hsb = Color.RGBtoHSB(color >>> 16 & 255, color >>> 8 & 255, color & 255, null);
-        if (hsb[1] < .05F) return color;
-        float hue = (float) (((hsb[0] * 360 + degrees) % 360 + 360) % 360) / 360;
-        return 0xFF000000 | Color.HSBtoRGB(hue, hsb[1], hsb[2]) & 0xFFFFFF;
-    }
-
     static int tint(int color, int tintColor, double amount) {
         if (amount <= 0 || color == 0) return color;
         double blend = Math.clamp(amount, 0, 1);
@@ -1186,14 +1156,17 @@ public final class CoverArtTexture implements AutoCloseable {
     }
 
     private final class MotionSurface {
+        private static final int AMBIENT_SIZE = 64;
+        private static final long AMBIENT_INTERVAL = 1_000_000_000L / 12;
         private final String name;
         private final VideoLoop video = new VideoLoop(Boolean.getBoolean("lyrica.motionSelfTest"));
         private volatile String url;
         private volatile long sourceVersion;
-        private long gpuVersion = -1, uploadedSequence, ambientSequence, lastPaletteNanos;
+        private long gpuVersion = -1, uploadedSequence, ambientSequence, lastPaletteNanos, lastAmbientNanos;
         private DynamicTexture videoTexture, ambientTexture;
         private TextureState state, ambient;
         private VideoLoop.PixelFrame pixels;
+        private int[] ambientPixels, ambientScratch;
         private PaletteData palette;
 
         private final java.util.LinkedHashMap<VideoShape, RoundedFrame> rounded = new java.util.LinkedHashMap<>(8, .75f, true);
@@ -1221,19 +1194,14 @@ public final class CoverArtTexture implements AutoCloseable {
             VideoShape key = new VideoShape(blurred, width, height, radius, PlatformTextures.guiScale(), canvasSurface);
             RoundedFrame frame = rounded.get(key);
             if (frame == null) { frame = new RoundedFrame(key, source.width(), source.height()); rounded.put(key, frame); }
-            if (frame.sequence != uploadedSequence) {
-                int[] data;
-                if (!blurred && pixels != null) data = pixels.argb();
-                else {
-                    data = new int[source.width() * source.height()];
-                    for (int py = 0; py < source.height(); py++) for (int px = 0; px < source.width(); px++)
-                        data[py * source.width() + px] = PlatformTextures.colorArgb(source.image(), px, py);
-                }
+            long sequence = blurred ? ambientSequence : uploadedSequence;
+            if (frame.sequence != sequence) {
+                int[] data = blurred ? ambientPixels : pixels.argb();
                 frame.plan.render(data, frame.output);
                 NativeImage image = frame.texture.getPixels();
                 for (int py = 0; py < frame.plan.height(); py++) for (int px = 0; px < frame.plan.width(); px++)
                     PlatformTextures.setColorArgb(image, px, py, frame.output[py * frame.plan.width() + px]);
-                PlatformTextures.upload(frame.texture); frame.sequence = uploadedSequence;
+                PlatformTextures.upload(frame.texture); frame.sequence = sequence;
             }
             PlatformTextures.draw(context, frame.id, x, y, width, height, 0, 0, frame.plan.width(), frame.plan.height(),
                     frame.plan.width(), frame.plan.height(), opacity, brightness);
@@ -1261,9 +1229,20 @@ public final class CoverArtTexture implements AutoCloseable {
             video.touchVisible(autoplay);
             VideoLoop.PixelFrame latest = video.latest();
             if (latest == null || expected != sourceVersion) return null;
+            // A backdrop needs only the small ambient frame. Avoid uploading an unused cover.
+            if (ambientWanted) {
+                long now = System.nanoTime();
+                if (ambient == null || ambientSequence != latest.sequence() && now - lastAmbientNanos >= AMBIENT_INTERVAL) {
+                    updateAmbient(expected, latest);
+                    lastAmbientNanos = now;
+                }
+                return ambient;
+            }
             if (latest.sequence() != uploadedSequence) {
-                if (state == null || state.width() != latest.width() || state.height() != latest.height()) {
+                if (state != null && (state.width() != latest.width() || state.height() != latest.height())) {
                     destroyGpu(); gpuVersion = expected;
+                }
+                if (state == null) {
                     NativeImage image = new NativeImage(latest.width(), latest.height(), true);
                     videoTexture = PlatformTextures.fromImage("Lyrica " + name, image);
                     Identifier id = PlatformTextures.register("fandroid_motion_" + textureInstanceId + "_" + name + "_" + expected, videoTexture);
@@ -1280,40 +1259,26 @@ public final class CoverArtTexture implements AutoCloseable {
                 pixels = latest;
                 uploadedSequence = latest.sequence();
             }
-            if (!ambientWanted) return state;
-            if (ambientSequence != uploadedSequence && pixels != null) updateAmbient(expected);
-            return ambient;
+            return state;
         }
-        private void updateAmbient(long expected) {
-            final int size = 64;
+        private void updateAmbient(long expected, VideoLoop.PixelFrame latest) {
+            int size = AMBIENT_SIZE;
             if (ambient == null) {
-                NativeImage image = new NativeImage(size, size, true);
+                ambientPixels = new int[size * size];
+                ambientScratch = new int[size * size];
+            }
+            RoundedVideoRaster.renderAmbient(latest.argb(), latest.width(), latest.height(), size, ambientPixels, ambientScratch);
+            NativeImage image = ambient == null ? new NativeImage(size, size, true) : ambient.image();
+            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
+                PlatformTextures.setColorArgb(image, x, y, ambientPixels[y * size + x]);
+            if (ambient == null) {
                 ambientTexture = PlatformTextures.fromImage("Lyrica ambient " + name, image);
                 Identifier id = PlatformTextures.register("fandroid_motion_ambient_" + textureInstanceId + "_" + name + "_" + expected, ambientTexture);
-                ambient = new TextureState(id, image, size, size, state.accent(), state.palette());
+                PaletteData colors = palette == null ? extractPalette(image) : palette;
+                ambient = new TextureState(id, image, size, size, colors.accent(), colors.colors());
             }
-            int[] colors = new int[size * size];
-            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
-                colors[y * size + x] = pixels.argb()[Math.min(pixels.height() - 1, y * pixels.height() / size) * pixels.width()
-                        + Math.min(pixels.width() - 1, x * pixels.width() / size)];
-            for (int pass = 0; pass < 3; pass++) {
-                int[] blurred = new int[colors.length];
-                for (int y = 0; y < size; y++) for (int x = 0; x < size; x++) {
-                    int r = 0, g = 0, b = 0, count = 0;
-                    for (int d = -4; d <= 4; d++) {
-                        int xx = (pass & 1) == 0 ? Math.clamp(x + d, 0, size - 1) : x;
-                        int yy = (pass & 1) == 0 ? y : Math.clamp(y + d, 0, size - 1);
-                        int color = colors[yy * size + xx];
-                        r += color >>> 16 & 255; g += color >>> 8 & 255; b += color & 255; count++;
-                    }
-                    blurred[y * size + x] = 0xFF000000 | r / count << 16 | g / count << 8 | b / count;
-                }
-                colors = blurred;
-            }
-            for (int y = 0; y < size; y++) for (int x = 0; x < size; x++)
-                PlatformTextures.setColorArgb(ambient.image(), x, y, colors[y * size + x]);
             PlatformTextures.upload(ambientTexture);
-            ambientSequence = uploadedSequence;
+            ambientSequence = latest.sequence();
         }
         void destroyGpu() {
             for (RoundedFrame frame : rounded.values()) PlatformTextures.retireEffectMask(frame.id);
@@ -1322,6 +1287,8 @@ public final class CoverArtTexture implements AutoCloseable {
             if (ambient != null) destroy(ambient);
             state = null; ambient = null; videoTexture = null; ambientTexture = null;
             pixels = null; palette = null; uploadedSequence = 0; ambientSequence = 0;
+            ambientPixels = ambientScratch = null;
+            lastAmbientNanos = 0;
         }
     }
 
@@ -1333,10 +1300,10 @@ public final class CoverArtTexture implements AutoCloseable {
     }
 
     /** Reactive parameters for the fluid backdrop (hue, bloom, spectral tint). */
-    public record BackdropFx(double huePulse, boolean hueAuto, double bloomPulse,
+    public record BackdropFx(double bloomPulse,
                              boolean tint, double tintStrength, double centroid) {
-        public static BackdropFx plain(double huePulse, boolean hueAuto, double bloomPulse) {
-            return new BackdropFx(huePulse, hueAuto, bloomPulse, false, 0, .5);
+        public static BackdropFx plain(double bloomPulse) {
+            return new BackdropFx(bloomPulse, false, 0, .5);
         }
     }
 
@@ -1479,7 +1446,7 @@ public final class CoverArtTexture implements AutoCloseable {
         private int compositeRadius = -1, preparedBlur = -1;
         private BackdropSamplingPlan samplingPlan;
         private long lastFrame, lastSource, transitionStarted;
-        private double motionTime, currentSpeed, hueShift, bloomGlow;
+        private double motionTime, currentSpeed, bloomGlow;
         private float[] current, previous;
         private final int[] frame = new int[SIZE * SIZE];
 
@@ -1511,11 +1478,9 @@ public final class CoverArtTexture implements AutoCloseable {
                 double blend = previous == null ? 1 : Math.clamp((now - transitionStarted) / 1_000_000_000.0, 0, 1);
                 KawarpRaster.render(previous, current, blend, motionTime, frame);
                 if (blend >= 1) previous = null;
-                hueShift = fx.hueAuto() ? (hueShift + fx.huePulse() * 150 * delta) % 360 : fx.huePulse() * 80;
                 bloomGlow += (fx.bloomPulse() - bloomGlow) * (1 - Math.exp(-delta * 5));
                 for (int py = 0; py < SIZE; py++) for (int px = 0; px < SIZE; px++) {
                     int color = frame[py * SIZE + px];
-                    if (Math.abs(hueShift) > .01) color = rotateHue(color, hueShift);
                     if (fx.tint()) color = tint(color, fx.centroid() < .5 ? 0xFFE06020 : 0xFF3090E8,
                             Math.abs(Math.clamp(fx.centroid(), 0, 1) - .5) * 2 * fx.tintStrength());
                     if (bloomGlow > .01) {
@@ -1629,7 +1594,7 @@ public final class CoverArtTexture implements AutoCloseable {
             composite = null; compositeId = null; sourceId = null;
             current = null; previous = null; samplingPlan = null;
             compositeWidth = compositeHeight = visibleWidth = visibleHeight = paintedWidth = paintedHeight = 0; compositeRadius = -1;
-            lastFrame = lastSource = 0; motionTime = currentSpeed = hueShift = bloomGlow = 0;
+            lastFrame = lastSource = 0; motionTime = currentSpeed = bloomGlow = 0;
         }
     }
 

@@ -31,6 +31,7 @@ import dev.fandroid.protocol.lyrics.LyricLine;
 import dev.fandroid.protocol.lyrics.LyricVocalGroup;
 import dev.fandroid.protocol.lyrics.LyricsDocument;
 import dev.fandroid.protocol.lyrics.LyricsMetadata;
+import dev.fandroid.protocol.lyrics.ParentheticalBackingVocals;
 import dev.fandroid.protocol.lyrics.TimedWord;
 import dev.fandroid.protocol.music.PlaybackSnapshot;
 import net.minecraft.client.MinecraftClient;
@@ -127,6 +128,8 @@ public final class LyricsOverlay implements AutoCloseable {
     private final CoverArtTexture makerAvatarTexture = new CoverArtTexture();
     private final CoverArtTexture uploaderAvatarTexture = new CoverArtTexture();
     private volatile LyricsDocument document = new LyricsDocument(List.of());
+    private volatile LyricsDocument sourceDocument = document;
+    private boolean parentheticalBackingApplied;
     private volatile PlaybackSnapshot playback = PlaybackSnapshot.unavailable();
     private volatile String emptyMessage = ui("lyrics.fandroid.no_synced");
     private volatile String syncLabel = ui("lyrics.fandroid.synced");
@@ -248,7 +251,7 @@ public final class LyricsOverlay implements AutoCloseable {
     public void beginLookup() {
         unavailableTransition.reset();
         lyricsLoading = true;
-        document = new LyricsDocument(List.of());
+        sourceDocument = document = new LyricsDocument(List.of());
         emptyMessage = ui("lyrics.fandroid.finding");
         syncLabel = ui("lyrics.fandroid.searching");
         resetAnimation();
@@ -257,7 +260,7 @@ public final class LyricsOverlay implements AutoCloseable {
     public void clearLyrics() {
         unavailableTransition.reset();
         lyricsLoading = false;
-        document = new LyricsDocument(List.of());
+        sourceDocument = document = new LyricsDocument(List.of());
         emptyMessage = ui("lyrics.fandroid.no_synced");
         syncLabel = ui("lyrics.fandroid.synced");
         resetAnimation();
@@ -282,7 +285,9 @@ public final class LyricsOverlay implements AutoCloseable {
 
     public void setLyrics(LyricsDocument lyrics, String label) {
         lyricsLoading = false;
-        document = lyrics == null ? new LyricsDocument(List.of()) : lyrics;
+        sourceDocument = lyrics == null ? new LyricsDocument(List.of()) : lyrics;
+        parentheticalBackingApplied = preferences.isParentheticalBackingVocals();
+        document = parentheticalBackingApplied ? ParentheticalBackingVocals.infer(sourceDocument) : sourceDocument;
         LyricsRomanizer.setDocumentContext(document.lines().stream().flatMap(line -> java.util.stream.Stream.of(
                 line.text(), line.words().stream().map(TimedWord::text).collect(java.util.stream.Collectors.joining()))).toList());
         if (document.groups().isEmpty()) unavailableTransition.unavailable();
@@ -296,6 +301,7 @@ public final class LyricsOverlay implements AutoCloseable {
     private Runnable translationRequest = () -> { };
     public void setTranslationRequest(Runnable request) { translationRequest = request; }
     public LyricsDocument document() { return document; }
+    public LyricsDocument sourceDocument() { return sourceDocument; }
     private static boolean settling(LyricVocalGroup group, long now) {
         return now >= group.endMillis() && now - group.endMillis() < 2_000;
     }
@@ -319,10 +325,13 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     public void setPlayback(PlaybackSnapshot playback) {
-        if(dockSeeking && (playback.durationMillis()<=0 || !playbackTrackKey(this.playback).equals(playbackTrackKey(playback)))) cancelPopupProgressScrub();
-        unavailableTransition.track(playbackTrackKey(playback));
+        if (this.playback == playback && currentSongSource == null) return;
+        currentSongSource = null;
+        String track = playbackTrackKey(playback);
+        if(dockSeeking && (playback.durationMillis()<=0 || !playbackTrackKey(this.playback).equals(track))) cancelPopupProgressScrub();
+        unavailableTransition.track(track);
         if(meaningfulIslandTrack(playback)) {
-            if(lastIslandTrack==null || !playbackTrackKey(lastIslandTrack).equals(playbackTrackKey(playback))) dockMotion.revealTitle();
+            if(lastIslandTrack==null || !playbackTrackKey(lastIslandTrack).equals(track)) dockMotion.revealTitle();
             lastIslandTrack=playback;
         }
         this.playback = playback;
@@ -424,6 +433,14 @@ public final class LyricsOverlay implements AutoCloseable {
     }
 
     public void tick() {
+        if (parentheticalBackingApplied != preferences.isParentheticalBackingVocals()) {
+            parentheticalBackingApplied = preferences.isParentheticalBackingVocals();
+            LyricsDocument formatted = parentheticalBackingApplied ? ParentheticalBackingVocals.infer(sourceDocument) : sourceDocument;
+            if (document != formatted) {
+                document = formatted;
+                resetAnimation();
+            }
+        }
         if(islandAudioDemand!=null) islandAudioDemand.accept(wantsIslandAudio(System.nanoTime()));
         bloomRenderer.tick();
         if (currentSongPreview != null) currentSongPreview.tick();
@@ -593,7 +610,7 @@ public final class LyricsOverlay implements AutoCloseable {
 
     public boolean isHudVisible() {
         return preferences.isLyricsVisible() && preferences.isLyricsPinned()
-                && (meaningfulIslandTrack(playback) || isPopupDocked() && lastIslandTrack!=null);
+                && (isPopupDocked() || meaningfulIslandTrack(playback));
     }
 
     /** Renders above inventory screens using a stable, non-blurred editing surface. */
@@ -659,6 +676,8 @@ public final class LyricsOverlay implements AutoCloseable {
         preview.syncLabel = syncLabel;
         preview.artworkAccent = artworkAccent;
         preview.artworkTexture = artworkTexture;
+        preview.sourceDocument = sourceDocument;
+        preview.parentheticalBackingApplied = preview.preferences.isParentheticalBackingVocals();
         if (preview.document != document) {
             preview.document = document;
             preview.updateCreditAvatars(document.metadata());
@@ -676,7 +695,9 @@ public final class LyricsOverlay implements AutoCloseable {
         lyricsLoading = source.lyricsLoading;
         emptyMessage = source.emptyMessage;
         syncLabel = source.syncLabel;
-        if (document != source.document) setLyrics(source.document, source.syncLabel);
+        if (sourceDocument != source.sourceDocument
+                || parentheticalBackingApplied != preferences.isParentheticalBackingVocals())
+            setLyrics(source.sourceDocument, source.syncLabel);
     }
 
     public void setWorldPopupLyricsZoom(double zoom) { worldPopupLyricsZoom = zoom; }
@@ -1495,16 +1516,12 @@ public final class LyricsOverlay implements AutoCloseable {
             double reactive = getLyricsBackgroundReactiveMultiplier();
             double musicSpeed = dev.fandroid.client.music.KawarpRaster.speed(playback.playing(), playback.bpm(), playback.intensity(), playback.beatPhase());
             double backdropSpeed = preferences.isLyricsAnimations() ? preferences.getLyricsBackgroundSpeedMultiplier() * reactive * musicSpeed : 0;
-            boolean hueAuto = preferences.isLyricsReactiveHueAuto();
-            double hueSignal = Math.clamp(playback.intensity(), 0, 1);
+            double audioIntensity = Math.clamp(playback.intensity(), 0, 1);
             boolean playing = playback.playing();
-            double huePulse = !preferences.isLyricsReactiveHue() || !playing
-                    ? 0 : hueAuto ? hueSignal
-                    : hueSignal * (preferences.getLyricsReactiveHueAmount() / 80.0);
             double bloomPulse = !preferences.isLyricsReactiveBloom() || !playing
-                    ? 0 : hueSignal * (preferences.getLyricsReactiveBloomAmount() / 100.0);
+                    ? 0 : audioIntensity * (preferences.getLyricsReactiveBloomAmount() / 100.0);
             CoverArtTexture.BackdropFx fx = new CoverArtTexture.BackdropFx(
-                    huePulse, hueAuto, bloomPulse,
+                    bloomPulse,
                     preferences.isLyricsReactiveSpectral() && playing,
                     preferences.getLyricsReactiveSpectralAmount() / 100.0,
                     playback.spectralCentroid());
@@ -2870,7 +2887,8 @@ public final class LyricsOverlay implements AutoCloseable {
         long maximumEnd = Long.MIN_VALUE;
         for (int index = 0; index < current.groups().size(); index++) {
             LyricVocalGroup group = current.groups().get(index);
-            PreparedLine lead = prepareLine(group.lead(), width, 2.15 * textScale, true);
+            boolean backingOnly = group.lead().background();
+            PreparedLine lead = prepareLine(group.lead(), width, (backingOnly ? 1.34 : 2.15) * textScale, !backingOnly);
             PreparedLine[] backgrounds = new PreparedLine[group.backingVocals().size()];
             for (int backgroundIndex = 0; backgroundIndex < backgrounds.length; backgroundIndex++) {
                 backgrounds[backgroundIndex] = prepareLine(

@@ -1,7 +1,9 @@
 package dev.relaylyrics.client.karaoke;
 
 import com.google.gson.JsonObject;
+import dev.relaylyrics.client.MusicPresence;
 import dev.relaylyrics.client.RelayLyricsClient;
+import dev.relaylyrics.client.presence.MusicPresenceClient.ListenHost;
 import dev.relaylyrics.client.presence.PresenceTrack;
 import dev.relaylyrics.client.ui.KaraokePanelMotion;
 import dev.relaylyrics.karaoke.KaraokeWire.*;
@@ -51,7 +53,7 @@ public final class KaraokeClient {
         volatile long generation;
         private long received;
         private long nextSync, mismatchSince;
-        private boolean loading, matched, spotifyFailed, spotifySync;
+        private boolean loading, matched, spotifyFailed, spotifySync, relay;
         private String resolvedUri;
         public final Map<UUID, Cursor> cursors = new HashMap<>();
         final KaraokeQueueView queue = new KaraokeQueueView();
@@ -133,11 +135,11 @@ public final class KaraokeClient {
                 }
                 case "listen_track" -> {
                     var listener = following;
-                    if (listener != null && listener.panel == null && listener.id.equals(id(data, "player"))) applyTrack(listener, data);
+                    if (listener != null && listener.panel == null && !listener.relay && listener.id.equals(id(data, "player"))) applyTrack(listener, data);
                     return;
                 }
                 case "listen_stopped" -> {
-                    if (following != null && following.panel == null) {
+                    if (following != null && following.panel == null && !following.relay) {
                         stopFollowing();
                         KaraokePlatform.listenNotice("stopped");
                     }
@@ -198,8 +200,10 @@ public final class KaraokeClient {
                 case "track" -> {
                     if (!room.accepted) return;
                     boolean changed = applyTrack(room, data);
-                    if (changed && room.queue.side != 0 && !room.queue.searching && room.queue.request == null)
-                        requestQueue(room, "list", "", 0);
+                    if (changed) {
+                        room.queue.queue = new QueueResult(List.of(), 0, "ok");
+                        room.queue.refreshAt = 0;
+                    }
                 }
                 case "queue_execute" -> { if (room.owned()) executeQueue(room, data); }
                 case "queue_result" -> {
@@ -207,15 +211,22 @@ public final class KaraokeClient {
                     var result = read(data, "result", QueueResult.class);
                     room.queue.request = null;
                     if (result == null) return;
-                    boolean search = string(data, "action").equals("search");
+                    String action = string(data, "action");
+                    boolean search = action.equals("search");
+                    if (!search && room.queue.requestGeneration != room.generation
+                            && !Set.of("added", "added_refresh", "jumped").contains(result.status())) return;
                     if (search && (!room.queue.searching || !room.queue.submittedQuery.equals(text(room.queue.field.value(), 100)))) return;
                     room.queue.status = result.status().equals("ok") ? "" : result.status();
                     if (search) room.queue.results = result.tracks();
                     else if (Set.of("ok", "changed", "added", "jumped").contains(result.status())) room.queue.queue = result;
-                    if (search || string(data, "action").equals("list")) room.queue.first = 0;
+                    if (action.equals("list") && result.status().equals("busy"))
+                        room.queue.refreshAt = System.nanoTime() + 1_500_000_000L;
+                    if (result.status().equals("added_refresh")) room.queue.refreshAt = 0;
+                    if (search) room.queue.first = 0;
                 }
                 case "queue_snapshot" -> {
                     if (!room.accepted) return;
+                    if (data.has("generation") && generation(data) != room.generation) return;
                     var result = read(data, "result", QueueResult.class);
                     if (result != null) {
                         room.queue.queue = result;
@@ -251,13 +262,52 @@ public final class KaraokeClient {
     }
 
     public static int listen(String name) {
-        if (!supported() || !listenSupported) { KaraokePlatform.listenNotice("unsupported"); return 0; }
         if (!canSyncSpotify()) { KaraokePlatform.listenNotice("spotify"); return 0; }
+        if (MusicPresence.listen(name) || listenNative(name)) return 1;
+        KaraokePlatform.listenNotice("unavailable");
+        return 0;
+    }
+
+    public static boolean nativeListenAvailable() { return supported() && listenSupported; }
+    public static boolean listenNative(String name) {
+        if (!nativeListenAvailable()) return false;
         send("listen", "name", name);
-        return 1;
+        return true;
+    }
+
+    public static boolean isFollowing() { return following != null; }
+
+    public static void updateRelay(ListenHost host) {
+        var room = following;
+        if (room == null || !room.relay || !room.id.equals(host.id())) {
+            if (room != null && !room.relay) leave(room, true);
+            room = new Room(host.id(), text(host.name(), 16), null);
+            room.accepted = room.spotifySync = room.relay = true;
+            following = room;
+            RelayLyricsClient.music().setKaraokeSpotifyWatching(true);
+            KaraokePlatform.listenNotice("started", room.name);
+        }
+        Song song = host.song();
+        if (song == null ? room.song != null : room.song == null || !song.sameTrack(room.song))
+            room.resetTrack(room.generation + 1);
+        room.song = song;
+        room.received = host.sampledAt();
+    }
+
+    public static void suspendRelay() {
+        var room = following;
+        if (room != null && room.relay && room.song != null) {
+            room.resetTrack(room.generation + 1);
+            room.song = null;
+        }
+    }
+
+    public static void endRelay() {
+        if (following != null && following.relay) stopFollowing();
     }
 
     public static int stopListening() {
+        if (MusicPresence.stopListen()) { KaraokePlatform.listenNotice("stopped"); return 1; }
         if (following == null || following.panel != null) {
             KaraokePlatform.listenNotice("idle");
             return 0;
@@ -269,6 +319,7 @@ public final class KaraokeClient {
     public static void tick() {
         if (!supported()) {
             if (!ROOMS.isEmpty() || !PRESENCE.isEmpty()) clear();
+            if (following != null && following.relay && following.song != null) syncSpotify(following);
             return;
         }
         ticks++;
@@ -328,7 +379,7 @@ public final class KaraokeClient {
         }
     }
 
-    private static Song song(PlaybackSnapshot snapshot, long position) {
+    public static Song song(PlaybackSnapshot snapshot, long position) {
         if (snapshot.title() == null || snapshot.title().isBlank() || "Nothing playing".equals(snapshot.title())) return null;
         return new Song(snapshot.title(), snapshot.artist(), snapshot.album(), snapshot.artworkUrl(), snapshot.spotifyUri(),
                 position, snapshot.durationMillis(), snapshot.playing(), snapshot.shuffled(), snapshot.repeatMode()).clean();
@@ -347,7 +398,9 @@ public final class KaraokeClient {
                 || KaraokePlatform.visibleDistance(room) > RANGE * RANGE) return;
         var queue = room.queue;
         queue.request = UUID.randomUUID();
+        queue.requestGeneration = room.generation;
         queue.lastRequestAt = System.nanoTime();
+        if ("list".equals(action)) queue.refreshAt = queue.lastRequestAt + 12_000_000_000L;
         queue.deadline = queue.lastRequestAt + TimeUnit.MILLISECONDS.toNanos(QUEUE_TIMEOUT_MILLIS + 1_500);
         queue.status = "loading";
         send("queue_request", "room", room.id, "request", queue.request, "action", action,
@@ -704,7 +757,8 @@ public final class KaraokeClient {
 
     private static void leave(Room room, boolean notify) {
         if (room.panel == null) {
-            if (notify) send("listen_stop");
+            if (room.relay) MusicPresence.stopListen();
+            else if (notify) send("listen_stop");
             if (following == room) stopFollowing();
             KaraokePlatform.listenNotice("stopped");
             return;
@@ -785,6 +839,7 @@ public final class KaraokeClient {
                     room.loading = false;
                     if (following == room && failure != null) {
                         room.spotifyFailed = true;
+                        dev.lyrica.engine.StatusMetrics.error("listen_sync");
                         room.status = "karaoke.lyrica.spotify_error";
                         if (room.panel == null) KaraokePlatform.listenNotice("playback");
                     }

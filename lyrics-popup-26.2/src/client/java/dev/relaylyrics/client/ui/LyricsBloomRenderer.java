@@ -108,10 +108,21 @@ final class LyricsBloomRenderer implements AutoCloseable {
         return true;
     }
 
+    boolean drawSmoothedText(GuiGraphicsExtractor context, Component text, int color) {
+        var surface = cache.requestExact(text, 0);
+        if (surface == null) return false;
+        drawSurface(context, surface, 0, 0, 1, color);
+        return true;
+    }
+
     private void drawMask(GuiGraphicsExtractor context, Component text, double x, double y,
                           double scale, int color, double radius) {
         var surface = cache.request(text, radius);
-        if (surface == null) return;
+        if (surface != null) drawSurface(context, surface, x, y, scale, color);
+    }
+
+    private void drawSurface(GuiGraphicsExtractor context, LyricsEffectCache.Surface<Identifier> surface,
+                             double x, double y, double scale, int color) {
         LyricsEffectRaster.Mask mask = surface.mask();
         GuiTransform.push(context);
         try {

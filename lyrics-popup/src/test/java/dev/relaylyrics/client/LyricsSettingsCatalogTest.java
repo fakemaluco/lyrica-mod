@@ -72,15 +72,26 @@ class LyricsSettingsCatalogTest {
     @Test void organizedCustomCategoryAndSmallMainPagesWithOptionalWorld() {
         var p = new ClientPreferences(); var c = catalog(p);
         assertThat(c.categories()).containsExactly(Category.GENERAL, Category.APPEARANCE, Category.CUSTOM, Category.CONNECTION, Category.SOURCES, Category.ADVANCED, Category.WORLD);
-        for (var category : c.categories()) if (category != Category.SOURCES) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(category == Category.GENERAL ? 10 : 8);
+        for (var category : c.categories()) if (category != Category.SOURCES) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(category == Category.GENERAL ? 10 : category == Category.WORLD ? 9 : 8);
         p.setWorldLyrics(true);
         assertThat(c.categories()).endsWith(Category.WORLD);
-        for (var category : c.categories()) if (category != Category.SOURCES) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(category == Category.GENERAL ? 10 : 8);
+        for (var category : c.categories()) if (category != Category.SOURCES) assertThat(c.entries(category)).hasSizeLessThanOrEqualTo(category == Category.GENERAL ? 10 : category == Category.WORLD ? 9 : 8);
         assertThat(keys(c, Category.ADVANCED)).doesNotContain("world_lyrics");
-        assertThat(keys(c, Category.WORLD)).contains("world_lyrics", "world_style", "world_presentation_intensity", "world_cinematic", "world_reposition")
+        assertThat(keys(c, Category.WORLD)).contains("world_lyrics", "world_style", "world_reveal", "world_presentation_intensity", "world_cinematic", "world_reposition")
                 .doesNotContain("world_direction", "group.world_gemini");
         assertThat(keys(c, Category.GENERAL)).doesNotContain("world_lyrics").contains("lyrics_delay", "lyrics_delay_reset");
     }
+    @Test void worldOutlineRevealsItsColorPickerWhenEnabled() {
+        var p = new ClientPreferences();
+        p.setWorldLyrics(true);
+        var c = catalog(p);
+        c.expand("world");
+        assertThat(keys(c, Category.WORLD)).contains("world_outline").doesNotContain("world_outline_color");
+        p.setWorldLyricsOutline(true);
+        assertThat(keys(c, Category.WORLD)).contains("world_position", "world_animation_speed", "world_outline_color", "world_restore");
+        assertThat(keys(c, Category.CUSTOM)).doesNotContain("group.world", "world_position", "world_animation_speed", "world_outline_color");
+    }
+
     @Test void openingEveryCategoryDoesNotMigrateOrOverwriteCustomValues() throws Exception {
         var p = ClientPreferences.decode("""
                 {"worldLyricsPositionVersion":5,"worldLyrics":true,"worldLyricsAutomatic":false,"worldLyricsPreset":"MURAL",
@@ -122,13 +133,15 @@ class LyricsSettingsCatalogTest {
     @Test void disablingEffectsHidesControlsAndKeepsTheirValues() {
         var p = new ClientPreferences(); var c = catalog(p);
         c.expand("effects"); c.expand("background"); c.expand("world");
-        p.setLyricsShadowDistance(3); p.setLyricsReactiveHueAmount(135); p.setWorldLyricsAutomatic(false);
+        p.setLyricsShadowDistance(3); p.setWorldLyrics(false); p.setWorldLyricsAutomatic(false);
         p.setWorldLyricsPreset(WorldLyricsDirector.Preset.MONOLITH);
         p.setLyricsTextShadow(false); LyricsSettingsPresets.applyBackground(p, LyricsSettingsPresets.Background.SIMPLE);
         assertThat(keys(c, Category.CUSTOM)).doesNotContain("shadow_distance", "reactive_hue_amount", "world_depth");
+        assertThat(keys(c, Category.WORLD)).doesNotContain("world_depth");
         p.setLyricsTextShadow(true); LyricsSettingsPresets.applyBackground(p, LyricsSettingsPresets.Background.REACTIVE); p.setWorldLyrics(true);
-        assertThat(keys(c, Category.CUSTOM)).contains("shadow_distance", "reactive_hue_amount", "world_depth");
-        assertThat(p.getLyricsShadowDistance()).isEqualTo(3); assertThat(p.getLyricsReactiveHueAmount()).isEqualTo(135);
+        assertThat(keys(c, Category.CUSTOM)).contains("shadow_distance").doesNotContain("reactive_hue_amount", "world_depth");
+        assertThat(keys(c, Category.WORLD)).contains("world_depth");
+        assertThat(p.getLyricsShadowDistance()).isEqualTo(3);
         p.setWorldLyricsAutomatic(true); assertThat(keys(c, Category.WORLD)).doesNotContain("world_preset");
         p.setWorldLyricsAutomatic(false); assertThat(keys(c, Category.WORLD)).contains("world_style").doesNotContain("world_preset");
         assertThat(p.getWorldLyricsPreset()).isEqualTo(WorldLyricsDirector.Preset.MONOLITH);
@@ -159,7 +172,9 @@ class LyricsSettingsCatalogTest {
         var p = new ClientPreferences(); var c = catalog(p);
         for (String group : List.of("languages", "translation_provider", "updates", "support", "effects", "background", "world", "typography", "interaction")) c.expand(group);
         p.setWorldLyrics(true);
-        assertThat(keys(c, Category.CUSTOM)).contains("font", "weight", "scale", "translation", "romanization", "glow", "shadow", "width", "height", "dynamic", "reactive", "world_depth");
+        assertThat(keys(c, Category.CUSTOM)).contains("font", "weight", "scale", "translation", "romanization", "glow", "shadow", "width", "height", "dynamic", "reactive")
+                .doesNotContain("world_depth");
+        assertThat(keys(c, Category.WORLD)).contains("world_depth", "font");
         assertThat(keys(c, Category.ADVANCED)).doesNotContain("shadow", "glow", "world_depth", "font", "width");
         for (var category : c.categories()) assertThat(keys(c, category)).noneMatch(key -> key.contains("preview"));
     }
@@ -173,7 +188,7 @@ class LyricsSettingsCatalogTest {
         c.restore("appearance"); assertThat(p.getLyricsX()).isEqualTo(133);
         c.restore("all");
         assertThat(p.getSpotifyClientId()).isEqualTo("keep-me"); assertThat(p.getMusicSource()).isEqualTo(MusicSource.SPOTIFY_ACCOUNT);
-        assertThat(p.getLyricsX()).isEqualTo(24); assertThat(p.isWorldLyrics()).isFalse();
+        assertThat(p.getLyricsX()).isEqualTo(24); assertThat(p.isWorldLyrics()).isTrue();
     }
     @Test void restoringDistanceWorksEvenWhenPreviousMaximumWasBelowDefaultMinimum() {
         var p = new ClientPreferences(); var c = catalog(p);

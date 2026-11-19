@@ -4,6 +4,7 @@ import dev.relaylyrics.FanDroidMod;
 import dev.relaylyrics.client.music.MusicService;
 import dev.relaylyrics.client.ui.LyricsConfigScreen;
 import dev.relaylyrics.client.ui.LyricsOverlay;
+import dev.relaylyrics.client.ui.UpdateIslandScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -47,6 +48,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
         GoogleFontManager.restore(preferences().getGoogleFontFamily(),
                 preferences().getLyricsFontWeight().cssWeight(), overlay::fontChanged);
         InventoryLyricsInteraction.register();
+        SettingsKeyBinding.register();
         MusicPresence.initialize();
         dev.relaylyrics.client.karaoke.KaraokeClient.initialize();
         WorldLyricsRenderHook.register();
@@ -94,12 +96,15 @@ public final class RelayLyricsClient implements ClientModInitializer {
                 music.tickAudioDucking(client.world != null);
                 music.tickGeminiShaders();
                 if (client.player != null) {
-                    String version = music.support().takeNotification();
-                    if (!version.isBlank()) client.inGameHud.getChatHud().addMessage(net.minecraft.text.Text.translatable("config.relaylyrics.updates.notification", version));
+                    var update = music.support().takeNotification();
+                    if (update != null) UpdateIslandScreen.announce(music.support(), update);
                 }
             }
             dev.relaylyrics.client.karaoke.KaraokeClient.tick();
             MusicPresence.tick();
+            var statusServer = client.getCurrentServerEntry();
+            StatusReporter.tick(client.player != null && client.world != null && client.getNetworkHandler() != null,
+                    statusServer == null ? null : statusServer.address);
             dev.relaylyrics.client.ui.WorldLyricsProbe.tick(client);
             dev.relaylyrics.client.ui.WorldLyricsRenderer.tickPlayerMotion(client);
             dev.relaylyrics.client.ui.WorldTextMesh.tick();
@@ -115,9 +120,11 @@ public final class RelayLyricsClient implements ClientModInitializer {
             dev.relaylyrics.client.karaoke.KaraokePlatform.paintPopups(false);
             var screen = MinecraftClient.getInstance().currentScreen;
             if (screen == null) {
-                InventoryLyricsController.renderWorldHud(context);
+                boolean updateNotice = UpdateIslandScreen.hasNotice();
+                if (!updateNotice || !overlay.isPopupDocked()) InventoryLyricsController.renderWorldHud(context);
                 dev.relaylyrics.client.ui.GeminiWorldProbe.hud(context);
-                JadeIsland.render(context);
+                if (updateNotice) UpdateIslandScreen.renderNotice(context, -1, -1);
+                else JadeIsland.render(context);
             }
         });
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {

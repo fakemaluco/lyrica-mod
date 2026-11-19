@@ -25,7 +25,7 @@ public final class WorldLyricsProbe {
     private static final boolean PLACEMENT = Boolean.getBoolean("lyrica.popupPlacementSelfTest");
     private static final boolean CINEMATIC = Boolean.getBoolean("lyrica.worldCinematicSelfTest");
     private static int cinematicBefore, cinematicReframesBefore, cinematicWorldBefore;
-    private static final String[] STAGES=OBSTACLES ? new String[]{"dense-forest", "low-canopy-tunnel", "obstacle-added", "camera-turn-move", "paused-camera-occlusion", "near-stone-wall"} : PRESENTATION ? new String[]{"falling-entry", "falling-formed", "progressive", "coexist", "staircase", "spotlight", "planar", "volume", "paused-camera", "spicy-glyphs", "scattered-words", "mixed-chunks", "motion-disabled"} : PLACEMENT ? new String[]{"align-xaero", "align-center", "align-free", "size-empty", "size-lyrics"} : CINEMATIC ? new String[]{"f1-world","ji-afk-caption","ji-afk-elytra","ji-afk-paused","ji-return"} : new String[]{"around","sky","glyph-lift-a","glyph-lift-b","popup-font-changed","duet",
+    private static final String[] STAGES=OBSTACLES ? new String[]{"dense-forest", "low-canopy-tunnel", "obstacle-added", "camera-turn-fixed", "paused-opaque-occlusion", "near-stone-wall"} : PRESENTATION ? new String[]{"falling-entry", "falling-formed", "progressive", "coexist", "staircase", "spotlight", "planar", "volume", "paused-camera", "spicy-glyphs", "scattered-words", "mixed-chunks", "motion-disabled"} : PLACEMENT ? new String[]{"align-xaero", "align-center", "align-free", "size-empty", "size-lyrics"} : CINEMATIC ? new String[]{"f1-world","ji-afk-caption","ji-afk-elytra","ji-afk-paused","ji-return"} : new String[]{"around","sky","glyph-lift-a","glyph-lift-b","popup-font-changed","duet",
             "night-unlit","night-lit","night-removed","elytra-short","elytra-long","elytra-turn"};
     private static int total,ticks,stage = Integer.getInteger("lyrica.worldPresentationStage", 0);
     private static boolean initialized,capturePending;
@@ -34,6 +34,7 @@ public final class WorldLyricsProbe {
     private static java.awt.image.BufferedImage darkFrame;
     private WorldLyricsProbe() { }
     public static void tick(MinecraftClient client) {
+        if (Boolean.getBoolean("lyrica.worldContextSelfTest")) { WorldLyricsContextProbe.tick(client); return; }
         if (Boolean.getBoolean("lyrica.islandJadeSelfTest") || Boolean.getBoolean("lyrica.musicPresenceSelfTest") || !Boolean.getBoolean("lyrica.worldExperienceSelfTest")) return;
         if (++total>4000) throw new IllegalStateException("Spatial world probe timed out at "+STAGES[stage]);
         if (client.player==null && total%100==0) FanDroidMod.LOGGER.info("World fixture waiting: {}",client.currentScreen);
@@ -42,8 +43,7 @@ public final class WorldLyricsProbe {
         client.player.setPosition(.5,81,.5); client.player.setYaw(CINEMATIC && (stage==2 && ticks>=40 || stage==3) ? 105 : !PRESENTATION && stage==11 && ticks>=25 ? 41 : 0); client.player.setPitch(0);
         client.player.setVelocity(Vec3d.ZERO); client.player.setSprinting(false);
         if (OBSTACLES && ticks >= 40) {
-            if (stage == 3) { client.player.setPosition(3.5, 81, .5); client.player.setYaw(135); }
-            else if (stage == 4) client.player.setYaw(90);
+            if (stage == 3) client.player.setYaw(135);
         }
         if (!initialized) {
             initialized=true;
@@ -81,8 +81,8 @@ public final class WorldLyricsProbe {
         }
         if (stage==8 && lastLight!=null && terrainLightLevel(lastLight)>.01) throw new IllegalStateException("Old word light was not removed");
         if (stage==9) shortFlight=WorldLyricsRenderer.probeAnchorDistance();
-        if (stage==10 && (shortFlight<50 || WorldLyricsRenderer.probeAnchorDistance()<shortFlight+5))
-            throw new IllegalStateException("Elytra runway did not grow: "+shortFlight+" -> "+WorldLyricsRenderer.probeAnchorDistance());
+        if (stage==10 && (shortFlight<=0 || Math.abs(WorldLyricsRenderer.probeAnchorDistance()-shortFlight)>12))
+            throw new IllegalStateException("A long verse inflated the next chunk's flight runway: "+shortFlight+" -> "+WorldLyricsRenderer.probeAnchorDistance());
         if (stage==11 && WorldLyricsRenderer.probeCourseChanges()!=0) throw new IllegalStateException("Elytra turn moved a fixed phrase");
         capturePending=true;capture(client);
     }
@@ -318,22 +318,24 @@ public final class WorldLyricsProbe {
                 obstacleMutationQueued = true;
                 var server = client.getServer();
                 server.execute(() -> {
-                    String command = stage == 2 ? "fill -8 81 2 8 91 2 minecraft:oak_leaves[persistent=true]"
-                            : "fill -2 81 -7 -2 90 7 minecraft:oak_leaves[persistent=true]";
+                    String command = stage == 2 ? "fill -16 81 3 16 94 3 minecraft:stone"
+                            : "fill -16 81 3 16 94 7 minecraft:oak_leaves[persistent=true]";
                     WorldLyricsRenderHook.probeCommand(server, command);
                     obstacleMutationQueued = false;
                 });
             }
         }
         if (ticks < 110 || obstacleMutationQueued) return;
-        if (!WorldLyricsRenderer.verifyProbe(1, false) || WorldLyricsRenderer.probeWordCount() != 4
-                || !WorldLyricsRenderer.probeReadable())
+        if (stage != 3 && (!WorldLyricsRenderer.verifyProbe(1, false) || WorldLyricsRenderer.probeWordCount() != 4
+                || !WorldLyricsRenderer.probeReadable()))
             throw new IllegalStateException("Obstacle fixture lost readable phrase: " + STAGES[stage] + " " + WorldLyricsRenderer.probeSummary());
         if (WorldLyricsRenderer.probeGroups() > WorldLyricsPresentation.MAX_GROUPS)
             throw new IllegalStateException("Obstacle recovery exceeded the group budget");
         if ((stage == 1 || stage == 5) && !WorldLyricsRenderer.probeCompact())
             throw new IllegalStateException("Blocked space did not select a coherent compact phrase: " + STAGES[stage]);
-        if (stage >= 2 && stage <= 4 && (WorldLyricsRenderer.probeRecoveryCount() <= obstacleRecoveryBefore
+        if (stage == 3 && !Objects.equals(obstacleBeforeAnchors, WorldLyricsRenderer.probeAnchors()))
+            throw new IllegalStateException("A camera turn moved the paused phrase");
+        if ((stage == 2 || stage == 4) && (WorldLyricsRenderer.probeRecoveryCount() <= obstacleRecoveryBefore
                 || Objects.equals(obstacleBeforeAnchors, WorldLyricsRenderer.probeAnchors())))
             throw new IllegalStateException("Paused playback prevented obstacle/camera recovery: " + STAGES[stage]);
         if (obstacleStableAnchors == null) { obstacleStableAnchors = WorldLyricsRenderer.probeAnchors(); return; }

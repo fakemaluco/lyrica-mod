@@ -62,6 +62,7 @@ public final class MusicService implements AutoCloseable {
     private final ReleaseSupport support;
     private final SpotifyAccountClient spotifyAccount;
     private volatile MusicSource lastSyncedSource;
+    private String spotifyBridgeKey;
     private volatile String lookupKey;
     private volatile String lookupTrackKey;
     private volatile long lookupCredentialGeneration;
@@ -102,11 +103,9 @@ public final class MusicService implements AutoCloseable {
             FanDroidMod.LOGGER.warn("Could not install the bundled media bridge", exception);
         }
         connector = MediaBridgeConnector.start(path);
-        spotifyAccount = new SpotifyAccountClient(preferences, this::update,
+        spotifyAccount = new SpotifyAccountClient(preferences, this::updateAccount,
                 () -> !hasPlayingNonSpotifyMedia());
-        connector.subscribe(value -> {
-            if (!spotifyAccount.shouldOverrideBridge()) update(value);
-        });
+        connector.subscribe(this::updateBridge);
         if (connector instanceof MediaBridgeConnector bridge) {
             bridge.subscribeAudio(overlay::setIslandAudioLevels);
             overlay.setIslandAudioDemand(bridge::setAudioLevelsEnabled);
@@ -169,6 +168,24 @@ public final class MusicService implements AutoCloseable {
     public boolean spotifyPlaybackActive() { return spotifyAccount.shouldOverrideBridge(); }
     public String spotifyTrackMatchStatus() { return spotifyAccount.matchStatus(); }
     public String spotifyAccountStatus() { return spotifyAccount.status(); }
+
+    private synchronized void updateAccount(PlaybackSnapshot value) {
+        if (value.title() != null && !value.title().isBlank() && !value.title().equals("Nothing playing")) {
+            if (spotifyAccount.shouldOverrideBridge()) update(value);
+        } else {
+            var fallback = connector.snapshot().getNow(value);
+            if (!spotifyAccount.shouldOverrideBridge() && snapshot.get() != fallback) update(fallback);
+        }
+    }
+
+    private synchronized void updateBridge(PlaybackSnapshot value) {
+        String next = spotifyMedia(value) ? value.title() + '\n' + value.artist() + '\n' + value.playing() : null;
+        if (!java.util.Objects.equals(spotifyBridgeKey, next)) {
+            spotifyBridgeKey = next;
+            spotifyAccount.requestPlaybackRefresh();
+        }
+        if (!spotifyAccount.shouldOverrideBridge()) update(value);
+    }
 
     private synchronized void update(PlaybackSnapshot value) {
         if (closed) return;
@@ -413,7 +430,7 @@ public final class MusicService implements AutoCloseable {
         if (!isCurrentLookup(key)) return;
         applySourceResult(key, result);
         if (preferences.getLyricsSources().contains("lrc_red")
-                && !hasWordTiming(overlay.document()) && !result.wordTimingAvailable()
+                && !hasWordTiming(overlay.sourceDocument()) && !result.wordTimingAvailable()
                 && !result.document().map(MusicService::hasWordTiming).orElse(false)) {
             var cached = modelSyncByTrack.get(lookupTrackKey);
             if (cached != null) {
@@ -432,7 +449,7 @@ public final class MusicService implements AutoCloseable {
     }
 
     private synchronized void finishModelSync(String key, MultiSourceLyricsClient.Result result) {
-        if (!isCurrentLookup(key) || !preferences.getLyricsSources().contains("lrc_red") || hasWordTiming(overlay.document())) return;
+        if (!isCurrentLookup(key) || !preferences.getLyricsSources().contains("lrc_red") || hasWordTiming(overlay.sourceDocument())) return;
         sourceDiagnostics += "\n" + result.diagnostics();
         if (result.document().filter(MusicService::hasWordTiming).isPresent()) {
             modelSyncByTrack.put(lookupTrackKey, result);
@@ -472,14 +489,14 @@ public final class MusicService implements AutoCloseable {
         boolean preferred = preferences.isPreferSpicyLyrics() && "spicy_lyrics".equals(result.sourceId());
         boolean lrcRedWord = "lrc_red".equals(result.sourceId()) && hasWordTiming(document);
         if (preferences.isPreferSpicyLyrics() && key.equals(preferredLyricsKey) && !preferred
-                && (!(modelUpgrade || lrcRedWord) || hasWordTiming(overlay.document()) || !hasWordTiming(document))) return;
+                && (!(modelUpgrade || lrcRedWord) || hasWordTiming(overlay.sourceDocument()) || !hasWordTiming(document))) return;
         if (preferred && key.equals(lrcRedWordKey) && !hasWordTiming(document)) return;
-        if (preferred && key.equals(preferredLyricsKey) && hasWordTiming(overlay.document()) && !hasWordTiming(document)) return;
+        if (preferred && key.equals(preferredLyricsKey) && hasWordTiming(overlay.sourceDocument()) && !hasWordTiming(document)) return;
         if (preferred) preferredLyricsKey = key;
         // A late line-only source must not replace word-synced companion/cache lyrics.
         if (!(preferences.isPreferSpicyLyrics() && "spicy_lyrics".equals(result.sourceId()))
-                && key.equals(spicyLyricsKey) && hasWordTiming(overlay.document()) && !hasWordTiming(document)) return;
-        if (overlay.document().equals(document)) return;
+                && key.equals(spicyLyricsKey) && hasWordTiming(overlay.sourceDocument()) && !hasWordTiming(document)) return;
+        if (overlay.sourceDocument().equals(document)) return;
         lrcRedWordKey = lrcRedWord ? key : null;
         spicyLyricsKey = key;
         lyricsStatus = "Lyrics ready";
@@ -501,11 +518,14 @@ public final class MusicService implements AutoCloseable {
     private boolean hasPlayingNonSpotifyMedia() {
         if (connector instanceof MediaBridgeConnector bridge && !bridge.bridgeAlive()) return false;
         PlaybackSnapshot media = connector.snapshot().getNow(PlaybackSnapshot.unavailable());
-        String app = java.util.Objects.toString(media.deviceName(), "").toLowerCase(Locale.ROOT);
-        boolean spotify = app.equals("spotify") || app.endsWith("spotify.exe") || app.startsWith("spotifyab.spotifymusic_");
-        return !spotify && media.playing() && media.title() != null && !media.title().isBlank()
+        return !spotifyMedia(media) && media.playing() && media.title() != null && !media.title().isBlank()
                 && !media.title().equals("Nothing playing") && media.observedAt() != null
                 && java.time.Duration.between(media.observedAt(), java.time.Instant.now()).abs().toSeconds() < 5;
+    }
+
+    private static boolean spotifyMedia(PlaybackSnapshot media) {
+        String app = java.util.Objects.toString(media.deviceName(), "").toLowerCase(Locale.ROOT);
+        return app.equals("spotify") || app.endsWith("spotify.exe") || app.startsWith("spotifyab.spotifymusic_");
     }
 
     private static boolean isSpotifyDjSpeaking(PlaybackSnapshot value) {
@@ -540,9 +560,9 @@ public final class MusicService implements AutoCloseable {
             audioDucking.tick(bridge, preferences, snapshot(), playbackMethod(), inWorld);
     }
     public void tickGeminiShaders() {
-        var current = overlay.document();
+        var current = overlay.sourceDocument();
         var translated = translations.tick(current);
-        if (translated != current && overlay.document() == current) overlay.setLyrics(translated);
+        if (translated != current && overlay.sourceDocument() == current) overlay.setLyrics(translated);
         support.tick(); geminiShaders.tick(snapshot.get(), clock.positionMillis(), artwork.accentColor());
         geminiLyrics.tick(snapshot.get(), overlay.document(), overlay.worldPlayback().positionMillis()); }
     public String pairingCode() {

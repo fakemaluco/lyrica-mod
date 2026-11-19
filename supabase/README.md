@@ -13,7 +13,8 @@ O mod usa a chave publicável do projeto. A chave administrativa permanece exclu
 4. `POST /sync` com `x-lyrica-session`: publica apenas metadados atuais quando necessário e consulta os UUIDs online. Sessão, jogador e sala são decididos pelo servidor. Dados enviados no corpo não podem reatribuir a identidade.
 5. Realtime Broadcast avisa as alterações, sem conter metadados musicais. O cliente solicita uma nova fotografia autenticada do estado; avisos falsos não se tornam músicas falsas.
 6. `POST /viewer` cria uma sessão de 30 minutos somente para leitura, para clientes sem autenticação Minecraft. O banco impede publicação mesmo que um cliente modificado tente forjar `write: true`.
-7. `POST /leave` revoga a sessão e remove a faixa em cascata.
+7. `POST /listen` usa a mesma sessão para publicar uma escuta iniciada com `/music listen share`, revogá-la ou consultar o estado atual. O anfitrião publica faixa, posição, pausa e fila do Spotify. O código de convite é armazenado como hash. A busca por UUID fica restrita à sala do cliente verificado. Cada publicação vence após 25 segundos.
+8. `POST /leave` revoga a sessão e remove a presença e o compartilhamento de escuta em cascata.
 
 As tabelas têm RLS e acesso direto negado a `anon` e `authenticated`; funções RPC são exclusivas de `service_role`. A função de borda é o único caminho de dados. Há limites de corpo, tamanhos, hosts de imagem, consultas e tentativas de autenticação. `pg_cron` limpa registros expirados a cada minuto.
 
@@ -27,7 +28,7 @@ Verificação local da função:
 
 ```powershell
 deno check supabase/functions/music-presence/index.ts
-deno test supabase/functions/music-presence/core_test.ts
+deno test supabase/functions/music-presence/core_test.ts supabase/functions/music-presence/listen_test.ts
 ```
 
 `tests/realtime_test.ts` usa sessões temporárias criadas por um administrador exclusivamente para QA. O arquivo de sessões fica em `build/`, ignorado pelo Git, e as sessões são revogadas ao terminar. Não existe endpoint de autenticação de teste na função publicada.

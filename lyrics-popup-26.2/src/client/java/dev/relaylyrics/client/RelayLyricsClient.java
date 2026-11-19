@@ -4,6 +4,7 @@ import dev.relaylyrics.FanDroidMod;
 import dev.relaylyrics.client.music.MusicService;
 import dev.relaylyrics.client.ui.LyricsConfigScreen;
 import dev.relaylyrics.client.ui.LyricsOverlay;
+import dev.relaylyrics.client.ui.UpdateIslandScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -48,6 +49,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
         GoogleFontManager.restore(preferences().getGoogleFontFamily(),
                 preferences().getLyricsFontWeight().cssWeight(), overlay::fontChanged);
         InventoryLyricsInteraction.register();
+        SettingsKeyBinding.register();
         MusicPresence.initialize();
         dev.relaylyrics.client.karaoke.KaraokeClient.initialize();
         WorldLyricsRenderHook.register();
@@ -58,6 +60,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
                         Minecraft.getInstance().execute(() -> {
                             dev.relaylyrics.client.ui.WorldTextMesh.clear();
                             overlay.fontChanged();
+                            dev.relaylyrics.client.karaoke.KaraokePlatform.fontChanged();
                             dev.relaylyrics.client.music.WorldGeminiRenderer.close();
                         });
                     }
@@ -71,6 +74,7 @@ public final class RelayLyricsClient implements ClientModInitializer {
         if (Boolean.getBoolean("lyrica.motionArtworkSelfTest"))
             ClientLifecycleEvents.CLIENT_STARTED.register(client -> effectsProbeArmed = true);
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (Boolean.getBoolean("lyrica.updateIslandSelfTest")) dev.relaylyrics.client.ui.UpdateIslandProbe.tick(client);
             if (effectsProbeArmed && client.gui.overlay() == null && ++effectsProbeTicks >= 10) {
                 effectsProbeArmed = false;
                 client.options.guiScale().set(1);
@@ -95,12 +99,15 @@ public final class RelayLyricsClient implements ClientModInitializer {
                 music.tickAudioDucking(client.level != null);
                 music.tickGeminiShaders();
                 if (client.player != null) {
-                    String version = music.support().takeNotification();
-                    if (!version.isBlank()) client.gui.hud.getChat().addClientSystemMessage(net.minecraft.network.chat.Component.translatable("config.relaylyrics.updates.notification", version));
+                    var update = music.support().takeNotification();
+                    if (update != null) UpdateIslandScreen.announce(music.support(), update);
                 }
             }
             dev.relaylyrics.client.karaoke.KaraokeClient.tick();
             MusicPresence.tick();
+            var statusServer = client.getCurrentServer();
+            StatusReporter.tick(client.player != null && client.level != null && client.getConnection() != null,
+                    statusServer == null ? null : statusServer.ip);
             dev.relaylyrics.client.ui.WorldLyricsProbe.tick(client);
             dev.relaylyrics.client.ui.WorldLyricsRenderer.tickPlayerMotion(client);
             dev.relaylyrics.client.ui.WorldTextMesh.tick();
@@ -116,9 +123,11 @@ public final class RelayLyricsClient implements ClientModInitializer {
             dev.relaylyrics.client.karaoke.KaraokePlatform.paintPopups(false);
             var screen = Minecraft.getInstance().gui.screen();
             if (screen == null) {
-                InventoryLyricsController.renderWorldHud(context);
+                boolean updateNotice = UpdateIslandScreen.hasNotice();
+                if (!updateNotice || !overlay.isPopupDocked()) InventoryLyricsController.renderWorldHud(context);
                 dev.relaylyrics.client.ui.GeminiWorldProbe.hud(context);
-                JadeIsland.render(context);
+                if (updateNotice) UpdateIslandScreen.renderNotice(context, -1, -1);
+                else JadeIsland.render(context);
             }
         });
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {

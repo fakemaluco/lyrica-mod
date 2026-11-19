@@ -791,6 +791,7 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
                 notice = "@config.relaylyrics.translation." + (removed ? "key_removed" : "key_failed"); rebuild();
             }
             case "updates_check" -> { if (music != null) music.support().check(); }
+            case "updates_review" -> UpdateIslandScreen.open(this);
             case "updates_open" -> browse(music == null ? java.net.URI.create("https://github.com/fakemaluco/lyrica-mod/releases") : music.support().releasePage());
             case "diagnostics_copy" -> { if (music != null) { copy(music.diagnosticReport()); notice = "@config.relaylyrics.support.copied"; } }
             case "bug_report" -> browse(java.net.URI.create("https://github.com/fakemaluco/lyrica-mod/issues/new"));
@@ -804,12 +805,6 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             case "background_style" -> { if (RelayLyricsClient.music() != null) RelayLyricsClient.music().refreshBackgroundArtwork(); }
             case "layout" -> { editing = true; rebuild(); }
             case "custom_effects" -> { category = Category.CUSTOM; scroll = 0; expandedChoice = ""; rebuild(); }
-            case "custom_world" -> {
-                category = Category.CUSTOM; scroll = 0; expandedChoice = ""; rebuild();
-                for (Row row : rows) if (row.entry.key.endsWith(".group.world")) {
-                    scroll = Math.clamp(row.offset, 0, maxScroll()); positionRows(); break;
-                }
-            }
             case "source" -> { if (music != null) music.syncMusicSource(); if (preferences.getMusicSource() == MusicSource.SPOTIFY_ACCOUNT) catalog.expand("spotify_account"); if (preferences.getMusicSource() == MusicSource.YOUTUBE_MUSIC) catalog.expand("youtube_account"); }
             case "spotify" -> openConnectionGroup("spotify_account");
             case "youtube" -> openConnectionGroup("youtube_account");
@@ -1061,9 +1056,8 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
         if (paintAlpha <= 0) return;
         if (bridgePrompt) { drawBridgePrompt(context); return; }
         if (colorEntry != null) { drawColorEditor(context); return; }
-        for (int spread = 12; spread >= 3; spread -= 3)
-            RoundedGui.smoothFill(context, modalX - spread, modalY - spread / 2, modalWidth + spread * 2,
-                    modalHeight + spread, 16, ink(0x08000000));
+        RoundedGui.smoothFill(context, modalX - 7, modalY - 3, modalWidth + 14,
+                modalHeight + 7, 16, ink(0x20000000));
         RoundedGui.smoothGradient(context, modalX, modalY, modalWidth, modalHeight, 16, FIELD, DEEP, sidebarWidth, 0x55231A39, paintAlpha);
         context.fill(paneX, modalY, paneX + 1, modalY + modalHeight, ink(HAIRLINE));
         RoundedGui.smoothOutline(context, modalX, modalY, modalWidth, modalHeight, 16, ink(0x28D9CAFF));
@@ -1152,10 +1146,10 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             mouseY = (int) Math.round(pointerY(mouseY));
             if (probeMouseX >= 0) { mouseX = probeMouseX; mouseY = probeMouseY; }
 
-            if (!editing) drawPopup(context);
+            if (!editing && (peeking || modalAlpha >= 1)) drawPopup(context);
             GuiTransform.nextLayer(context);
-            if (!editing && !peeking && modalAlpha > 0) blurSettingsBackdrop(context, delta);
-            context.fill(0, 0, width, height, SettingsMotion.opacity(0x48000000, peeking ? 0 : modalAlpha));
+            if (!peeking && modalAlpha > 0)
+                context.fill(0, 0, width, height, SettingsMotion.opacity(0x66000000, modalAlpha));
             GuiTransform.nextLayer(context);
             GuiTransform.push(context);
             try {
@@ -1446,11 +1440,27 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             if (!screen.catalog.categories().contains(Category.WORLD)) throw new IllegalStateException("World category must remain discoverable");
             Entry toggle = screen.catalog.entries(Category.WORLD).stream().filter(e -> e.key.endsWith(".world_lyrics")).findFirst().orElseThrow();
             toggle.activate.run();
-            if (screen.catalog.entries(Category.WORLD).size() != 7) throw new IllegalStateException("World page must have seven primary controls");
+            if (screen.catalog.entries(Category.WORLD).size() != 9) throw new IllegalStateException("World page must have nine primary controls");
             toggle.activate.run();
             if (screen.catalog.entries(Category.WORLD).size() != 1) throw new IllegalStateException("Disabled world controls remain visible");
         } finally { p.setWorldLyrics(original); }
     }
+    void verifyScrollbarInteraction() {
+        category = Category.CUSTOM;
+        for (String section : List.of("typography", "interaction", "effects", "background"))
+            catalog.expand(section);
+        rebuild();
+        scroll = 0; positionRows();
+        if (maxScroll() == 0) throw new IllegalStateException("Scrollbar fixture requires overflow");
+        int x = rowLeft + rowWidth + 7;
+        int y = scrollbarThumbY() + scrollbarThumb() / 2;
+        if (!handleMouseClicked(x, y, 0) || !handleMouseDragged(x, listBottom + 25, 0, 0, 25)
+                || scroll != maxScroll() || !handleMouseReleased(x, listBottom + 25, 0))
+            throw new IllegalStateException("Scrollbar thumb drag did not reach the bottom");
+        if (!handleMouseClicked(x, listTop + 1, 0) || scroll != 0 || !handleMouseReleased(x, listTop + 1, 0))
+            throw new IllegalStateException("Scrollbar track click did not return to the top");
+    }
+
     /** Called only by the opt-in screenshot fixture, using disposable preferences. */
     void configureProbe(String stage) {
         if (Boolean.getBoolean("lyrica.configAccordionSelfTest")) {
@@ -1523,15 +1533,19 @@ public final class LyricsConfigScreen extends FanDroidScreenBase implements Lyri
             case "appearance", "choices", "motion_artwork", "quality_choices" -> Category.APPEARANCE;
             case "connection" -> Category.CONNECTION;
             case "sources", "sources_end", "source_priority", "priority_choices", "compact_priority" -> Category.SOURCES;
-            case "updates", "support", "advanced", "experimental", "world_gemini_controls", "gemini_controls", "gemini_controls_lower", "gemini_controls_creative", "gemini_controls_art", "gemini_controls_actions" -> Category.ADVANCED;
+            case "updates", "support", "advanced", "experimental", "gemini_controls", "gemini_controls_lower", "gemini_controls_creative", "gemini_controls_art", "gemini_controls_actions" -> Category.ADVANCED;
             case "custom", "effects", "languages", "translation_provider" -> Category.CUSTOM;
-            case "world", "world_fixed" -> Category.WORLD;
+            case "world", "world_fixed", "world_gemini_controls" -> Category.WORLD;
             default -> Category.GENERAL;
         };
         if (stage.equals("motion_artwork")) catalog.expand("motion_artwork");
         if (stage.contains("priority")) catalog.expand("source_priority");
         if (stage.equals("experimental")) catalog.expand("experimental");
-        if (stage.equals("world_gemini_controls")) { catalog.expand("experimental"); catalog.expand("world_gemini"); }
+        if (stage.equals("world_gemini_controls")) {
+            preferences.setWorldLyrics(true);
+            catalog.expand("world");
+            catalog.expand("world_gemini");
+        }
         if (stage.startsWith("gemini_controls")) { catalog.expand("experimental"); catalog.expand("gemini_shader"); }
         if (stage.equals("effects")) catalog.expand("effects");
         if (stage.equals("languages") || stage.equals("translation_provider")) catalog.expand("languages");

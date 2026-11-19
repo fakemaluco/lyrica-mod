@@ -6,6 +6,7 @@ import org.bytedeco.javacv.FrameGrabber;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -68,14 +69,17 @@ public final class VideoLoop implements AutoCloseable {
     }
 
     public void setPlaying(boolean value, boolean pauseWhenStopped) {
+        if (playing == value && pauseWithMusic == pauseWhenStopped) return;
         playing = value;
         pauseWithMusic = pauseWhenStopped;
         synchronized (wake) { wake.notifyAll(); }
     }
 
     public void touchVisible() {
-        visibleUntil = System.nanoTime() + VISIBLE_GRACE;
-        synchronized (wake) { wake.notifyAll(); }
+        long now = System.nanoTime();
+        boolean wasVisible = now < visibleUntil;
+        visibleUntil = now + VISIBLE_GRACE;
+        if (!wasVisible) synchronized (wake) { wake.notifyAll(); }
     }
 
     /** A visible thumbnail can animate independently of music; ordinary draws revoke the lease. */
@@ -148,12 +152,15 @@ public final class VideoLoop implements AutoCloseable {
                     idleSince = 0;
                     long delay = nextFrame - System.nanoTime();
                     if (delay > 0) { await(Math.max(1, Math.min(40, delay / 1_000_000L))); continue; }
-                    Frame image = grabber.grabImage();
+                    long frameTime = System.nanoTime();
+                    boolean publish = first || sourceStep >= MIN_FRAME || frameTime >= nextPublish;
+                    // Inter-frame codecs still need the intervening frames, but those frames need no RGBA conversion.
+                    Frame image = grabber.grabFrame(false, true, publish, false, false);
                     if (image == null) {
                         // Both MP4 and finite HLS playlists repeat from their original first frame.
                         try {
                             grabber.setTimestamp(0, true);
-                            image = grabber.grabImage();
+                            image = grabber.grabFrame(false, true, publish, false, false);
                         } catch (Exception cannotSeekPlaylist) {
                             if (!first) break; // Reopen a finite, non-seekable HLS playlist.
                             throw cannotSeekPlaylist;
@@ -164,16 +171,14 @@ public final class VideoLoop implements AutoCloseable {
                         }
                     }
                     nextFrame = Math.max(nextFrame + sourceStep, System.nanoTime() - sourceStep);
-                    long now = System.nanoTime();
-                    if (paused()) continue;
-                    if (!first && now < nextPublish) continue;
+                    if (!publish || paused()) continue;
                     PixelFrame decoded = pixels(image, sequence.incrementAndGet());
                     if (closed || token != generation) break;
                     frame.set(decoded);
                     status = paused ? "Video paused" : "Video ready";
                     // Accumulated deadlines preserve ~24 fps for 25/30/60 fps sources instead
                     // of rounding each interval up to the source's next frame (which gave 15).
-                    nextPublish = Math.max(nextPublish + MIN_FRAME, now - MIN_FRAME);
+                    nextPublish = first ? frameTime + MIN_FRAME : Math.max(nextPublish + MIN_FRAME, frameTime - MIN_FRAME);
                     first = false;
                 }
             } catch (Exception | LinkageError failure) {
@@ -235,15 +240,12 @@ public final class VideoLoop implements AutoCloseable {
         int width = frame.imageWidth, height = frame.imageHeight;
         if (width <= 0 || height <= 0 || width > MAX_EDGE || height > MAX_EDGE)
             throw new IllegalArgumentException("Video decoder exceeded output dimensions");
-        ByteBuffer bytes = source.duplicate();
+        ByteBuffer bytes = source.duplicate().order(ByteOrder.BIG_ENDIAN);
         int[] result = new int[width * height];
         for (int y = 0; y < height; y++) {
-            int row = y * frame.imageStride;
-            for (int x = 0; x < width; x++) {
-                int at = row + x * 4;
-                result[y * width + x] = (bytes.get(at + 3) & 255) << 24
-                        | (bytes.get(at) & 255) << 16 | (bytes.get(at + 1) & 255) << 8 | bytes.get(at + 2) & 255;
-            }
+            int row = y * frame.imageStride, output = y * width;
+            for (int x = 0; x < width; x++)
+                result[output + x] = Integer.rotateRight(bytes.getInt(row + x * 4), 8);
         }
         return new PixelFrame(width, height, result, serial);
     }

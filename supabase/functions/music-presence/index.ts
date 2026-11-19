@@ -1,4 +1,7 @@
 import { UUID, text, cover, digest, random, validIdentity, verifiedProfile } from "./core.ts";
+import { listenParameters } from "./listen.ts";
+
+declare const EdgeRuntime: { waitUntil(task: Promise<unknown>): void } | undefined;
 
 const base = Deno.env.get("SUPABASE_URL")!;
 const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -25,6 +28,10 @@ async function notify(topic?: string): Promise<void> {
       body: JSON.stringify({ messages: [{ topic, event: "changed", payload: {}, private: false }] }),
       signal: AbortSignal.timeout(3000) });
   } catch { /* The periodic snapshot and TTL recover a dropped invalidation. */ }
+}
+async function invalidate(topic?: string): Promise<void> {
+  if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(notify(topic));
+  else await notify(topic);
 }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
@@ -98,12 +105,17 @@ Deno.serve(async req => {
       const result = await db("rpc/music_presence_sync", "POST", { p_token_hash: tokenHash,
         p_visible: [...new Set(body.visible)], p_write: body.write === true, p_sharing: body.sharing === true && !!title,
         p_title: title, p_artist: text(body.artist, 256), p_cover_url: cover(body.cover_url) });
-      if (result.changed) await notify(result.topic);
+      if (result.changed) await invalidate(result.topic);
       return json({ peers: result.peers });
+    }
+    if (route === "listen") {
+      const parameters = await listenParameters(body, tokenHash);
+      if (!parameters) throw new Failure(400, "invalid_listen_request");
+      return json(await db("rpc/music_listen_sync", "POST", parameters));
     }
     if (route === "leave") {
       const result = await db("rpc/music_presence_leave", "POST", { p_token_hash: tokenHash });
-      await notify(result?.topic); return json({ ok: true });
+      await invalidate(result?.topic); return json({ ok: true });
     }
     throw new Failure(404, "unknown_action");
   } catch (e) {

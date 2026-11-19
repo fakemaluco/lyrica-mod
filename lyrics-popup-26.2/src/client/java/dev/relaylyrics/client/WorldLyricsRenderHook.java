@@ -8,6 +8,15 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 public final class WorldLyricsRenderHook {
     private WorldLyricsRenderHook() { }
     public static net.minecraft.world.phys.Vec3 cameraPosition(net.minecraft.client.Minecraft client) { return client.gameRenderer.mainCamera().position(); }
+    public static double cameraFov(net.minecraft.client.Minecraft client) { return client.gameRenderer.mainCamera().getFov(); }
+    public static net.minecraft.world.phys.Vec3 cameraUp(net.minecraft.client.Minecraft client) {
+        var vector = client.gameRenderer.mainCamera().upVector();
+        return new net.minecraft.world.phys.Vec3(vector.x(), vector.y(), vector.z());
+    }
+    public static net.minecraft.world.phys.Vec3 cameraForward(net.minecraft.client.Minecraft client) {
+        var vector = client.gameRenderer.mainCamera().forwardVector();
+        return new net.minecraft.world.phys.Vec3(vector.x(), vector.y(), vector.z());
+    }
     public static net.minecraft.resources.Identifier defaultFont() { return net.minecraft.resources.Identifier.fromNamespaceAndPath("relaylyrics", "world"); }
     public static boolean gliding(net.minecraft.client.player.LocalPlayer player) { return player.isFallFlying(); }
 

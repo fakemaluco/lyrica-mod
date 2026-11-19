@@ -195,7 +195,7 @@ final class KaraokeHub {
             room.queueTask = null;
             queueReply(room, task.requester, task.id, task.action, result);
             if (Set.of("added", "jumped").contains(result.status()))
-                forMembers(room, message("queue_snapshot", "room", room.owner, "result", result));
+                forMembers(room, message("queue_snapshot", "room", room.owner, "generation", room.generation, "result", result));
             return;
         }
         if (op.equals("queue_request") && nearby) {

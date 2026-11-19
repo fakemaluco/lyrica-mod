@@ -19,7 +19,7 @@ public final class WorldTextMesh {
         Thread thread = new Thread(task, "lyrica-world-mesh"); thread.setDaemon(true); return thread;
     });
     private WorldTextMesh() { }
-    public static void clear() { CACHE.clear(); QUEUE.clear(); }
+    public static void clear() { CACHE.clear(); QUEUE.clear(); WorldLyricsOutline.clear(); }
 
     /** Opt-in integration probe requiring a real GL context and Minecraft's loaded fonts. */
     public static void verifyFontCapture() {
@@ -54,6 +54,7 @@ public final class WorldTextMesh {
 
     public static void tick() {
         var preferences = dev.relaylyrics.client.RelayLyricsClient.preferences();
+        WorldLyricsOutline.tick(preferences.isWorldLyrics() && preferences.isWorldLyricsOutline() && Minecraft.getInstance().level != null);
         if (!preferences.isWorldLyrics() && (dev.relaylyrics.client.MusicPresence.pinned() == null
                 || dev.relaylyrics.client.MusicPresence.track(dev.relaylyrics.client.MusicPresence.pinned()) == null)) { clear(); WorldGlyphAtlas.releaseSnapshots(); return; }
 

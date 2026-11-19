@@ -98,9 +98,9 @@ public final class WorldLyricsExperience {
         public Timeline(LyricsDocument document) {
             List<WorldLyricsPlan.WorldLine> sorted = new ArrayList<>();
             if (document != null && document.metadata().syncMode() != LyricsSyncMode.STATIC) {
-                if (document.groups().isEmpty()) document.lines().forEach(l -> sorted.add(new WorldLyricsPlan.WorldLine(l, LyricAlignment.NORMAL, false)));
+                if (document.groups().isEmpty()) document.lines().forEach(l -> sorted.add(new WorldLyricsPlan.WorldLine(l, LyricAlignment.NORMAL, l.background())));
                 else for (var group : document.groups()) {
-                    sorted.add(new WorldLyricsPlan.WorldLine(group.lead(), group.alignment(), false));
+                    sorted.add(new WorldLyricsPlan.WorldLine(group.lead(), group.alignment(), group.lead().background()));
                     group.backingVocals().forEach(l -> sorted.add(new WorldLyricsPlan.WorldLine(l, group.alignment(), true)));
                 }
             }

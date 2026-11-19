@@ -24,6 +24,9 @@ public final class PresencePlatform {
                 .executes(ctx -> MusicPresence.show(MinecraftClient.getInstance().getSession().getUsername()))
                 .then(ClientCommandManager.literal("listen")
                         .then(ClientCommandManager.literal("stop").executes(ctx -> KaraokeClient.stopListening()))
+                        .then(ClientCommandManager.literal("share").executes(ctx -> MusicPresence.shareListen(true)))
+                        .then(ClientCommandManager.literal("unshare").executes(ctx -> MusicPresence.shareListen(false)))
+                        .then(ClientCommandManager.literal("queue").executes(ctx -> MusicPresence.listenQueue()))
                         .then(ClientCommandManager.argument("host", StringArgumentType.string()).suggests((ctx, builder) -> {
                             for (String name : names())
                                 if (name.toLowerCase(Locale.ROOT).startsWith(builder.getRemainingLowerCase())) builder.suggest(name);

@@ -146,6 +146,14 @@ public final class LyricsEffectCache<K, T> implements AutoCloseable {
      * This method does not capture glyphs, blur masks or call graphics functions.
      */
     public Surface<T> request(K key, double blurRadius) {
+        return request(key, blurRadius, true);
+    }
+
+    public Surface<T> requestExact(K key, double blurRadius) {
+        return request(key, blurRadius, false);
+    }
+
+    private Surface<T> request(K key, double blurRadius, boolean allowNearbyRadius) {
         if (closed) return null;
         Objects.requireNonNull(key, "key");
         double radius = Double.isNaN(blurRadius) ? 0 : Math.max(0, Math.min(9, blurRadius));
@@ -153,10 +161,11 @@ public final class LyricsEffectCache<K, T> implements AutoCloseable {
         Variant existing = variants.get(variantKey);
         if (existing != null) {
             sources.get(key); // Update source recency along with variant recency.
-            return existing.surface != null ? existing.surface : nearestReady(existing.source, variantKey.radiusStep());
+            if (existing.surface != null) return existing.surface;
+            return allowNearbyRadius ? nearestReady(existing.source, variantKey.radiusStep()) : null;
         }
         Source<K> source = sources.get(key);
-        if (!makeVariantSlot()) return nearestReady(source, variantKey.radiusStep());
+        if (!makeVariantSlot()) return allowNearbyRadius ? nearestReady(source, variantKey.radiusStep()) : null;
         if (source == null) {
             if (!makeSourceSlot()) return null;
             source = new Source<>(key);
@@ -165,7 +174,7 @@ public final class LyricsEffectCache<K, T> implements AutoCloseable {
         }
         if (source.failed) return null;
         variants.put(variantKey, new Variant(variantKey, source));
-        return nearestReady(source, variantKey.radiusStep());
+        return allowNearbyRadius ? nearestReady(source, variantKey.radiusStep()) : null;
     }
 
     private Surface<T> nearestReady(Source<K> source, int radiusStep) {

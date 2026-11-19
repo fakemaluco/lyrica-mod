@@ -10,7 +10,35 @@ import static dev.relaylyrics.client.music.WorldLyricsPresentation.*;
 import static org.assertj.core.api.Assertions.*;
 
 class WorldLyricsRecoveryTest {
+    @Test void sideSlotsArePreferredWithCentralProbesStillAvailableInNarrowSpaces() {
+        for (int side : List.of(-1, 1)) {
+            var probes = WorldLyricsRecovery.readingProbes(8, 3, .8, side);
+            var first = probes.getFirst();
+            assertThat(first.distance()).isEqualTo(8);
+            assertThat(first.side() * side - first.width() / 2).isGreaterThan(.36);
+            assertThat(probes).anySatisfy(probe -> {
+                assertThat(probe.side()).isZero();
+                assertThat(probe.distance()).isLessThan(3);
+            });
+        }
+    }
+
     private static final long MS = 1_000_000L;
+
+    @Test void skySearchStartsAtTheSelectedMaximumAndKeepsItsLaneWhenItComesCloser() {
+        var range = new WorldLyricsSpace.DistanceRange(8, 32);
+        var left = WorldLyricsRecovery.skyProbes(range, 4, 1, -1);
+        var right = WorldLyricsRecovery.skyProbes(range, 4, 1, 1);
+        var finale = WorldLyricsRecovery.skyProbes(range, 4, 1, 0);
+        assertThat(left.getFirst().distance()).isEqualTo(32);
+        assertThat(left.getLast().distance()).isEqualTo(8);
+        assertThat(left).allMatch(probe -> probe.side() < 0 && range.clamp(probe.distance()) == probe.distance());
+        assertThat(right).allMatch(probe -> probe.side() > 0);
+        assertThat(finale).allMatch(probe -> probe.side() == 0);
+        assertThat(finale.getFirst().up()).isPositive();
+        assertThat(WorldLyricsRecovery.skyProbes(new WorldLyricsSpace.DistanceRange(12, 12), 4, 1, -1))
+                .hasSize(3).allMatch(probe -> probe.distance() == 12);
+    }
 
     @Test void missingBirthRecoversImmediatelyAndBacksOffAfterFailedSearch() {
         var monitor = new WorldLyricsRecovery.Monitor();
@@ -155,7 +183,8 @@ class WorldLyricsRecoveryTest {
     private static Cue cue(Composition composition, int count) {
         var words = IntStream.range(0, count).mapToObj(index -> new TimedWord(index * 500L,
                 (index + 1) * 500L, (index == 0 ? "" : " ") + "word" + index)).toList();
-        var line = new LyricLine(0, count * 500L, "sample phrase", words, "v1", false, null, null);
+        String text = words.stream().map(TimedWord::text).collect(java.util.stream.Collectors.joining());
+        var line = new LyricLine(0, count * 500L, text, words, "v1", false, null, null);
         return demonstration(new WorldLyricsPlan.WorldLine(line, LyricAlignment.NORMAL, false), composition);
     }
 }

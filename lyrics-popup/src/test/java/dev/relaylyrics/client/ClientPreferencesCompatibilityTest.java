@@ -6,6 +6,16 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 final class ClientPreferencesCompatibilityTest {
+    @Test void laterRemembersEachReleaseAcrossRestarts() throws Exception {
+        var preferences = new ClientPreferences();
+        assertThat(preferences.dismissUpdateVersion("0.9.5")).isTrue();
+        assertThat(preferences.dismissUpdateVersion("0.9.5")).isFalse();
+        preferences.dismissUpdateVersion("0.9.6-beta.1");
+        var restarted = ClientPreferences.decode(ProtocolCodec.mapper().writeValueAsBytes(preferences));
+        assertThat(restarted.isUpdateDismissed("0.9.5")).isTrue();
+        assertThat(restarted.isUpdateDismissed("0.9.6-beta.1")).isTrue();
+        assertThat(restarted.isUpdateDismissed("0.9.6")).isFalse();
+    }
     @Test
     void oldBackgroundPreferencesKeepTheirModeAndArtistChoiceSurvivesReload() throws Exception {
         var p = ProtocolCodec.mapper().readValue("{}", ClientPreferences.class);
@@ -92,7 +102,7 @@ final class ClientPreferencesCompatibilityTest {
         assertThat(preferences.isInventoryPopup()).isTrue();
         assertThat(preferences.isInventoryNowPlaying()).isTrue();
         assertThat(preferences.isModernMode()).isTrue();
-        assertThat(preferences.isWorldLyrics()).isFalse();
+        assertThat(preferences.isWorldLyrics()).isTrue();
         assertThat(preferences.getMusicSource()).isEqualTo(MusicSource.AUTOMATIC);
         assertThat(preferences.getLyricsRenderType()).isEqualTo(LyricsRenderType.NON_INTRUSIVE);
         assertThat(preferences.getLyricsWidth()).isEqualTo(210);
@@ -155,14 +165,14 @@ final class ClientPreferencesCompatibilityTest {
     }
 
     @Test
-    void persistsTheExperimentalWorldLyricsToggle() throws Exception {
-        ClientPreferences preferences = ProtocolCodec.mapper().readValue(
-                "{\"worldLyrics\":true}", ClientPreferences.class);
-
+    void enablesWorldLyricsByDefaultAndPreservesAnExplicitOptOut() throws Exception {
+        var mapper = ProtocolCodec.mapper();
+        var preferences = mapper.readValue("{}", ClientPreferences.class);
         assertThat(preferences.isWorldLyrics()).isTrue();
-        ClientPreferences restored = ProtocolCodec.mapper().readValue(
-                ProtocolCodec.mapper().writeValueAsBytes(preferences), ClientPreferences.class);
-        assertThat(restored.isWorldLyrics()).isTrue();
+
+        preferences.setWorldLyrics(false);
+        var restored = mapper.readValue(mapper.writeValueAsBytes(preferences), ClientPreferences.class);
+        assertThat(restored.isWorldLyrics()).isFalse();
     }
     @Test void islandDefaultsAndExplicitOptOutSurviveReload() throws Exception {
         var preferences=ProtocolCodec.mapper().readValue("{}",ClientPreferences.class);
@@ -173,5 +183,17 @@ final class ClientPreferencesCompatibilityTest {
         assertThat(restored.isIslandKawarpBackground()).isFalse(); assertThat(restored.isIslandVideoCover()).isFalse();
         assertThat(restored.isPopupDocked()).isFalse(); assertThat(restored.getLyricsTextScale()).isEqualTo(1.2);
         restored.resetLayout(); assertThat(restored.isPopupDocked()).isTrue();
+    }
+    @Test void worldOutlineStartsBlackAndSavesItsColorAndToggle() throws Exception {
+        var mapper = ProtocolCodec.mapper();
+        var preferences = mapper.readValue("{}", ClientPreferences.class);
+        assertThat(preferences.isWorldLyricsOutline()).isFalse();
+        assertThat(preferences.getWorldLyricsOutlineColor()).isZero();
+
+        preferences.setWorldLyricsOutline(true);
+        preferences.setWorldLyricsOutlineColor(0xFF39CF);
+        var restored = mapper.readValue(mapper.writeValueAsBytes(preferences), ClientPreferences.class);
+        assertThat(restored.isWorldLyricsOutline()).isTrue();
+        assertThat(restored.getWorldLyricsOutlineColor()).isEqualTo(0xFF39CF);
     }
 }

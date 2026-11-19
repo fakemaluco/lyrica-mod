@@ -8,6 +8,18 @@ import static dev.relaylyrics.client.music.WorldLyricsPresentation.*;
 import static org.assertj.core.api.Assertions.*;
 
 class WorldLyricsStageTest {
+    @Test void nearbyReadingGroupsShareASideAndSmallCameraTurnsKeepTheHeading() {
+        var cue = demonstration(source("uma", "frase"), Composition.COEXIST);
+        int first = WorldLyricsStage.readingSide(cue, 0, false);
+        assertThat(WorldLyricsStage.readingSide(cue, 1, false)).isEqualTo(first);
+        assertThat(WorldLyricsStage.readingSide(cue, 2, false)).isEqualTo(-first);
+        assertThat(WorldLyricsStage.readingSide(cue, 3, false)).isEqualTo(-first);
+        assertThat(WorldLyricsStage.readingSide(cue, 1, true)).isEqualTo(-first);
+        assertThat(WorldLyricsStage.readingSide(cue, 2, true)).isEqualTo(first);
+        assertThat(WorldLyricsStage.keepReadingHeading(Math.cos(Math.toRadians(15)))).isTrue();
+        assertThat(WorldLyricsStage.keepReadingHeading(Math.cos(Math.toRadians(32)))).isFalse();
+    }
+
     @Test void independentlyPlacedWordsUseFourLanesAndStableMildTransforms() {
         var source = source("I'm", "a", "loser", "today");
         var cue = demonstration(source, Composition.FALLING_WORDS);
@@ -110,6 +122,50 @@ class WorldLyricsStageTest {
             assertThat(WorldLyricsStage.topSideSign(group, 4)).isEqualTo(first);
             assertThat(WorldLyricsStage.topSideSign(group, 6)).isEqualTo(opposite);
         }
+    }
+
+    @Test void fastTravelBuildsShortWholeWordChunksWithoutChangingSourceTimingOrRtlOrder() {
+        var source = source("مرحبا", "بك", "في", "هذا", "العالم", "مع", "الأصدقاء");
+        var cue = demonstration(source, Composition.FALLING_WORDS);
+        var tokens = WorldLyricsPlan.tokens(source.line(), false);
+        var originalEnds = cue.groupEnds();
+        for (var mode : List.of(WorldLyricsContext.Mode.SPRINT, WorldLyricsContext.Mode.FLIGHT)) {
+            var context = new WorldLyricsContext.Snapshot(mode, 10, 0, 1, 0, 0);
+            var groups = WorldLyricsStage.groups(cue, tokens, Intensity.DISCREET, context);
+            assertThat(groups).hasSize(3);
+            assertThat(groups).extracting(WorldLyricsStage.Group::index).containsExactly(0, 1, 2);
+            var rebuilt = new ArrayList<WorldLyricsPlan.Token>();
+            for (var group : groups) {
+                var subset = tokens.subList(group.firstToken(), group.endToken());
+                assertThat(subset.stream().filter(WorldLyricsPlan.Token::startsWord).count()).isBetween(2L, 3L);
+                rebuilt.addAll(subset);
+            }
+            assertThat(rebuilt).containsExactlyElementsOf(tokens);
+            assertThat(groups).isEqualTo(WorldLyricsStage.groups(cue, tokens, Intensity.DISCREET, context));
+        }
+        assertThat(cue.groupEnds()).isSameAs(originalEnds);
+        assertThat(tokens).extracting(WorldLyricsPlan.Token::startMillis).containsExactly(0L, 500L, 1000L, 1500L, 2000L, 2500L, 3000L);
+    }
+
+    @Test void fastTravelKeepsTimedSyllablesTogetherAndDoesNotInventUntimedWordTimings() {
+        var line = new LyricLine(0, 2_000, "hello beautiful world", List.of(new TimedWord(0, 250, "hel"),
+                new TimedWord(250, 500, "lo", true), new TimedWord(500, 1_250, " beautiful"),
+                new TimedWord(1_250, 2_000, " world")), "v1", false, null, null);
+        var source = new WorldLyricsPlan.WorldLine(line, LyricAlignment.NORMAL, false);
+        var cue = demonstration(source, Composition.FALLING_WORDS);
+        var context = new WorldLyricsContext.Snapshot(WorldLyricsContext.Mode.FLIGHT, 30, 0, 1, 0, 0);
+        var tokens = WorldLyricsPlan.tokens(line, false);
+        var groups = WorldLyricsStage.groups(cue, tokens, Intensity.DISCREET, context);
+        assertThat(groups).hasSize(1);
+        assertThat(groups.getFirst().firstToken()).isZero();
+        assertThat(groups.getFirst().endToken()).isEqualTo(4);
+        assertThat(source.line()).isSameAs(line);
+        var untimed = new LyricLine(0, 10_000, "a long line with only line timing", List.of(), "v1", false, null, null);
+        var untimedCue = demonstration(new WorldLyricsPlan.WorldLine(untimed, LyricAlignment.NORMAL, false), Composition.PROGRESSIVE);
+        var untimedTokens = WorldLyricsPlan.tokens(untimed, false);
+        assertThat(WorldLyricsStage.groups(untimedCue, untimedTokens, Intensity.DISCREET, context)).hasSize(1);
+        assertThat(untimedTokens).hasSize(1);
+        assertThat(untimedTokens.getFirst().endMillis()).isEqualTo(10_000);
     }
 
     private static WorldLyricsPlan.WorldLine source(String... text) {

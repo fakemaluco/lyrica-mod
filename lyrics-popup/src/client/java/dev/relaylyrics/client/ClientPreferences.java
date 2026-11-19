@@ -56,7 +56,7 @@ public final class ClientPreferences {
         return lineLyricsAnimation == null ? LineLyricsAnimation.TOP_TO_BOTTOM : lineLyricsAnimation;
     }
     public void setLineLyricsAnimation(LineLyricsAnimation value) { lineLyricsAnimation = value; }
-    private boolean romanizationUnderLine = true;
+    private boolean romanizationUnderLine;
     private boolean automaticTranslation;
     private String translationLanguage = java.util.Locale.getDefault().getLanguage();
     private String translationProvider = "Google";
@@ -64,6 +64,8 @@ public final class ClientPreferences {
     private String translationModel = "", translationGeminiModel = "";
     private boolean motionVideos = true;
     private boolean updateChecks = true, updatePrereleases;
+    @com.fasterxml.jackson.annotation.JsonProperty
+    private java.util.Set<String> dismissedUpdateVersions = new java.util.LinkedHashSet<>();
     public boolean isRomanizationUnderLine() { return romanizationUnderLine; }
     public void setRomanizationUnderLine(boolean value) { romanizationUnderLine = value; }
     public boolean isAutomaticTranslation() { return automaticTranslation; }
@@ -89,6 +91,14 @@ public final class ClientPreferences {
     public void setUpdateChecks(boolean value) { updateChecks = value; }
     public boolean isUpdatePrereleases() { return updatePrereleases; }
     public void setUpdatePrereleases(boolean value) { updatePrereleases = value; }
+    public boolean isUpdateDismissed(String version) {
+        return dismissedUpdateVersions != null && dismissedUpdateVersions.contains(version);
+    }
+    public boolean dismissUpdateVersion(String version) {
+        if (version == null || version.isBlank()) return false;
+        if (dismissedUpdateVersions == null) dismissedUpdateVersions = new java.util.LinkedHashSet<>();
+        return dismissedUpdateVersions.add(version);
+    }
 
     private dev.relaylyrics.client.music.WorldLyricsExperience.Style worldLyricsStyle;
     private dev.relaylyrics.client.music.WorldLyricsExperience.RenderMode worldLyricsRenderMode;
@@ -152,7 +162,7 @@ public final class ClientPreferences {
 
     private boolean islandKawarpBackground = true, islandVideoCover = true;
     private boolean jadeIsland = true;
-    private boolean islandLyrics;
+    private boolean islandLyrics = true;
     public boolean isIslandLyrics() { return islandLyrics; }
     public void setIslandLyrics(boolean value) { islandLyrics=value; }
     public boolean isJadeIsland() { return jadeIsland; }
@@ -233,6 +243,7 @@ public final class ClientPreferences {
     private LyricsEffectsMode lyricsEffects = LyricsEffectsMode.AUTO;
     private boolean lyricsTranslation = true;
     private boolean lyricsRomanization = true;
+    private boolean parentheticalBackingVocals = true;
     private double lyricsTextScale = 0.6;
     private LyricsFont lyricsFont = LyricsFont.MINECRAFT;
     private String googleFontFamily = "";
@@ -257,6 +268,9 @@ public final class ClientPreferences {
     private int lyricsX = 24;
     private int lyricsY = 24;
     private boolean musicPresenceEnabled = true;
+    private boolean publicStatusMetrics = true;
+    public boolean isPublicStatusMetrics() { return publicStatusMetrics; }
+    public void setPublicStatusMetrics(boolean value) { publicStatusMetrics = value; }
     private boolean musicPresenceSharing = true;
     public boolean isMusicPresenceEnabled() { return musicPresenceEnabled; }
     public void setMusicPresenceEnabled(boolean value) { musicPresenceEnabled = value; }
@@ -279,14 +293,11 @@ public final class ClientPreferences {
     private boolean lyricsReactiveBackground;
     private ReactiveSource lyricsReactiveSource = ReactiveSource.WORDS;
     private double lyricsReactiveIntensity = 1.0;
-    private boolean lyricsReactiveHue = true;
-    private double lyricsReactiveHueAmount = 80;
-    private boolean lyricsReactiveHueAuto;
     private boolean lyricsReactiveBloom = true;
     private double lyricsReactiveBloomAmount = 100;
     private boolean lyricsReactiveSpectral;
     private double lyricsReactiveSpectralAmount = 100;
-    private boolean worldLyrics;
+    private boolean worldLyrics = true;
     private WorldIntensity worldLyricsIntensity = WorldIntensity.NORMAL;
     private boolean worldLyricsPlayerReactions = true;
     private double worldLyricsSize = 1.2;
@@ -299,7 +310,8 @@ public final class ClientPreferences {
     private String duckingApplication = "";
     private double duckingVolume = .30;
     private boolean worldLyricsCinematic;
-    private boolean worldLyricsVolumetric;
+    private boolean worldLyricsVolumetric = true;
+    private WorldLyricsPresentation.Reveal worldLyricsReveal = WorldLyricsPresentation.Reveal.PHRASE_AND_WORD;
     private WorldLyricsPresentation.Direction worldLyricsDirection = WorldLyricsPresentation.Direction.AUTOMATIC;
     private WorldLyricsPresentation.Intensity worldLyricsPresentationIntensity = WorldLyricsPresentation.Intensity.DISCREET;
     private boolean worldLyricsGeminiFont;
@@ -329,6 +341,8 @@ public final class ClientPreferences {
     private boolean worldLyricsTrails;
     private int worldLyricsSideColor = 0x56647A;
     private int worldLyricsFaceColor = 0xFFFFFF;
+    private boolean worldLyricsOutline;
+    private int worldLyricsOutlineColor = 0x000000;
     private boolean lyricsAnimations = true;
     private int lyricsAnimationFrameRate;
     private boolean lyricsLoadingSkeleton;
@@ -412,6 +426,8 @@ public final class ClientPreferences {
     public void setLyricsTranslation(boolean value) { lyricsTranslation = value; }
     public boolean isLyricsRomanization() { return lyricsRomanization; }
     public void setLyricsRomanization(boolean value) { lyricsRomanization = value; }
+    public boolean isParentheticalBackingVocals() { return parentheticalBackingVocals; }
+    public void setParentheticalBackingVocals(boolean value) { parentheticalBackingVocals = value; }
     public double getLyricsTextScale() { return Math.clamp(lyricsTextScale, 0.6, 1.8); }
     public void setLyricsTextScale(double value) { lyricsTextScale = Math.clamp(value, 0.6, 1.8); }
     public LyricsFont getLyricsFont() {
@@ -557,16 +573,6 @@ public final class ClientPreferences {
     public void setLyricsReactiveIntensity(double value) {
         lyricsReactiveIntensity = Math.clamp(value, 0.25, 3.0);
     }
-    public boolean isLyricsReactiveHue() { return lyricsReactiveHue; }
-    public void setLyricsReactiveHue(boolean value) { lyricsReactiveHue = value; }
-    public double getLyricsReactiveHueAmount() {
-        return Math.clamp(lyricsReactiveHueAmount, 0, 180);
-    }
-    public void setLyricsReactiveHueAmount(double value) {
-        lyricsReactiveHueAmount = Math.clamp(value, 0, 180);
-    }
-    public boolean isLyricsReactiveHueAuto() { return lyricsReactiveHueAuto; }
-    public void setLyricsReactiveHueAuto(boolean value) { lyricsReactiveHueAuto = value; }
     public boolean isLyricsReactiveBloom() { return lyricsReactiveBloom; }
     public void setLyricsReactiveBloom(boolean value) { lyricsReactiveBloom = value; }
     public double getLyricsReactiveBloomAmount() {
@@ -595,7 +601,6 @@ public final class ClientPreferences {
 
     static ClientPreferences decode(byte[] bytes) throws java.io.IOException {
         var json = ProtocolCodec.mapper().readTree(bytes);
-        if (!json.has("romanizationUnderLine")) ((com.fasterxml.jackson.databind.node.ObjectNode) json).put("romanizationUnderLine", false);
         if ("SPICETIFY_BRIDGE".equals(json.path("musicSource").asText())) {
             ((com.fasterxml.jackson.databind.node.ObjectNode) json).put("musicSource", MusicSource.AUTOMATIC.name());
         }
@@ -639,6 +644,10 @@ public final class ClientPreferences {
         return worldLyricsDirection == null ? WorldLyricsPresentation.Direction.AUTOMATIC : worldLyricsDirection;
     }
     public void setWorldLyricsDirection(WorldLyricsPresentation.Direction value) { worldLyricsDirection = value; }
+    public WorldLyricsPresentation.Reveal getWorldLyricsReveal() {
+        return worldLyricsReveal == null ? WorldLyricsPresentation.Reveal.PHRASE_AND_WORD : worldLyricsReveal;
+    }
+    public void setWorldLyricsReveal(WorldLyricsPresentation.Reveal value) { worldLyricsReveal = value; }
     public WorldLyricsPresentation.Intensity getWorldLyricsPresentationIntensity() {
         return worldLyricsPresentationIntensity == null ? WorldLyricsPresentation.Intensity.DISCREET : worldLyricsPresentationIntensity;
     }
@@ -783,6 +792,10 @@ public final class ClientPreferences {
     public void setWorldLyricsTrails(boolean value) { worldLyricsTrails = value; }
     public int getWorldLyricsSideColor() { return worldLyricsSideColor & 0xFFFFFF; }
     public void setWorldLyricsSideColor(int value) { worldLyricsSideColor = value & 0xFFFFFF; }
+    public boolean isWorldLyricsOutline() { return worldLyricsOutline; }
+    public void setWorldLyricsOutline(boolean value) { worldLyricsOutline = value; }
+    public int getWorldLyricsOutlineColor() { return worldLyricsOutlineColor & 0xFFFFFF; }
+    public void setWorldLyricsOutlineColor(int value) { worldLyricsOutlineColor = value & 0xFFFFFF; }
     public int getWorldLyricsFaceColor() { return worldLyricsFaceColor & 0xFFFFFF; }
     public void setWorldLyricsFaceColor(int value) { worldLyricsFaceColor = value & 0xFFFFFF; }
 

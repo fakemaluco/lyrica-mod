@@ -51,6 +51,7 @@ val prepareSharedClientJava by tasks.registering(Sync::class) {
         include("dev/relaylyrics/mixin/SimpleVoiceDuckingMixin.java")
         include("dev/relaylyrics/mixin/PlasmoVoiceDuckingMixin.java")
         include("dev/relaylyrics/client/MusicPresence.java")
+        include("dev/relaylyrics/client/StatusReporter.java")
         include("dev/relaylyrics/client/presence/**")
         include("dev/relaylyrics/client/karaoke/KaraokeClient.java")
         include("dev/relaylyrics/client/karaoke/KaraokePopup.java")

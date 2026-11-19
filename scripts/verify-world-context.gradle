@@ -1,0 +1,14 @@
+// Local synthetic lyrics and terrain, only in the disposable LyricaWorldQA world.
+allprojects {
+    tasks.withType(JavaExec).configureEach {
+        if (name == 'runClient') {
+            systemProperty 'lyrica.worldExperienceSelfTest', 'true'
+            systemProperty 'lyrica.worldContextSelfTest', 'true'
+            systemProperty 'lyrica.worldPresentationStage', providers.gradleProperty('worldStage').getOrElse('0')
+            systemProperty 'lyrica.worldFrameBenchmark', providers.gradleProperty('worldBenchmark').getOrElse('false')
+            systemProperty 'lyrica.worldBenchmarkFrames', providers.gradleProperty('worldBenchmarkFrames').getOrElse('2000')
+            systemProperty 'lyrica.worldProbeOutput', rootProject.layout.buildDirectory.dir('world-context-qa').get().asFile.absolutePath
+            args '--width', '1280', '--height', '720', '--quickPlaySingleplayer', 'LyricaWorldQA'
+        }
+    }
+}

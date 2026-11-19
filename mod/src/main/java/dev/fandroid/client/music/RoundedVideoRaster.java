@@ -4,12 +4,12 @@ package dev.fandroid.client.music;
 public final class RoundedVideoRaster {
     private final int sourceWidth, sourceHeight, width, height;
     private final int[] x0, x1, y0, y1, alpha;
-    private final double[] tx, ty;
+    private final int[] tx, ty;
     private final boolean canvasSurface;
     private final int blurRadius;
-    private final double blurMix;
+    private final int blurMix;
     private final int[] blurA, blurB;
-    private final double[] shade;
+    private final int[] shade;
     public int width() { return width; }
     public int height() { return height; }
     public RoundedVideoRaster(int sourceWidth, int sourceHeight, int logicalWidth, int logicalHeight, int radius, double density) {
@@ -22,27 +22,30 @@ public final class RoundedVideoRaster {
         if (sourceWidth <= 0 || sourceHeight <= 0 || logicalWidth <= 0 || logicalHeight <= 0) throw new IllegalArgumentException("Invalid video bounds");
         this.sourceWidth = sourceWidth; this.sourceHeight = sourceHeight;
         this.canvasSurface = canvasSurface;
-        double ppu = Math.max(.05, Math.min(density, Math.min(1024.0 / logicalWidth, 1024.0 / logicalHeight)));
+        int maxEdge = Math.min(1024, Math.max(256, Math.max(sourceWidth, sourceHeight)));
+        double ppu = Math.min(Math.max(.05, density), maxEdge / (double) Math.max(logicalWidth, logicalHeight));
         width = Math.max(1, (int) Math.ceil(logicalWidth * ppu)); height = Math.max(1, (int) Math.ceil(logicalHeight * ppu));
-        x0 = new int[width]; x1 = new int[width]; tx = new double[width];
-        y0 = new int[height]; y1 = new int[height]; ty = new double[height]; alpha = new int[width * height];
+        x0 = new int[width]; x1 = new int[width]; tx = new int[width];
+        y0 = new int[height]; y1 = new int[height]; ty = new int[height]; alpha = new int[width * height];
         double fit = Math.max(logicalWidth / (double) sourceWidth, logicalHeight / (double) sourceHeight);
         blurRadius = Math.clamp((int) Math.ceil(1.4 / fit), 1, 4);
-        blurMix = Math.min(1, 1.4 / (fit * blurRadius));
+        blurMix = (int) Math.round(256 * Math.min(1, 1.4 / (fit * blurRadius)));
         blurA = canvasSurface && soften ? new int[sourceWidth * sourceHeight] : null;
         blurB = canvasSurface && soften ? new int[sourceWidth * sourceHeight] : null;
-        shade = new double[height];
-        for (int y = 0; y < height; y++) shade[y] = canvasSurface ? 1 - .44 * smooth((y / (double) height - .55) / .45) : 1;
+        shade = new int[height];
+        for (int y = 0; y < height; y++)
+            shade[y] = canvasSurface ? (int) Math.round(256 * (1 - .44 * smooth((y / (double) height - .55) / .45))) : 256;
         double cropW = logicalWidth / fit, cropH = logicalHeight / fit;
         for (int x = 0; x < width; x++) {
             double u = (sourceWidth - cropW) / 2 + (x + .5) / width * cropW - .5;
-            int base = (int) Math.floor(u); tx[x] = u - base;
+            int base = (int) Math.floor(u); tx[x] = (int) Math.round((u - base) * 256);
             x0[x] = Math.clamp(base, 0, sourceWidth - 1); x1[x] = Math.clamp(base + 1, 0, sourceWidth - 1);
         }
         for (int y = 0; y < height; y++) {
             double v = (sourceHeight - cropH) / 2 + (y + .5) / height * cropH - .5;
-            int base = (int) Math.floor(v); ty[y] = v - base;
-            y0[y] = Math.clamp(base, 0, sourceHeight - 1); y1[y] = Math.clamp(base + 1, 0, sourceHeight - 1);
+            int base = (int) Math.floor(v); ty[y] = (int) Math.round((v - base) * 256);
+            y0[y] = sourceWidth * Math.clamp(base, 0, sourceHeight - 1);
+            y1[y] = sourceWidth * Math.clamp(base + 1, 0, sourceHeight - 1);
         }
         double r = Math.min(radius * ppu, Math.min(width, height) / 2.0);
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
@@ -56,35 +59,48 @@ public final class RoundedVideoRaster {
     public void render(int[] source, int[] output) {
         if (source.length != sourceWidth * sourceHeight || output.length != width * height) throw new IllegalArgumentException("Invalid frame dimensions");
         if (canvasSurface && blurA!=null) {
-            blur(source, blurA, true); blur(blurA, blurB, false);
-            for (int i = 0; i < blurB.length; i++) {
-                int mixed = 0;
-                for (int shift = 0; shift <= 24; shift += 8) {
-                    int original = source[i] >>> shift & 255;
-                    mixed |= (int) Math.round(original + ((blurB[i] >>> shift & 255) - original) * blurMix) << shift;
-                }
-                blurB[i] = mixed;
-            }
+            blur(source, blurA, sourceWidth, sourceHeight, blurRadius, true);
+            blur(blurA, blurB, sourceWidth, sourceHeight, blurRadius, false);
+            for (int i = 0; i < blurB.length; i++) blurB[i] = mix(source[i], blurB[i], blurMix);
             source = blurB;
         }
         for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
-            int a = source[y0[y] * sourceWidth + x0[x]], b = source[y0[y] * sourceWidth + x1[x]];
-            int c = source[y1[y] * sourceWidth + x0[x]], d = source[y1[y] * sourceWidth + x1[x]];
-            int color = 0;
-            for (int shift = 0; shift <= 24; shift += 8) {
-                double top = (a >>> shift & 255) + ((b >>> shift & 255) - (a >>> shift & 255)) * tx[x];
-                double bottom = (c >>> shift & 255) + ((d >>> shift & 255) - (c >>> shift & 255)) * tx[x];
-                int channel = (int) Math.round(top + (bottom - top) * ty[y]);
-                if (shift == 24) channel = channel * alpha[y * width + x] / 255;
-                else channel = (int) Math.round(channel * shade[y]);
-                color |= channel << shift;
+            int index = y * width + x;
+            int mask = alpha[index];
+            if (mask == 0) {
+                output[index] = 0;
+                continue;
             }
-            output[y * width + x] = color;
+            int top = mix(source[y0[y] + x0[x]], source[y0[y] + x1[x]], tx[x]);
+            int bottom = mix(source[y1[y] + x0[x]], source[y1[y] + x1[x]], tx[x]);
+            int color = mix(top, bottom, ty[y]);
+            int opacity = (color >>> 24) * mask / 255;
+            int rgb = shade[y] == 256 ? color : mix(0, color, shade[y]);
+            output[index] = opacity << 24 | rgb & 0xFFFFFF;
         }
     }
     private static double smooth(double value) { double t = Math.clamp(value, 0, 1); return t * t * (3 - 2 * t); }
     /** Sliding windows keep the source softening linear in the decoded frame size. */
-    private void blur(int[] input, int[] output, boolean horizontal) {
+    private static int mix(int first, int second, int weight) {
+        // Two channels fit in each product because their weights are 16 bits apart.
+        int inverse = 256 - weight;
+        int lanes = 0x00FF00FF;
+        int rb = ((first & lanes) * inverse + (second & lanes) * weight + 0x00800080) >>> 8;
+        int ag = ((first >>> 8 & lanes) * inverse + (second >>> 8 & lanes) * weight + 0x00800080) >>> 8;
+        return (rb & lanes) | (ag & lanes) << 8;
+    }
+
+    public static void renderAmbient(int[] source, int width, int height, int size, int[] output, int[] scratch) {
+        for (int y = 0; y < size; y++) {
+            int row = (y * height / size) * width;
+            for (int x = 0; x < size; x++) scratch[y * size + x] = source[row + x * width / size] | 0xFF000000;
+        }
+        blur(scratch, output, size, size, 4, true);
+        blur(output, scratch, size, size, 4, false);
+        blur(scratch, output, size, size, 4, true);
+    }
+
+    private static void blur(int[] input, int[] output, int sourceWidth, int sourceHeight, int blurRadius, boolean horizontal) {
         int lines = horizontal ? sourceHeight : sourceWidth, length = horizontal ? sourceWidth : sourceHeight;
         int step = horizontal ? 1 : sourceWidth, count = blurRadius * 2 + 1;
         for (int line = 0; line < lines; line++) {

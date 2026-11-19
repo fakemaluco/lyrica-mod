@@ -197,6 +197,7 @@ public final class LyricsSettingsCatalog {
                     info("music_presence.status", () -> actions.status("music_presence"));
                 }
                 if (group("connection_details")) {
+                    toggle("status_metrics", p::isPublicStatusMetrics, p::setPublicStatusMetrics);
                     info("connection.method", () -> actions.status("method"));
                     info("connection.lyrics", () -> actions.status("lyrics"));
                     action("reload", "reload.button", () -> actions.run("retry"));
@@ -251,6 +252,7 @@ public final class LyricsSettingsCatalog {
                     if (enabled) p.enableWorldLyricsWithModernDefaults(); else p.setWorldLyrics(false);
                 }).changesStructure = true;
                 if (p.isWorldLyrics()) {
+                    choice("world_reveal", WorldLyricsPresentation.Reveal.values(), p::getWorldLyricsReveal, p::setWorldLyricsReveal);
                     choice("world_presentation_intensity", WorldLyricsPresentation.Intensity.values(), p::getWorldLyricsPresentationIntensity, p::setWorldLyricsPresentationIntensity);
                     toggle("world_reposition", p::isWorldLyricsReposition, p::setWorldLyricsReposition);
                     toggle("world_cinematic", p::isWorldLyricsCinematic, p::setWorldLyricsCinematic);
@@ -260,7 +262,7 @@ public final class LyricsSettingsCatalog {
                     distance.min = 3; distance.max = 256; distance.step = 1;
                     distance.number = p::getWorldLyricsMinimumDistance; distance.setNumber = p::setWorldLyricsMinimumDistance;
                     distance.upperNumber = p::getWorldLyricsMaximumDistance; distance.setUpperNumber = p::setWorldLyricsMaximumDistance;
-                    action("world_customize", "customize.button", () -> { expanded.add("world"); actions.run("custom_world"); });
+                    if (group("world")) worldCustomization();
                 }
             }
         }
@@ -286,6 +288,8 @@ public final class LyricsSettingsCatalog {
             toggle("updates.prereleases", p::isUpdatePrereleases, p::setUpdatePrereleases);
             info("updates.status", () -> actions.status("updates"));
             action("updates.check", "updates.check.button", () -> actions.run("updates_check"));
+            if (!actions.status("update_available").isBlank())
+                action("updates.review", "updates.review.button", () -> actions.run("updates_review"));
             action("updates.open", "updates.open.button", () -> actions.run("updates_open"));
         }
         if (group("support")) {
@@ -302,20 +306,6 @@ public final class LyricsSettingsCatalog {
             action("restore_performance", "restore", () -> restore("performance"));
         }
         if (group("experimental")) {
-            if (group("world_gemini")) {
-                info("world_gemini.privacy", () -> "@" + PREFIX + "world_gemini.privacy.value");
-                toggle("world_gemini.enabled", () -> p.getWorldLyricsDirection() == WorldLyricsPresentation.Direction.GEMINI,
-                        enabled -> p.setWorldLyricsDirection(enabled ? WorldLyricsPresentation.Direction.GEMINI : WorldLyricsPresentation.Direction.AUTOMATIC));
-                input("world_gemini.key", () -> actions.status("world_gemini_key_input"), value -> actions.input("world_gemini_key", value), true);
-                info("world_gemini.key_status", () -> actions.status("world_gemini_key_status"));
-                action("world_gemini.key_save", "gemini.key_save.button", () -> actions.run("world_gemini_key_save"));
-                action("world_gemini.key_remove", "gemini.key_remove.button", () -> actions.run("world_gemini_key_remove"));
-                toggle("world_gemini.song_font", p::isWorldLyricsGeminiFont, p::setWorldLyricsGeminiFont);
-                input("world_gemini.model", p::getWorldLyricsGeminiModel, p::setWorldLyricsGeminiModel, false);
-                input("world_gemini.direction", p::getWorldLyricsGeminiDirection, p::setWorldLyricsGeminiDirection, false);
-                info("world_gemini.status", () -> actions.status("world_gemini_status"));
-                action("world_gemini.regenerate", "world_gemini.regenerate.button", () -> actions.run("world_gemini_regenerate"));
-            }
             if (group("gemini_shader")) {
                 info("gemini.privacy", () -> "@" + PREFIX + "gemini.privacy.value");
                 toggle("gemini.enabled", p::isGeminiShaderEnabled, p::setGeminiShaderEnabled);
@@ -356,6 +346,7 @@ public final class LyricsSettingsCatalog {
 
     private void custom() {
         if (group("languages")) {
+            toggle("parenthetical_backing_vocals", p::isParentheticalBackingVocals, p::setParentheticalBackingVocals);
             toggle("romanization", p::isLyricsRomanization, p::setLyricsRomanization);
             indexed("romanization.mode", List.of("romanization.mode.replace", "romanization.mode.under"),
                     () -> p.isRomanizationUnderLine() ? 1 : 0, n -> p.setRomanizationUnderLine(n == 1));
@@ -439,11 +430,6 @@ public final class LyricsSettingsCatalog {
                 choice("reactive_source", ClientPreferences.ReactiveSource.values(), p::getLyricsReactiveSource, p::setLyricsReactiveSource).changesStructure = true;
                 if (p.getLyricsReactiveSource() != ClientPreferences.ReactiveSource.WORDS) action("reactive_output_reload", "reactive_output_reload.button", () -> actions.run("audio"));
                 percent("reactive_intensity", .25, 3, .05, p::getLyricsReactiveIntensity, p::setLyricsReactiveIntensity);
-                toggle("reactive_hue", p::isLyricsReactiveHue, p::setLyricsReactiveHue).changesStructure = true;
-                if (p.isLyricsReactiveHue()) {
-                    toggle("reactive_hue_auto", p::isLyricsReactiveHueAuto, p::setLyricsReactiveHueAuto);
-                    slider("reactive_hue_amount", 0, 180, 5, p::getLyricsReactiveHueAmount, p::setLyricsReactiveHueAmount, "°");
-                }
                 toggle("reactive_bloom", p::isLyricsReactiveBloom, p::setLyricsReactiveBloom).changesStructure = true;
                 if (p.isLyricsReactiveBloom()) slider("reactive_bloom_amount", 0, 300, 5, p::getLyricsReactiveBloomAmount, p::setLyricsReactiveBloomAmount, "%");
                 toggle("reactive_spectral", p::isLyricsReactiveSpectral, p::setLyricsReactiveSpectral).changesStructure = true;
@@ -451,22 +437,43 @@ public final class LyricsSettingsCatalog {
             }
             action("restore_background", "restore", () -> restore("background"));
         }
-        if (p.isWorldLyrics() && group("world")) {
-            choice("world_position", WorldLyricsSpace.Position.values(), p::getWorldLyricsPosition, p::setWorldLyricsPosition);
-            slider("world_luminance", 0, 15, 1, p::getWorldLyricsLuminance, v -> p.setWorldLyricsLuminance((int)Math.round(v)), "");
-            toggle("world_terrain_light", p::isWorldLyricsTerrainLight, p::setWorldLyricsTerrainLight);
-            choice("world_quality", WorldLyricsDirector.Quality.values(), p::getWorldLyricsQuality, p::setWorldLyricsQuality);
-            action("font", "font", () -> actions.run("font"));
-            toggle("world_volumetric", p::isWorldLyricsVolumetric, p::setWorldLyricsVolumetric);
-            slider("world_depth", .04, .30, .01, p::getWorldLyricsDepth, p::setWorldLyricsDepth, "");
-            colors("world_face_color", p::getWorldLyricsFaceColor, p::setWorldLyricsFaceColor,
-                    0xFFFFFF, 0xE4F5FF, 0xFFF0D2, 0xDEF7E4, 0xF5E1FF);
-            colors("world_side_color", p::getWorldLyricsSideColor, p::setWorldLyricsSideColor,
-                    0x56647A, 0x323A4B, 0x7A5B3C, 0x377B85, 0x805487);
-            percent("world_animation_strength", 0, 1.5, .1, p::getWorldLyricsAnimationIntensity, p::setWorldLyricsAnimationIntensity);
-            toggle("world_light", p::isWorldLyricsWorldLight, p::setWorldLyricsWorldLight);
-            info("world_light_status", () -> "@" + PREFIX + (WorldLyricsLights.available() ? "world_light_status.ready" : "world_light_status.missing"));
-            action("world_restore", "restore", () -> restore("world_experience"));
+    }
+
+    private void worldCustomization() {
+        choice("world_position", WorldLyricsSpace.Position.values(), p::getWorldLyricsPosition, p::setWorldLyricsPosition);
+        slider("world_luminance", 0, 15, 1, p::getWorldLyricsLuminance, v -> p.setWorldLyricsLuminance((int)Math.round(v)), "");
+        toggle("world_terrain_light", p::isWorldLyricsTerrainLight, p::setWorldLyricsTerrainLight);
+        choice("world_quality", WorldLyricsDirector.Quality.values(), p::getWorldLyricsQuality, p::setWorldLyricsQuality);
+        action("font", "font", () -> actions.run("font"));
+        toggle("world_volumetric", p::isWorldLyricsVolumetric, p::setWorldLyricsVolumetric);
+        slider("world_depth", .04, .30, .01, p::getWorldLyricsDepth, p::setWorldLyricsDepth, "");
+        colors("world_face_color", p::getWorldLyricsFaceColor, p::setWorldLyricsFaceColor,
+                0xFFFFFF, 0xE4F5FF, 0xFFF0D2, 0xDEF7E4, 0xF5E1FF);
+        colors("world_side_color", p::getWorldLyricsSideColor, p::setWorldLyricsSideColor,
+                0x56647A, 0x323A4B, 0x7A5B3C, 0x377B85, 0x805487);
+        toggle("world_outline", p::isWorldLyricsOutline, p::setWorldLyricsOutline).changesStructure = true;
+        if (p.isWorldLyricsOutline())
+            colors("world_outline_color", p::getWorldLyricsOutlineColor, p::setWorldLyricsOutlineColor,
+                    0x000000, 0xFFFFFF, 0x1D2631, 0x382950, 0x522C27);
+        percent("world_animation_strength", 0, 1.5, .1, p::getWorldLyricsAnimationIntensity, p::setWorldLyricsAnimationIntensity);
+        percent("world_animation_speed", .25, 2, .05, p::getWorldLyricsAnimationSpeed, p::setWorldLyricsAnimationSpeed);
+        toggle("world_light", p::isWorldLyricsWorldLight, p::setWorldLyricsWorldLight);
+        info("world_light_status", () -> "@" + PREFIX + (WorldLyricsLights.available() ? "world_light_status.ready" : "world_light_status.missing"));
+        action("world_restore", "restore", () -> restore("world_experience"));
+
+        if (group("world_gemini")) {
+            info("world_gemini.privacy", () -> "@" + PREFIX + "world_gemini.privacy.value");
+            toggle("world_gemini.enabled", () -> p.getWorldLyricsDirection() == WorldLyricsPresentation.Direction.GEMINI,
+                    enabled -> p.setWorldLyricsDirection(enabled ? WorldLyricsPresentation.Direction.GEMINI : WorldLyricsPresentation.Direction.AUTOMATIC));
+            input("world_gemini.key", () -> actions.status("world_gemini_key_input"), value -> actions.input("world_gemini_key", value), true);
+            info("world_gemini.key_status", () -> actions.status("world_gemini_key_status"));
+            action("world_gemini.key_save", "gemini.key_save.button", () -> actions.run("world_gemini_key_save"));
+            action("world_gemini.key_remove", "gemini.key_remove.button", () -> actions.run("world_gemini_key_remove"));
+            toggle("world_gemini.song_font", p::isWorldLyricsGeminiFont, p::setWorldLyricsGeminiFont);
+            input("world_gemini.model", p::getWorldLyricsGeminiModel, p::setWorldLyricsGeminiModel, false);
+            input("world_gemini.direction", p::getWorldLyricsGeminiDirection, p::setWorldLyricsGeminiDirection, false);
+            info("world_gemini.status", () -> actions.status("world_gemini_status"));
+            action("world_gemini.regenerate", "world_gemini.regenerate.button", () -> actions.run("world_gemini_regenerate"));
         }
     }
 
@@ -492,8 +499,7 @@ public final class LyricsSettingsCatalog {
                 p.setLyricsBackgroundOpacity(d.getLyricsBackgroundOpacity()); p.setLyricsBlurStrength(d.getLyricsBlurStrength());
                 p.setLyricsBackgroundSpeed(d.getLyricsBackgroundSpeed()); p.setLyricsCoverShadow(d.isLyricsCoverShadow());
                 p.setLyricsReactiveSource(d.getLyricsReactiveSource()); p.setLyricsReactiveIntensity(d.getLyricsReactiveIntensity());
-                p.setLyricsReactiveHue(d.isLyricsReactiveHue()); p.setLyricsReactiveHueAuto(d.isLyricsReactiveHueAuto());
-                p.setLyricsReactiveHueAmount(d.getLyricsReactiveHueAmount()); p.setLyricsReactiveBloom(d.isLyricsReactiveBloom());
+                p.setLyricsReactiveBloom(d.isLyricsReactiveBloom());
                 p.setLyricsReactiveBloomAmount(d.getLyricsReactiveBloomAmount()); p.setLyricsReactiveSpectral(d.isLyricsReactiveSpectral());
                 p.setLyricsReactiveSpectralAmount(d.getLyricsReactiveSpectralAmount());
             }
@@ -517,6 +523,8 @@ public final class LyricsSettingsCatalog {
                 p.setWorldLyricsBevel(d.isWorldLyricsBevel()); p.setWorldLyricsBevelWidth(d.getWorldLyricsBevelWidth());
                 p.setWorldLyricsContactShadow(d.isWorldLyricsContactShadow()); p.setWorldLyricsWorldLight(d.isWorldLyricsWorldLight());
                 p.setWorldLyricsSideColor(d.getWorldLyricsSideColor()); p.setWorldLyricsFaceColor(d.getWorldLyricsFaceColor());
+                p.setWorldLyricsOutline(d.isWorldLyricsOutline());
+                p.setWorldLyricsOutlineColor(d.getWorldLyricsOutlineColor());
             }
             case "world_animation" -> {
                 p.setWorldLyricsEntranceOverride(null); p.setWorldLyricsAnimationIntensity(d.getWorldLyricsAnimationIntensity());
@@ -525,7 +533,7 @@ public final class LyricsSettingsCatalog {
             case "world_experience" -> {
                 restore("world_volume"); restore("world_animation");
                 p.setWorldLyricsDistanceRange(d.getWorldLyricsMinimumDistance(), d.getWorldLyricsMaximumDistance());
-                p.setWorldLyricsDirection(d.getWorldLyricsDirection()); p.setWorldLyricsPresentationIntensity(d.getWorldLyricsPresentationIntensity());
+                p.setWorldLyricsReveal(d.getWorldLyricsReveal()); p.setWorldLyricsDirection(d.getWorldLyricsDirection()); p.setWorldLyricsPresentationIntensity(d.getWorldLyricsPresentationIntensity());
                 p.setWorldLyricsStyle(d.getWorldLyricsStyle()); p.setWorldLyricsAccent(d.getWorldLyricsAccent());
                 p.setWorldLyricsTerrainLight(d.isWorldLyricsTerrainLight()); p.setWorldLyricsLuminance(d.getWorldLyricsLuminance()); p.setWorldLyricsPosition(d.getWorldLyricsPosition());
                 p.setWorldLyricsSize(d.getWorldLyricsSize()); p.setWorldLyricsSurfacePreference(d.getWorldLyricsSurfacePreference());
@@ -550,7 +558,7 @@ public final class LyricsSettingsCatalog {
                 p.setRomanizationUnderLine(d.isRomanizationUnderLine()); p.setUpdateChecks(d.isUpdateChecks()); p.setUpdatePrereleases(d.isUpdatePrereleases());
                 p.setLyricsTranslation(d.isLyricsTranslation()); p.setLyricsRomanization(d.isLyricsRomanization()); p.setLyricsAnimations(d.isLyricsAnimations());
                 p.setLyricsAllowGuiOverlap(d.isLyricsAllowGuiOverlap()); p.setLyricsClickSeek(d.isLyricsClickSeek());
-                p.setLyricsBorder(d.isLyricsBorder()); p.setLyricsResizeGrip(d.isLyricsResizeGrip()); p.setWorldLyrics(false);
+                p.setLyricsBorder(d.isLyricsBorder()); p.setLyricsResizeGrip(d.isLyricsResizeGrip()); p.setWorldLyrics(d.isWorldLyrics());
                 p.setWorldLyricsAutomatic(true); p.setWorldLyricsPreset(d.getWorldLyricsPreset()); p.setWorldLyricsIntensity(d.getWorldLyricsIntensity());
                 p.setWorldLyricsSize(d.getWorldLyricsSize()); p.setWorldLyricsQuality(d.getWorldLyricsQuality());
             }

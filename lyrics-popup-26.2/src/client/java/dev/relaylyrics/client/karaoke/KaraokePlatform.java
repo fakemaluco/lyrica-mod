@@ -74,6 +74,10 @@ public final class KaraokePlatform {
         var player = Minecraft.getInstance().player;
         if (player != null) player.sendSystemMessage(net.minecraft.network.chat.Component.translatable("music.lyrica.listen." + key, args));
     }
+    public static void fontChanged() {
+        KaraokeSurfaces.fontChanged();
+    }
+
     static void clearPopups() {
         frustum = null;
         KaraokeSurfaces.clear();

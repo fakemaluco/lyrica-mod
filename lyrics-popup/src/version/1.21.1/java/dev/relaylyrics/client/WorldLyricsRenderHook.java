@@ -9,6 +9,15 @@ public final class WorldLyricsRenderHook {
     public static net.minecraft.util.Identifier defaultFont() { return net.minecraft.util.Identifier.of("relaylyrics", "world"); }
     public static void probeCommand(net.minecraft.server.MinecraftServer server, String command) { server.getCommandManager().executeWithPrefix(server.getCommandSource(), command); }
     public static net.minecraft.util.math.Vec3d cameraPosition(net.minecraft.client.MinecraftClient client) { return client.gameRenderer.getCamera().getPos(); }
+    public static double cameraFov(net.minecraft.client.MinecraftClient client) { return PresencePlatform.fov(PresencePlatform.renderDelta()); }
+    public static net.minecraft.util.math.Vec3d cameraUp(net.minecraft.client.MinecraftClient client) {
+        var vector = client.gameRenderer.getCamera().getVerticalPlane();
+        return new net.minecraft.util.math.Vec3d(vector.x(), vector.y(), vector.z());
+    }
+    public static net.minecraft.util.math.Vec3d cameraForward(net.minecraft.client.MinecraftClient client) {
+        var vector = client.gameRenderer.getCamera().getHorizontalPlane();
+        return new net.minecraft.util.math.Vec3d(vector.x(), vector.y(), vector.z());
+    }
     public static boolean gliding(net.minecraft.client.network.ClientPlayerEntity player) { return player.isFallFlying(); }
 
     public static void register() {

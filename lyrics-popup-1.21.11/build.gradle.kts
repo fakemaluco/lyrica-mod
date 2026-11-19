@@ -73,6 +73,8 @@ val prepareStandaloneClientJava by tasks.registering(Sync::class) {
         include("dev/fandroid/client/music/WorldLyricsStage.java")
         include("dev/fandroid/client/music/WorldLyricsRecovery.java")
         include("dev/fandroid/client/music/WorldLyricsSpace.java")
+        include("dev/fandroid/client/music/WorldLyricsSpatial.java")
+        include("dev/fandroid/client/music/WorldLyricsContext.java")
         include("dev/fandroid/client/music/WorldLyricsLights.java")
         include("dev/fandroid/client/music/LyricsViewport.java")
         include("dev/fandroid/client/music/ManualLyricsScroll.java")

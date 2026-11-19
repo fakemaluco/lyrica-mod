@@ -2,6 +2,7 @@ package dev.relaylyrics.client;
 
 import dev.relaylyrics.client.ui.LyricsConfigScreen;
 import dev.relaylyrics.client.ui.GuiTransform;
+import dev.relaylyrics.client.ui.UpdateIslandScreen;
 import dev.relaylyrics.client.ui.LyricsOverlay;
 import dev.relaylyrics.client.ui.PopupIcons;
 import dev.relaylyrics.client.music.SpringValue;
@@ -134,9 +135,10 @@ public final class InventoryLyricsController {
         if (dragging || scrubbing || volumeScrubbing || overlay.isPopupProgressScrubbing())
             updatePointer(mouseX, mouseY, popupVisible);
         double transitionVisibility = popupTransitionVisibility();
-        if (popupVisible && activePopupTransition().isFullyVisible()) {
+        boolean hideDock = UpdateIslandScreen.hasNotice() && overlay.isPopupDocked();
+        if (!hideDock && popupVisible && activePopupTransition().isFullyVisible()) {
             overlay.renderHudOverScreen(context, mouseX, mouseY);
-        } else if (transitionVisibility > .001
+        } else if (!hideDock && transitionVisibility > .001
                 && (popupVisible || !screenPopupEnabled(activeScreen))) {
             overlay.renderHudTransition(context, transitionVisibility, true);
         }
@@ -156,12 +158,15 @@ public final class InventoryLyricsController {
             }
         }
         updateCursor(context, mouseX, mouseY, popupVisible);
+        UpdateIslandScreen.renderNotice(context, mouseX, mouseY);
     }
 
     public static boolean mouseClicked(Screen screen, double mouseX, double mouseY, int button) {
         if (screen != activeScreen) return false;
+        if (UpdateIslandScreen.clickNotice(mouseX, mouseY, button)) return true;
         LyricsOverlay overlay = RelayLyricsClient.overlay();
-        boolean popupVisible = inventoryPopupAvailable();
+        boolean popupVisible = inventoryPopupAvailable()
+                && !(UpdateIslandScreen.hasNotice() && overlay != null && overlay.isPopupDocked());
         if (button != GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             return popupVisible && overlay != null
                     && overlay.isPopupCoverInteractionActiveAt(mouseX, mouseY);

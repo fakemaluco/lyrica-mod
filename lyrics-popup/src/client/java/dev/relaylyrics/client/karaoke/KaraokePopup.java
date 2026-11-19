@@ -5,6 +5,7 @@ import dev.relaylyrics.client.music.CoverArtTexture;
 import dev.relaylyrics.client.ui.LyricsOverlay;
 import dev.relaylyrics.client.ui.KaraokePanelMotion;
 import dev.relaylyrics.karaoke.KaraokeWire.Preview;
+import dev.relaylyrics.karaoke.KaraokeWire.Song;
 import dev.relaylyrics.protocol.music.MusicCapabilities;
 import dev.relaylyrics.protocol.music.PlaybackSnapshot;
 
@@ -37,6 +38,8 @@ final class KaraokePopup implements AutoCloseable {
     private long generation = -1;
     private CompletableFuture<LyricsDocument> lyricsLookup;
     private CompletableFuture<DesktopMotionArtworkEngine.Result> artworkLookup;
+    private Song lastSample;
+    private PlaybackSnapshot shownTrack;
 
     void update(KaraokeClient.Room room) {
         motionEnabled = KaraokeSurfaces.spatialMotionEnabled();
@@ -56,6 +59,8 @@ final class KaraokePopup implements AutoCloseable {
         overlay.setWorldPopupLyricsZoom(room.lyricsZoom);
         var source = RelayLyricsClient.overlay();
         if (room.owned() && source != null && source.hasCurrentSong()) {
+            lastSample = null;
+            shownTrack = null;
             overlay.usePopupMediaFrom(source);
             return;
         }
@@ -69,23 +74,35 @@ final class KaraokePopup implements AutoCloseable {
                 resetMedia();
                 generation = room.generation;
             }
-            artwork.update(null);
-            overlay.setArtworkAccent(0);
-            overlay.setPlayback(PlaybackSnapshot.unavailable());
+            if (shownTrack == null || !"Nothing playing".equals(shownTrack.title())) {
+                lastSample = null;
+                shownTrack = PlaybackSnapshot.unavailable();
+                artwork.update(null);
+                artwork.setMotionPlaying(false);
+                overlay.setArtworkAccent(0);
+                overlay.setPlayback(shownTrack);
+            }
             return;
         }
         artwork.update(song.cover());
         overlay.setArtworkAccent(artwork.accentColor());
         var music = RelayLyricsClient.music();
-        var local = music == null ? PlaybackSnapshot.unavailable() : music.snapshot();
+        var local = music == null ? null : music.snapshot();
         boolean ownPlayback = room.owned() || room.isListeningOnSpotify();
-        var track = new PlaybackSnapshot(song.title(), song.artist(), song.album(), song.cover(), song.uri(), null,
-                room.position(), song.duration(), song.playing(), ownPlayback ? local.volume() : 0,
-                song.shuffled(), song.repeat(), ownPlayback && local.liked(), 0, 0, 0, .5, new double[0],
-                Instant.now(), new MusicCapabilities(true, true, true, song.duration() > 0,
-                ownPlayback && local.capabilities().volume(), true, true, !song.uri().isBlank(), false));
-        overlay.setPlayback(track);
-        artwork.setMotionPlaying(song.playing());
+        double volume = ownPlayback && local != null ? local.volume() : 0;
+        boolean liked = ownPlayback && local != null && local.liked();
+        boolean hasVolume = ownPlayback && local != null && local.capabilities().volume();
+        if (lastSample != song || shownTrack == null || shownTrack.volume() != volume
+                || shownTrack.liked() != liked || shownTrack.capabilities().volume() != hasVolume) {
+            lastSample = song;
+            shownTrack = new PlaybackSnapshot(song.title(), song.artist(), song.album(), song.cover(), song.uri(), null,
+                    room.position(), song.duration(), song.playing(), volume, song.shuffled(), song.repeat(),
+                    liked, 0, 0, 0, .5, new double[0], Instant.now(),
+                    new MusicCapabilities(true, true, true, song.duration() > 0,
+                            hasVolume, true, true, !song.uri().isBlank(), false));
+            overlay.setPlayback(shownTrack);
+            artwork.setMotionPlaying(song.playing());
+        }
         if (music == null) return;
         var preferences = RelayLyricsClient.preferences();
         boolean canvas = preferences.isMotionVideos() && preferences.isSpotifyCanvas();
@@ -95,8 +112,8 @@ final class KaraokePopup implements AutoCloseable {
             resetMedia();
             generation = room.generation;
             overlay.beginLookup();
-            lyricsLookup = music.lookupKaraokeLyrics(track);
-            if (canvas || cover || background) artworkLookup = music.lookupKaraokeArtwork(track, canvas || background, cover);
+            lyricsLookup = music.lookupKaraokeLyrics(shownTrack);
+            if (canvas || cover || background) artworkLookup = music.lookupKaraokeArtwork(shownTrack, canvas || background, cover);
         }
         if (lyricsLookup != null && lyricsLookup.isDone()) {
             var lyrics = lyricsLookup.isCompletedExceptionally() ? null : lyricsLookup.getNow(null);

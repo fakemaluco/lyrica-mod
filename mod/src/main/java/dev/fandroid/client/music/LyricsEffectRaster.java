@@ -111,6 +111,49 @@ public final class LyricsEffectRaster {
         return new Mask(width, height, left, top, actualPpu, quantize(coverage));
     }
 
+    /** Rounded stroke with transparent glyph interiors, in the same drawing units as the source. */
+    public static Mask outline(Mask source) {
+        return outline(source, false);
+    }
+
+    public static Mask outline(Mask source, boolean square) {
+        double ppu = source.pixelsPerUnit;
+        double radius = .9 * ppu;
+        int padding = (int) Math.ceil(radius + .5);
+        if (source.width + 2L * padding > MAX_SIDE || source.height + 2L * padding > MAX_SIDE) {
+            double extent = Math.max(source.width, source.height) / ppu;
+            ppu = (MAX_SIDE - 4) / (extent + 1.8);
+            source = resample(source, ppu);
+            radius = .9 * ppu;
+            padding = (int) Math.ceil(radius + .5);
+        }
+        int width = source.width + 2 * padding;
+        int height = source.height + 2 * padding;
+        byte[] expanded = new byte[width * height];
+        for (int dy = -padding; dy <= padding; dy++) {
+            for (int dx = -padding; dx <= padding; dx++) {
+                double distance = square ? Math.max(Math.abs(dx), Math.abs(dy)) : Math.hypot(dx, dy);
+                double weight = Math.clamp(radius + .5 - distance, 0, 1);
+                if (weight == 0) continue;
+                for (int y = 0; y < source.height; y++) {
+                    int row = (y + padding + dy) * width + padding + dx;
+                    for (int x = 0; x < source.width; x++) {
+                        int coverage = (int) Math.round((source.alpha[y * source.width + x] & 255) * weight);
+                        if (coverage > (expanded[row + x] & 255)) expanded[row + x] = (byte) coverage;
+                    }
+                }
+            }
+        }
+        for (int y = 0; y < source.height; y++) {
+            int row = (y + padding) * width + padding;
+            for (int x = 0; x < source.width; x++) {
+                int inside = source.alpha[y * source.width + x] & 255;
+                expanded[row + x] = (byte) Math.max(0, (expanded[row + x] & 255) - inside);
+            }
+        }
+        return new Mask(width, height, source.left - padding / ppu, source.top - padding / ppu, ppu, expanded);
+    }
+
     /** CSS text-shadow radius: Gaussian sigma is half the supplied radius in drawing units. */
     public static Mask blur(Mask source, double cssBlurRadiusInUnits) {
         Objects.requireNonNull(source, "source");

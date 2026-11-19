@@ -59,6 +59,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ steps.build.outputs.version }}
+          prerelease: ${{ contains(github.ref_name, '-beta') }}
+          make_latest: ${{ !contains(github.ref_name, '-beta') }}
           body_path: ${{ steps.build.outputs.notes }}
           fail_on_unmatched_files: true
           files: |

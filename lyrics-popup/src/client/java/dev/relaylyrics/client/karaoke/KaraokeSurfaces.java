@@ -41,6 +41,14 @@ final class KaraokeSurfaces {
         return surface != null || room.accepted || room.dismissed ? surface : idleInvitation;
     }
 
+    static void fontChanged() {
+        for (var surface : SURFACES.values()) {
+            surface.popup.overlay.fontChanged();
+            surface.nextPaint = 0;
+        }
+        if (idleInvitation != null) idleInvitation.nextPaint = 0;
+    }
+
     static boolean motionEnabled() {
         return RelayLyricsClient.preferences().isLyricsAnimations();
     }

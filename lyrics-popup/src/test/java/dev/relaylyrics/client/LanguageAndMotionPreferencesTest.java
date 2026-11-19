@@ -25,10 +25,13 @@ class LanguageAndMotionPreferencesTest {
         restored.setTranslationProvider("Gemini");
         assertThat(restored.translationModel()).isEqualTo("my-gemini-model");
     }
-    @Test void existingPreferencesKeepReplacementModeAndDoNotEnableTranslationRequests() throws Exception {
+    @Test void romanizationReplacesTheOriginalByDefault() throws Exception {
+        var defaults = new ClientPreferences();
+        assertThat(defaults.isLyricsRomanization()).isTrue();
+        assertThat(defaults.isRomanizationUnderLine()).isFalse();
+
         var old = ClientPreferences.decode("{\"lyricsRomanization\":true}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         assertThat(old.isRomanizationUnderLine()).isFalse();
         assertThat(old.isAutomaticTranslation()).isFalse();
-        assertThat(new ClientPreferences().isRomanizationUnderLine()).isTrue();
     }
 }

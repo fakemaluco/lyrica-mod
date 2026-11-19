@@ -52,7 +52,7 @@ public final class ClientPreferences {
         return lineLyricsAnimation == null ? LineLyricsAnimation.TOP_TO_BOTTOM : lineLyricsAnimation;
     }
     public void setLineLyricsAnimation(LineLyricsAnimation value) { lineLyricsAnimation = value; }
-    private boolean romanizationUnderLine = true;
+    private boolean romanizationUnderLine;
     private boolean automaticTranslation;
     private String translationLanguage = java.util.Locale.getDefault().getLanguage();
     private String translationProvider = "Google";
@@ -164,7 +164,7 @@ public final class ClientPreferences {
     private double phoneHeight = 0.55;
     private boolean islandKawarpBackground, islandVideoCover;
     private boolean jadeIsland = true;
-    private boolean islandLyrics;
+    private boolean islandLyrics = true;
     public boolean isIslandLyrics() { return islandLyrics; }
     public void setIslandLyrics(boolean value) { islandLyrics=value; }
     public boolean isJadeIsland() { return jadeIsland; }
@@ -290,9 +290,6 @@ public final class ClientPreferences {
     private boolean lyricsReactiveBackground;
     private ReactiveSource lyricsReactiveSource = ReactiveSource.WORDS;
     private double lyricsReactiveIntensity = 1.0;
-    private boolean lyricsReactiveHue = true;
-    private double lyricsReactiveHueAmount = 80;
-    private boolean lyricsReactiveHueAuto;
     private boolean lyricsReactiveBloom = true;
     private double lyricsReactiveBloomAmount = 100;
     private boolean lyricsReactiveSpectral;
@@ -498,20 +495,6 @@ public final class ClientPreferences {
     }
     public void setLyricsReactiveIntensity(double lyricsReactiveIntensity) {
         this.lyricsReactiveIntensity = Math.clamp(lyricsReactiveIntensity, 0.25, 3.0);
-    }
-    public boolean isLyricsReactiveHue() { return lyricsReactiveHue; }
-    public void setLyricsReactiveHue(boolean lyricsReactiveHue) {
-        this.lyricsReactiveHue = lyricsReactiveHue;
-    }
-    public double getLyricsReactiveHueAmount() {
-        return Math.clamp(lyricsReactiveHueAmount, 0, 180);
-    }
-    public void setLyricsReactiveHueAmount(double lyricsReactiveHueAmount) {
-        this.lyricsReactiveHueAmount = Math.clamp(lyricsReactiveHueAmount, 0, 180);
-    }
-    public boolean isLyricsReactiveHueAuto() { return lyricsReactiveHueAuto; }
-    public void setLyricsReactiveHueAuto(boolean lyricsReactiveHueAuto) {
-        this.lyricsReactiveHueAuto = lyricsReactiveHueAuto;
     }
     public boolean isLyricsReactiveBloom() { return lyricsReactiveBloom; }
     public void setLyricsReactiveBloom(boolean lyricsReactiveBloom) {

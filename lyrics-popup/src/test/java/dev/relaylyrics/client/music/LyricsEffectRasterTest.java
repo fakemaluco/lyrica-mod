@@ -176,4 +176,30 @@ class LyricsEffectRasterTest {
         for (int i = 0; i < alpha.length; i++) result[i] = alpha[i] & 255;
         return result;
     }
+    @Test void outlineKeepsTheGlyphInteriorAndTheCounterTransparent() {
+        int side = 25;
+        byte[] pixels = new byte[side * side];
+        for (int y = 1; y < side - 1; y++) for (int x = 1; x < side - 1; x++) {
+            if (x < 6 || x >= 19 || y < 6 || y >= 19) pixels[y * side + x] = (byte) 255;
+        }
+        var mask = new LyricsEffectRaster.Mask(side, side, 0, 0, 4, pixels);
+        var outline = LyricsEffectRaster.outline(mask);
+        int pad = (outline.width() - side) / 2;
+        var coverage = outline.alpha();
+        assertThat(coverage[(pad + 12) * outline.width() + pad + 3] & 255).isZero();
+        assertThat(coverage[(pad + 12) * outline.width() + pad + 12] & 255).isZero();
+        assertThat(coverage[(pad + 12) * outline.width() + pad + 6] & 255).isPositive();
+        assertThat(coverage[(pad + 12) * outline.width() + pad] & 255).isPositive();
+    }
+
+    @Test void squareOutlineFillsTheCornerOutsideTheRoundedStroke() {
+        var mask = new LyricsEffectRaster.Mask(1, 1, 0, 0, 4, new byte[]{(byte) 255});
+        var rounded = LyricsEffectRaster.outline(mask);
+        var square = LyricsEffectRaster.outline(mask, true);
+        int center = square.width() / 2;
+        int corner = (center + 3) * square.width() + center + 3;
+        assertThat(square.alpha()[corner] & 255).isEqualTo(255);
+        assertThat(rounded.alpha()[corner] & 255).isZero();
+        assertThat(square.alpha()[center * square.width() + center] & 255).isZero();
+    }
 }

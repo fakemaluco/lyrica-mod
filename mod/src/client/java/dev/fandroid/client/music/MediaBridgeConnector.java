@@ -18,13 +18,17 @@ import java.nio.file.Path;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 
 public final class MediaBridgeConnector implements MusicConnector {
-    private final Process process;
-    private final BufferedWriter writer;
+    private final Path executable;
+    private final Object processLock = new Object();
+    private volatile Process process;
+    private BufferedWriter writer;
+    private volatile boolean closed;
     private final CopyOnWriteArrayList<Consumer<PlaybackSnapshot>> listeners = new CopyOnWriteArrayList<>();
     private final CopyOnWriteArrayList<Consumer<MusicAudioLevels>> audioListeners = new CopyOnWriteArrayList<>();
     private volatile boolean audioLevelsEnabled;
@@ -34,16 +38,14 @@ public final class MediaBridgeConnector implements MusicConnector {
     private volatile String pairingCode;
     private volatile int pairingPort;
     private volatile boolean youtubeConnected;
-    private volatile boolean bridgeAlive = true;
     private volatile String startupError;
     private volatile String source = "AUTOMATIC";
     private volatile String activeSource = "WINDOWS_MEDIA";
 
-    private MediaBridgeConnector(Process process) {
-        this.process = process;
-        this.writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
-        Thread.ofVirtual().name("fandroid-media-bridge-reader").start(() -> read(process));
-        Thread.ofVirtual().name("fandroid-media-bridge-errors").start(() -> readErrors(process));
+    private MediaBridgeConnector(Path executable, Process started) {
+        this.executable = executable;
+        bind(started);
+        Thread.ofVirtual().name("fandroid-media-bridge-reader").start(() -> supervise(started));
     }
 
     public static MusicConnector start(Path configuredPath) {
@@ -57,7 +59,7 @@ public final class MediaBridgeConnector implements MusicConnector {
             Process process = new ProcessBuilder(executable.toAbsolutePath().toString())
                     .start();
             FanDroidMod.LOGGER.info("Started FanDroid media bridge from {}", executable.toAbsolutePath());
-            return new MediaBridgeConnector(process);
+            return new MediaBridgeConnector(executable, process);
         } catch (Exception e) {
             FanDroidMod.LOGGER.warn("Media bridge is unavailable", e);
             String detail = e instanceof SecurityException
@@ -90,18 +92,81 @@ public final class MediaBridgeConnector implements MusicConnector {
         }
     }
 
+    private void bind(Process started) {
+        writer = new BufferedWriter(new OutputStreamWriter(started.getOutputStream(), StandardCharsets.UTF_8));
+        process = started;
+        Thread.ofVirtual().name("fandroid-media-bridge-errors").start(() -> readErrors(started));
+    }
+
+    private void supervise(Process current) {
+        long retryMillis = 1_000;
+        while (!closed) {
+            if (current != null) {
+                long startedAt = System.nanoTime();
+                read(current);
+                synchronized (processLock) {
+                    if (closed) return;
+                    current.destroyForcibly();
+                    process = null;
+                    writer = null;
+                    activeMediaApp = pairingCode = null;
+                    pairingPort = 0;
+                    youtubeConnected = false;
+                    latest = PlaybackSnapshot.unavailable();
+                }
+                publish(listeners, latest);
+                publish(audioListeners, MusicAudioLevels.SILENT);
+                dev.lyrica.engine.StatusMetrics.error("bridge_restart");
+                if (System.nanoTime() - startedAt > TimeUnit.SECONDS.toNanos(30)) retryMillis = 1_000;
+            }
+            try {
+                Thread.sleep(retryMillis);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            current = null;
+            synchronized (processLock) {
+                if (closed) return;
+                try {
+                    verifyChecksumIfPresent(executable);
+                    current = new ProcessBuilder(executable.toAbsolutePath().toString()).start();
+                    startupError = null;
+                    bind(current);
+                    if (!source.equals("AUTOMATIC")) send(java.util.Map.of("type", "source", "source", source));
+                    if (audioLevelsEnabled) send(java.util.Map.of("type", "audio_levels_enabled", "enabled", true));
+                } catch (Exception error) {
+                    startupError = "Media bridge disconnected — reconnecting";
+                    if (current != null) current.destroyForcibly();
+                    FanDroidMod.LOGGER.debug("Media bridge restart failed", error);
+                }
+            }
+            retryMillis = Math.min(30_000, retryMillis * 2);
+        }
+    }
+
+    private static <T> void publish(CopyOnWriteArrayList<Consumer<T>> targets, T value) {
+        for (var listener : targets) {
+            try { listener.accept(value); }
+            catch (RuntimeException error) { FanDroidMod.LOGGER.debug("Media bridge listener failed", error); }
+        }
+    }
+
     private void read(Process process) {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.length() > 10 * 1024 * 1024) continue;
-                var node = ProtocolCodec.mapper().readTree(line);
+                com.fasterxml.jackson.databind.JsonNode node;
+                try { node = ProtocolCodec.mapper().readTree(line); }
+                catch (com.fasterxml.jackson.core.JsonProcessingException invalid) { continue; }
+                if (node == null) continue;
                 if (node.path("type").asText().equals("audio_levels")) {
                     var levels=node.path("levels");
                     if(levels.isArray() && levels.size()==5 && audioLevelsEnabled) {
                         MusicAudioLevels sample=MusicAudioLevels.fromMeter(levels.get(0).asInt(),levels.get(1).asInt(),levels.get(2).asInt(),
                                 levels.get(3).asInt(),levels.get(4).asInt(),System.nanoTime());
-                        for(var listener:audioListeners) listener.accept(sample);
+                        publish(audioListeners, sample);
                     }
                     continue;
                 }
@@ -118,14 +183,13 @@ public final class MediaBridgeConnector implements MusicConnector {
                 if (!node.path("type").asText().equals("snapshot")) continue;
                 activeSource = node.path("activeSource").asText("WINDOWS_MEDIA");
                 activeMediaApp = node.path("activeMediaApp").asText(null);
-                latest = ProtocolCodec.mapper().treeToValue(node.path("snapshot"), PlaybackSnapshot.class);
-                for (Consumer<PlaybackSnapshot> listener : listeners) listener.accept(latest);
+                if (!node.path("snapshot").isObject()) continue;
+                try { latest = ProtocolCodec.mapper().treeToValue(node.path("snapshot"), PlaybackSnapshot.class); }
+                catch (com.fasterxml.jackson.core.JsonProcessingException invalid) { continue; }
+                publish(listeners, latest);
             }
         } catch (Exception e) {
             if (process.isAlive()) FanDroidMod.LOGGER.warn("Media bridge stopped producing snapshots", e);
-        } finally {
-            bridgeAlive = false;
-            youtubeConnected = false;
         }
     }
 
@@ -133,7 +197,7 @@ public final class MediaBridgeConnector implements MusicConnector {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                if (line.isBlank()) continue;
+                if (line.isBlank() || this.process != process || closed) continue;
                 startupError = line.length() > 180 ? line.substring(0, 180) : line;
                 FanDroidMod.LOGGER.warn("Media bridge: {}", startupError);
             }
@@ -147,7 +211,10 @@ public final class MediaBridgeConnector implements MusicConnector {
     public int pairingPort() { return pairingPort; }
     public boolean youtubeConnected() { return youtubeConnected; }
     public String activeSource() { return activeSource; }
-    public boolean bridgeAlive() { return bridgeAlive && process.isAlive(); }
+    public boolean bridgeAlive() {
+        Process current = process;
+        return !closed && current != null && current.isAlive();
+    }
     public String startupError() { return startupError; }
 
     public AutoCloseable subscribeAudio(Consumer<MusicAudioLevels> listener) {
@@ -156,18 +223,23 @@ public final class MediaBridgeConnector implements MusicConnector {
     }
     /** Changed only when the compact island needs audio; never polled per rendered frame. */
     public void setAudioLevelsEnabled(boolean enabled) {
-        if(enabled==audioLevelsEnabled || !bridgeAlive()) return;
-        audioLevelsEnabled=enabled;
-        try { send(java.util.Map.of("type","audio_levels_enabled","enabled",enabled)); }
-        catch(IllegalStateException stopped) { audioLevelsEnabled=false; }
-        if(!enabled) for(var listener:audioListeners) listener.accept(MusicAudioLevels.SILENT);
+        synchronized (processLock) {
+            if (enabled == audioLevelsEnabled) return;
+            audioLevelsEnabled = enabled;
+            if (bridgeAlive()) try { send(java.util.Map.of("type", "audio_levels_enabled", "enabled", enabled)); }
+            catch (IllegalStateException stopped) { /* Supervisor reapplies the current preference. */ }
+        }
+        if (!enabled) publish(audioListeners, MusicAudioLevels.SILENT);
     }
 
     public void setSource(String source) {
         String next = source == null || source.isBlank() ? "AUTOMATIC" : source;
-        if (next.equals(this.source)) return;
-        this.source = next;
-        send(java.util.Map.of("type", "source", "source", next));
+        synchronized (processLock) {
+            if (next.equals(this.source)) return;
+            this.source = next;
+            if (bridgeAlive()) try { send(java.util.Map.of("type", "source", "source", next)); }
+            catch (IllegalStateException stopped) { /* Supervisor reapplies the current preference. */ }
+        }
     }
 
     public String activeMediaApp() { return activeMediaApp; }
@@ -198,7 +270,8 @@ public final class MediaBridgeConnector implements MusicConnector {
     }
 
     private void send(java.util.Map<String, ?> value) {
-        synchronized (writer) {
+        synchronized (processLock) {
+            if (!bridgeAlive() || writer == null) throw new IllegalStateException("media bridge disconnected");
             try {
                 writer.write(ProtocolCodec.mapper().writeValueAsString(value));
                 writer.newLine();
@@ -218,16 +291,23 @@ public final class MediaBridgeConnector implements MusicConnector {
 
     @Override
     public void close() {
-        try { writer.close(); } catch (Exception ignored) { }
+        Process current;
+        synchronized (processLock) {
+            closed = true;
+            current = process;
+            if (writer != null) try { writer.close(); } catch (Exception ignored) { }
+            writer = null;
+        }
+        if (current == null) return;
         if (duckingUsed) {
             try {
-                if (process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) return;
+                if (current.waitFor(2, TimeUnit.SECONDS)) return;
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
             }
         }
-        process.destroy();
-        if (process.isAlive()) process.destroyForcibly();
+        current.destroy();
+        if (current.isAlive()) current.destroyForcibly();
     }
 
     private static final class UnavailableMusicConnector implements MusicConnector {

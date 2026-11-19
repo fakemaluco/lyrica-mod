@@ -2,7 +2,9 @@ package dev.relaylyrics.client;
 
 import dev.relaylyrics.FanDroidMod;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
+import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.repository.PackRepository;
 import java.io.IOException;
 import java.net.URI;
@@ -289,15 +291,16 @@ public final class GoogleFontManager {
     private static void writePackMetadata(Path pack, String family, int weight, List<String> fontFiles)
             throws Exception {
         Files.createDirectories(pack);
-        int packFormat = minecraftResourcePackFormat();
+        var format = SharedConstants.getCurrentVersion().packVersion(PackType.CLIENT_RESOURCES);
         String metadata = """
                 {
                   "pack": {
-                    "pack_format": %d,
+                    "min_format": [%d, %d],
+                    "max_format": [%d, %d],
                     "description": "Relay Google Font: %s (%d)"
                   }
                 }
-                """.formatted(packFormat, jsonEscape(family), weight);
+                """.formatted(format.major(), format.minor(), format.major(), format.minor(), jsonEscape(family), weight);
         Files.writeString(pack.resolve("pack.mcmeta"), metadata, StandardCharsets.UTF_8);
         Path definition = pack.resolve("assets").resolve(NAMESPACE).resolve("font").resolve("google.json");
         Files.createDirectories(definition.getParent());
@@ -332,13 +335,6 @@ public final class GoogleFontManager {
                 }
                 """);
         return "{\n  \"providers\": [\n" + providers + "\n  ]\n}\n";
-    }
-
-    private static int minecraftResourcePackFormat() {
-        String version = FabricLoader.getInstance().getModContainer("minecraft")
-                .map(container -> container.getMetadata().getVersion().getFriendlyString())
-                .orElse("1.21.1");
-        return version.startsWith("1.21.11") ? 75 : 34;
     }
 
     private static Path packDirectory() {

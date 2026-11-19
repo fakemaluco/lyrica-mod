@@ -79,4 +79,13 @@ class WorldLyricsPlanTest {
         return new LyricsDocument(List.of(new LyricVocalGroup(line.startMillis(), line.endMillis(),
                 line, List.of(), LyricAlignment.NORMAL)), LyricsMetadata.unknown());
     }
+    @Test void incompleteProviderTimingKeepsAllTheWrittenWords() {
+        var line = new LyricLine(0, 4000, "a frase inteira aparece", List.of(new TimedWord(0, 1000, "a"),
+                new TimedWord(1000, 2000, " frase")), null, false, null, null);
+        assertThat(WorldLyricsPlan.hasWordTiming(line)).isFalse();
+        assertThat(WorldLyricsPlan.tokens(line, false)).extracting(WorldLyricsPlan.Token::text)
+                .containsExactly("a frase inteira aparece");
+        assertThat(WorldLyricsPlan.wordTokens(line, false)).extracting(WorldLyricsPlan.Token::text)
+                .containsExactly("a", "frase", "inteira", "aparece");
+    }
 }

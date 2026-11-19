@@ -22,4 +22,15 @@ public class LyricaReleaseLookupTest {
         assertEquals("", LyricaReleaseLookup.newest("[" + release("2.0.0", "1.21.1", false)
                 .replace("\"draft\":false", "\"draft\":true") + "]", "1.0.0", "1.21.1", false));
     }
+    @Test public void updatesCarryAssetMetadataAndMustNotOfferTheInstalledBaseVersion() {
+        String published = release("0.9.4", "26.3", false);
+        assertEquals("", LyricaReleaseLookup.newest("[" + published + "]", "0.9.4+contextual.24", "26.3", false));
+        String digest = "a".repeat(64);
+        String next = release("0.9.5", "26.3", false)
+                .replace(".jar\"}", ".jar\",\"size\":100,\"digest\":\"sha256:" + digest + "\"}");
+        var update = LyricaReleaseLookup.find("[" + published + "," + next + "]", "0.9.4+contextual.24", "26.3", false);
+        assertEquals("0.9.5", update.version());
+        assertEquals(digest, update.sha256());
+        assertTrue(update.installable());
+    }
 }

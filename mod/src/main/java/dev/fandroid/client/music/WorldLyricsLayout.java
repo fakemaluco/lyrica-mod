@@ -8,7 +8,73 @@ import java.util.regex.Pattern;
 /** Measured wrapping and timed pages; independent of Minecraft and of the render frame rate. */
 public final class WorldLyricsLayout {
     private static final Pattern WORD = Pattern.compile("\\S+");
+    private static final Pattern PHRASE_END = Pattern.compile("[,.!?;:…，。！？、；](?:[\\p{Pe}\\p{Pf}\"']*)$");
     private WorldLyricsLayout() { }
+
+    public enum ReadingFit {
+        WORD(1), SHORT(3), MEDIUM(6), FULL(Integer.MAX_VALUE);
+
+        private final int wordLimit;
+        ReadingFit(int wordLimit) { this.wordLimit = wordLimit; }
+
+        public static ReadingFit atDistance(double blocks) {
+            if (blocks < 3.6) return WORD;
+            if (blocks < 5.3) return SHORT;
+            if (blocks < 7.2) return MEDIUM;
+            return FULL;
+        }
+
+        /** Leave a margin at the boundaries so similar reading distances choose the same size. */
+        public static ReadingFit atDistance(double blocks, ReadingFit previous) {
+            ReadingFit wanted = atDistance(blocks);
+            if (previous == null || wanted == previous) return wanted;
+            ReadingFit confirmed = atDistance(blocks + (wanted.ordinal() < previous.ordinal() ? .45 : -.45));
+            return wanted.ordinal() < previous.ordinal() ? confirmed.limitTo(previous)
+                    : confirmed.ordinal() > previous.ordinal() ? confirmed : previous;
+        }
+
+        public ReadingFit limitTo(ReadingFit other) {
+            return ordinal() <= other.ordinal() ? this : other;
+        }
+
+        public static ReadingFit openSky(List<WorldLyricsPlan.Token> words) {
+            if (words.size() < 4) return SHORT;
+            long duration = words.getLast().endMillis() - words.getFirst().startMillis();
+            return duration < words.size() * 240L ? MEDIUM : SHORT;
+        }
+
+        /** Keep words whole, with natural breaks preferred inside the available width. */
+        public List<Integer> groupEnds(List<WorldLyricsPlan.Token> tokens, double width, ToDoubleFunction<String> measure) {
+            List<Integer> ends = new ArrayList<>();
+            double space = Math.max(1, measure.applyAsDouble(" "));
+            int count = 0;
+            double used = 0;
+            long groupStart = 0;
+            for (int first = 0; first < tokens.size();) {
+                int end = first + 1;
+                double wordWidth = measure.applyAsDouble(tokens.get(first).text());
+                while (end < tokens.size() && !tokens.get(end).startsWord())
+                    wordWidth += measure.applyAsDouble(tokens.get(end++).text());
+                boolean pause = false, punctuation = false;
+                if (count > 0) {
+                    var previous = tokens.get(first - 1);
+                    pause = tokens.get(first).startMillis() - previous.endMillis() >= 200;
+                    punctuation = count >= 2 && previous.endMillis() - groupStart >= 520
+                            && PHRASE_END.matcher(previous.text().stripTrailing()).find();
+                }
+                if (count > 0 && (count == wordLimit || used + space + wordWidth > width || pause || punctuation)) {
+                    ends.add(first);
+                    count = 0;
+                    used = 0;
+                }
+                if (count == 0) groupStart = tokens.get(first).startMillis();
+                used += (count++ == 0 ? 0 : space) + wordWidth;
+                first = end;
+            }
+            if (!tokens.isEmpty()) ends.add(tokens.size());
+            return List.copyOf(ends);
+        }
+    }
 
     public record Span(String text, WorldLyricsPlan.Token token, double x, double width,
                        double sourceX, double sourceWidth, boolean rtl) {
@@ -25,6 +91,17 @@ public final class WorldLyricsLayout {
 
     public static List<Page> plan(List<WorldLyricsPlan.Token> tokens, boolean timed, boolean rtl,
                                   double widthLimit, ToDoubleFunction<String> measure) {
+        return plan(tokens, timed, rtl, widthLimit, measure, false);
+    }
+
+    /** Divide long line-timed verses into readable pages using the measured text's position. */
+    public static List<Page> readingPages(List<WorldLyricsPlan.Token> tokens, boolean timed, boolean rtl,
+                                          double widthLimit, ToDoubleFunction<String> measure) {
+        return plan(tokens, timed, rtl, widthLimit, measure, true);
+    }
+
+    private static List<Page> plan(List<WorldLyricsPlan.Token> tokens, boolean timed, boolean rtl,
+                                   double widthLimit, ToDoubleFunction<String> measure, boolean pageUntimed) {
         double limit = Math.max(12, widthLimit);
         List<List<Part>> words = new ArrayList<>();
         for (var token : tokens) {
@@ -78,7 +155,7 @@ public final class WorldLyricsLayout {
         long end = Long.MIN_VALUE;
         for (Row row : builder.rows) {
             // Overlapping vocals/fragments cannot be hidden by a page turn.
-            if (timed && pageRows.size() >= 2 && row.startMillis() >= end
+            if ((timed || pageUntimed) && pageRows.size() >= (timed ? 2 : 3) && row.startMillis() >= end
                     && row.startMillis() > pageRows.getFirst().startMillis()) {
                 result.add(page(pageRows)); pageRows.clear(); end = Long.MIN_VALUE;
             }

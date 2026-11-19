@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Atividade do Lyrica, requisições de letras e saúde dos provedores em um painel público.">
+  <meta name="theme-color" content="#f7f6f3">
+  <title>Status · Lyrica</title>
+  <link rel="icon" type="image/png" href="/status/assets/lyrica-icon.png">
+  <link rel="stylesheet" href="/status/assets/status.css?v=4">
+  <script type="module" src="/status/assets/status.js?v=3"></script>
+</head>
+<body>
+  <header class="bar"><div class="shell bar-inner">
+    <a class="brand" href="/status" aria-label="Lyrica Status"><img class="brand-icon" src="/status/assets/lyrica-icon.png" alt="" width="28" height="28">Lyrica<span class="brand-div" aria-hidden="true"></span><span class="brand-section">Status</span></a>
+    <a class="community" href="/">Discord</a>
+  </div></header>
+  <main class="shell">
+    <section class="intro" aria-labelledby="page-title">
+      <h1 id="page-title">Status do Lyrica</h1>
+      <p>Atividade do mod e disponibilidade das fontes de letras.</p>
+      <div class="freshness" id="freshness" role="status"><span class="dot"></span><span id="freshness-text">Consultando dados</span></div>
+    </section>
+    <section aria-label="Resumo" class="metrics">
+      <article class="metric">
+        <h2>Clientes ativos</h2><strong id="active">—</strong><p>Coleta do mod · últimos 3 minutos</p>
+      </article>
+      <article class="metric" title="Contas Minecraft verificadas que sincronizaram a presença. As duas contagens de atividade podem se sobrepor.">
+        <h2>Contas via Music Presence</h2><strong id="presence-active">—</strong><p>Últimos 3 minutos · inclui builds antigas</p>
+      </article>
+      <article class="metric">
+        <h2>Requisições ao lrc.red</h2><strong id="requests">—</strong><p>Desde o início da coleta</p>
+      </article>
+      <article class="metric">
+        <h2>Erros reportados</h2><strong id="errors">—</strong><p>Nas últimas 24 horas</p>
+      </article>
+    </section>
+    <div class="details">
+      <section class="panel" aria-labelledby="provider-title">
+        <div class="panel-head"><h2 id="provider-title">Provedores de letras</h2><span>Últimas 24 h</span></div>
+        <ul class="rows providers" id="providers"><li class="empty">Carregando provedores…</li></ul>
+      </section>
+      <div class="side">
+        <section class="panel" aria-labelledby="network-title">
+          <div class="panel-head"><h2 id="network-title">Servidores mais jogados</h2><span>7 dias</span></div>
+          <ul class="rows" id="networks"><li class="empty">Carregando sessões…</li></ul>
+          <p class="panel-note">Redes públicas conhecidas com pelo menos três sessões reportadas.</p>
+        </section>
+        <section class="panel" aria-labelledby="error-title">
+          <div class="panel-head"><h2 id="error-title">Erros por categoria</h2><span>Últimas 24 h</span></div>
+          <ul class="rows" id="categories"><li class="empty">Carregando categorias…</li></ul>
+        </section>
+      </div>
+    </div>
+    <footer class="footer">
+      <span>Métricas anônimas das versões que reportam atividade.</span>
+      <button type="button" id="refresh">Atualizar dados</button>
+    </footer>
+    <noscript><p>Ative o JavaScript para consultar as métricas públicas.</p></noscript>
+  </main>
+</body>
+</html>

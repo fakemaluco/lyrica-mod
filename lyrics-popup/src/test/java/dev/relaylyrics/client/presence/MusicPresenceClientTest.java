@@ -11,9 +11,10 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class MusicPresenceClientTest {
-    @Test void unverifiedAccountCanReadPresenceButNeverPublishesItsOwnMusic() throws Exception {
+    @Test void unverifiedAccountCanReadPresenceAndInvitesWithoutPublishingItsOwnMusic() throws Exception {
         var json = new ObjectMapper(); UUID own = UUID.randomUUID(), peer = UUID.randomUUID();
         String session = "a".repeat(64); var bodies = new CopyOnWriteArrayList<String>();
+        String uri = "spotify:track:1234567890123456789012";
         var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/", exchange -> {
             String input = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8); bodies.add(input);
@@ -21,6 +22,10 @@ class MusicPresenceClientTest {
                 case "/challenge" -> Map.of("challenge", UUID.randomUUID().toString(), "server_id", "b".repeat(40));
                 case "/viewer" -> Map.of("token", session, "topic", "lyrica-music-" + UUID.randomUUID(), "can_publish", false);
                 case "/sync" -> Map.of("peers", List.of(Map.of("player_id", peer.toString(), "player_name", "Friend", "title", "Their song", "artist", "Artist", "cover_url", "", "expires_in_ms", 75000)));
+                case "/listen" -> Map.of("can_share", false, "host", Map.of("id", peer.toString(),
+                        "name", "Friend", "song", Map.of("title", "Their song", "uri", uri, "position", 1_250,
+                        "duration", 90_000, "playing", true), "age_ms", 2_000,
+                        "queue", List.of(Map.of("uri", uri, "title", "First"), Map.of("uri", uri, "title", "Second"))));
                 default -> Map.of("ok", true);
             };
             byte[] output = json.writeValueAsBytes(reply); exchange.sendResponseHeaders(route.startsWith("/realtime") ? 400 : 200, output.length);
@@ -30,8 +35,17 @@ class MusicPresenceClientTest {
         var client = new MusicPresenceClient(URI.create("http://localhost:" + server.getAddress().getPort() + "/"), "publishable-test",
                 new MusicPresenceClient.Identity(own, own, "OfflinePlayer", PresenceScope.serverHash("localhost")), challenge -> { throw new IllegalStateException("No account token"); });
         try {
-            client.update(new MusicPresenceClient.Playing("My private song", "Private artist", "", true), Set.of(own, peer)); client.start();
+            client.update(new MusicPresenceClient.Playing("My private song", "Private artist", "", true), Set.of(own, peer));
+            var target = new MusicPresenceClient.ListenTarget("lyr_" + "c".repeat(32), "Friend");
+            client.updateListen(new MusicPresenceClient.ListenUpdate(null, null, System.nanoTime(), List.of(), target));
+            client.start();
             await(() -> client.track(peer) != null && client.status() == MusicPresenceClient.Status.VIEW_ONLY);
+            var reply = client.listenReply();
+            assertThat(reply.target()).isEqualTo(target);
+            assertThat(reply.host().song().position()).isEqualTo(1_250);
+            assertThat(reply.received() - reply.host().sampledAt()).isGreaterThanOrEqualTo(2_000_000_000L);
+            assertThat(reply.host().queue()).extracting(dev.relaylyrics.karaoke.KaraokeWire.QueueTrack::title)
+                    .containsExactly("First", "Second");
             assertThat(client.status()).isEqualTo(MusicPresenceClient.Status.VIEW_ONLY);
             assertThat(bodies).noneMatch(body -> body.contains("My private song") || body.contains("Private artist") || body.contains("\"sharing\":true"));
         } finally { client.close(); server.stop(0); }
