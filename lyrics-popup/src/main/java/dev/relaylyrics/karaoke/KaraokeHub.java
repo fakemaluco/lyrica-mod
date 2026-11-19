@@ -311,7 +311,7 @@ final class KaraokeHub {
             default -> false;
         };
         if (!valid) return;
-        String status = !room.queueReady || room.song == null || room.song.uri().isBlank() ? "inactive"
+        String status = !room.queueReady ? "not_connected"
                 : room.queueTask != null || now - room.lastQueueRequest < 650 ? "busy" : null;
         if (status != null) {
             queueReply(room, peer.id(), request, action, new QueueResult(List.of(), 0, status));
@@ -322,7 +322,7 @@ final class KaraokeHub {
         room.lastQueueRequest = now;
         room.queueTask = new QueueTask(request, peer.id(), action, now + QUEUE_TIMEOUT_MILLIS);
         host.send(message("queue_execute", "room", room.owner, "request", request, "action", action,
-                "value", value, "index", index, "version", version, "current", room.song.uri()));
+                "value", value, "index", index, "version", version, "current", room.song == null ? "" : room.song.uri()));
     }
 
     private void queueReply(Room room, UUID requester, UUID request, String action, QueueResult result) {

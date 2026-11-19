@@ -224,17 +224,25 @@ class SpotifyAccountClientTest {
             var search = client.karaokeQueue("search", "New track", 0, 0, current, 12, () -> true).get(5, TimeUnit.SECONDS);
             assertThat(search.entries()).extracting(SpotifyAccountClient.QueueEntry::uri).containsExactly(addition);
             var original = client.karaokeQueue("list", "", 0, 0, current, 12, () -> true).get(5, TimeUnit.SECONDS);
-            var appended = client.karaokeQueue("add", addition, 0, 0, current, 12, () -> true).get(5, TimeUnit.SECONDS);
+            var accountQueue = client.karaokeQueue("list", "", 0, 0, "", 12, () -> true).get(5, TimeUnit.SECONDS);
+            assertThat(accountQueue).isEqualTo(original);
+            assertThat(original.status()).isEqualTo("ok");
+            var appended = client.karaokeQueue("add", addition, 0, 0, "", 12, () -> true).get(5, TimeUnit.SECONDS);
             assertThat(added.get()).isEqualTo("uri=" + addition);
             assertThat(appended.status()).isEqualTo("added");
             var stale = client.karaokeQueue("jump", target, 1, original.version(), current, 12, () -> true).get(5, TimeUnit.SECONDS);
             assertThat(stale.status()).isEqualTo("changed");
             assertThat(skips.get()).isZero();
-            var jumped = client.karaokeQueue("jump", target, 1, appended.version(), current, 12, () -> true).get(5, TimeUnit.SECONDS);
+            var jumped = client.karaokeQueue("jump", target, 1, appended.version(), "", 12, () -> true).get(5, TimeUnit.SECONDS);
             assertThat(jumped.status()).isEqualTo("jumped");
             assertThat(skips.get()).isEqualTo(2);
             assertThat(playing.get()).isEqualTo(target);
             assertThat(jumped.entries()).extracting(SpotifyAccountClient.QueueEntry::uri).containsExactly(addition);
+            playing.set("");
+            tracks.clear();
+            var idle = client.karaokeQueue("list", "", 0, 0, "", 12, () -> true).get(5, TimeUnit.SECONDS);
+            assertThat(client.connected()).isTrue();
+            assertThat(idle.status()).isEqualTo("no_device");
         } finally { server.stop(0); }
     }
 

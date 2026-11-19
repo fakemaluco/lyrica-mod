@@ -37,7 +37,8 @@ public final class KaraokeWire {
         public QueueResult {
             tracks = tracks == null ? List.of() : tracks.stream().filter(java.util.Objects::nonNull).limit(QUEUE_LIMIT).toList();
             status = switch (status == null ? "" : status) {
-                case "ok", "added", "added_refresh", "jumped", "changed", "inactive", "denied", "busy", "rate", "timeout", "error" -> status;
+                case "ok", "added", "added_refresh", "jumped", "changed", "inactive",
+                        "not_connected", "no_device", "denied", "busy", "rate", "timeout", "error" -> status;
                 default -> "error";
             };
         }

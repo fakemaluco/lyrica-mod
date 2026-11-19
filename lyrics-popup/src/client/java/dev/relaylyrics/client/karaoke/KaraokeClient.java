@@ -217,6 +217,8 @@ public final class KaraokeClient {
                             && !Set.of("added", "added_refresh", "jumped").contains(result.status())) return;
                     if (search && (!room.queue.searching || !room.queue.submittedQuery.equals(text(room.queue.field.value(), 100)))) return;
                     room.queue.status = result.status().equals("ok") ? "" : result.status();
+                    if ("list".equals(action) && Set.of("not_connected", "no_device", "inactive").contains(result.status()))
+                        room.queue.refreshAt = System.nanoTime() + 4_000_000_000L;
                     if (search) room.queue.results = result.tracks();
                     else if (Set.of("ok", "changed", "added", "jumped").contains(result.status())) room.queue.queue = result;
                     if (action.equals("list") && result.status().equals("busy"))
@@ -484,15 +486,11 @@ public final class KaraokeClient {
             return;
         }
         String action = string(packet, "action");
-        String current = string(packet, "current");
-        if (!current.equals(music.snapshot().spotifyUri())) {
-            send("queue_result", "room", room.id, "request", request, "result", new QueueResult(List.of(), 0, "inactive"));
-            return;
-        }
         room.executingQueue = request;
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(QUEUE_TIMEOUT_MILLIS - 1_000);
         music.karaokeQueue(action, string(packet, "value"), packet.get("index").getAsInt(),
-                packet.get("version").getAsInt(), current, QUEUE_LIMIT,
+                // The Spotify account's player supplies the queue even if the HUD uses Windows media.
+                packet.get("version").getAsInt(), "", QUEUE_LIMIT,
                 () -> request.equals(room.executingQueue) && System.nanoTime() < deadline)
                 .whenComplete((reply, failure) -> KaraokePlatform.execute(() -> {
                     if (!request.equals(room.executingQueue)) return;

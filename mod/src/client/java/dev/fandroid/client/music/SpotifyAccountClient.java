@@ -499,22 +499,26 @@ public final class SpotifyAccountClient implements AutoCloseable {
                                                        String current, int limit, BooleanSupplier active) {
         return CompletableFuture.supplyAsync(() -> {
             try {
-                if (!active.getAsBoolean() || !connected()) throw new QueueUnavailable("inactive");
+                if (!active.getAsBoolean()) throw new QueueUnavailable("timeout");
+                if (!connected()) throw new QueueUnavailable("not_connected");
                 if (action.equals("search")) {
                     var data = queueRequest("/search?type=track&limit=10&q=" + encode(value), false, active);
                     return new QueueReply(queueEntries(data.path("tracks").path("items"), limit), 0, "ok");
                 }
                 PlayerQueue queue = playerQueue(limit, active);
-                if (current.isBlank() || !current.equals(queue.current())) throw new QueueUnavailable("inactive");
+                if (!current.isBlank() && !current.equals(queue.current())) throw new QueueUnavailable("inactive");
+                if (queue.current().isBlank() && (!action.equals("list") || queue.entries().isEmpty()))
+                    throw new QueueUnavailable("no_device");
                 if (action.equals("add")) {
                     if (!validQueueUri(value)) throw new QueueUnavailable("error");
                     queueRequest("/me/player/queue?uri=" + encode(value), true, active);
                     try {
+                        String playing = queue.current();
                         long previousCount = queue.uris().stream().filter(value::equals).count();
                         for (int attempt = 0; attempt < 3; attempt++) {
                             if (attempt > 0) Thread.sleep(225);
                             var updated = playerQueue(limit, active);
-                            if (!current.equals(updated.current())) break;
+                            if (!playing.equals(updated.current())) break;
                             if (updated.uris().stream().filter(value::equals).count() > previousCount)
                                 return updated.reply("added");
                         }
@@ -564,7 +568,8 @@ public final class SpotifyAccountClient implements AutoCloseable {
         for (int attempt = 0; attempt < 2; attempt++) {
             if (System.currentTimeMillis() < nextQueueAllowedMillis) throw new QueueUnavailable("rate");
             String token = validToken();
-            if (token == null || closed || !active.getAsBoolean()) throw new QueueUnavailable("inactive");
+            if (closed || !active.getAsBoolean()) throw new QueueUnavailable("timeout");
+            if (token == null) throw new QueueUnavailable(connected() ? "denied" : "not_connected");
             var request = HttpRequest.newBuilder(URI.create(queueApi + path))
                     .timeout(Duration.ofSeconds(5)).header("Authorization", "Bearer " + token);
             var response = http.send((post ? request.POST(HttpRequest.BodyPublishers.noBody()) : request.GET()).build(),
@@ -573,13 +578,17 @@ public final class SpotifyAccountClient implements AutoCloseable {
             if (code == 200) return ProtocolCodec.mapper().readTree(response.body());
             if (code == 204) return ProtocolCodec.mapper().createObjectNode();
             if (code == 403) throw new QueueUnavailable("denied");
-            if (code == 404 && path.startsWith("/me/player")) throw new QueueUnavailable("inactive");
+            if (code == 404 && path.startsWith("/me/player")) throw new QueueUnavailable("no_device");
             if (code == 429) {
                 nextQueueAllowedMillis = System.currentTimeMillis()
                         + retryAfterMillis(response.headers().firstValue("Retry-After").orElse(""));
                 throw new QueueUnavailable("rate");
             }
-            if (code != 401 || attempt != 0 || !refresh()) break;
+            if (code == 401) {
+                if (attempt == 0 && refresh()) continue;
+                throw new QueueUnavailable("denied");
+            }
+            break;
         }
         throw new QueueUnavailable("error");
     }

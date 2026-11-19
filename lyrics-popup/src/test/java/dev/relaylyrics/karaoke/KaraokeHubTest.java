@@ -174,6 +174,25 @@ class KaraokeHubTest {
     }
 
     @Test
+    void connectedHostsCanShareTheirQueueEvenWithoutSpotifyMetadataInThePanel() {
+        var hub = new KaraokeHub();
+        var host = new Player();
+        var guest = new Player();
+        hub.join(host);
+        hub.join(guest);
+        assertTrue(hub.open(host, host.position, 1_000));
+        hub.receive(guest, message("accept", "room", host.id), 1_200);
+        hub.receive(host, message("update", "room", host.id, "queue", false, "song", song("Windows media")), 1_400);
+        hub.receive(guest, message("queue_request", "room", host.id, "request", UUID.randomUUID(),
+                "action", "list", "value", "", "index", 0, "version", 0), 1_800);
+        assertEquals("not_connected", read(guest.packet("queue_result"), "result", QueueResult.class).status());
+        hub.receive(host, message("update", "room", host.id, "queue", true, "song", song("Windows media")), 2_000);
+        hub.receive(guest, message("queue_request", "room", host.id, "request", UUID.randomUUID(),
+                "action", "list", "value", "", "index", 0, "version", 0), 2_200);
+        assertEquals("", string(host.packet("queue_execute"), "current"));
+    }
+
+    @Test
     void listenSendsTimingOnlyToSubscribersAndStopsWhenSharingIsDisabled() {
         var hub = new KaraokeHub();
         var host = new Player("Host");
